@@ -1,0 +1,81 @@
+#!/bin/sh
+# Mechanical governance lock for the Universal Cognitive Brain.
+# Blocks commits that touch core governance or enforcement files unless the
+# human operator explicitly overrides with: ALLOW_GOVERNANCE_EDIT=1 git commit ...
+# See .brain/PERSONAS.md, Context-Switch Rule 5 (file-scoped governance lock).
+
+# Protected surface: exact files plus whole-directory prefixes (.githooks/,
+# .claude/agents/) so files added later are protected automatically.
+
+staged=$(git diff --cached --name-only)
+
+# Secret scan: runs FIRST and is NOT bypassed by the governance override.
+# Scans staged ADDED lines for credential patterns (the hook itself excluded,
+# since it contains these patterns as text). Override: ALLOW_SECRET_COMMIT=1.
+if [ "$ALLOW_SECRET_COMMIT" != "1" ]; then
+    SECRET_PATTERN="-----BEGIN [A-Z ]*PRIVATE KEY-----|AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{35}|ghp_[A-Za-z0-9]{36}|gho_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{22,}|sk-[A-Za-z0-9_-]{24,}|xox[baprs]-[A-Za-z0-9-]{10,}|npm_[A-Za-z0-9]{36}|eyJ[A-Za-z0-9_-]{30,}\.[A-Za-z0-9_-]{10,}|(api[_-]?key|apikey|secret|token|passwd|password)[\"']?[[:space:]]*[:=][[:space:]]*[\"']?[A-Za-z0-9_/+=.-]{16,}"
+    secrets=$(git diff --cached -U0 -- . ':(exclude).githooks/pre-commit' | grep '^+' | grep -Ev '^\+\+\+ ' | grep -Ei -e "$SECRET_PATTERN")
+    if [ -n "$secrets" ]; then
+        echo "SECRET SCAN: staged additions match credential patterns:" >&2
+        echo "$secrets" | head -10 | sed 's/^/  /' >&2
+        echo "" >&2
+        echo "Remove the secret (use environment variables or a secrets manager)." >&2
+        echo "False positive? Re-run with: ALLOW_SECRET_COMMIT=1 git commit ..." >&2
+        exit 1
+    fi
+fi
+
+if [ "$ALLOW_GOVERNANCE_EDIT" = "1" ]; then
+    exit 0
+fi
+
+blocked=""
+for s in $staged; do
+    case "$s" in
+        AI_WORKSPACE_RULES.md|CLAUDE.md|AGENTS.md|GEMINI.md|.github/copilot-instructions.md|setup.sh|setup.cmd|.brain/PERSONAS.md|.brain/PIPELINE.md|.brain/CHECKLISTS.md|.brain/BOOT_DIGEST.md|.brain/DRILL.md|.brain/DRILL_KEY.md|.claude/settings.json|.githooks/*|.claude/agents/*)
+            blocked="$blocked
+  $s" ;;
+    esac
+done
+
+if [ -n "$blocked" ]; then
+    echo "GOVERNANCE LOCK: this commit touches protected brain files:$blocked" >&2
+    echo "" >&2
+    echo "Core governance and enforcement files are human-locked." >&2
+    echo "If this change was explicitly directed by the human operator, re-run with:" >&2
+    echo "  ALLOW_GOVERNANCE_EDIT=1 git commit ..." >&2
+    exit 1
+fi
+
+# Documentation sync: structural brain changes must carry the guidebook
+# and/or digest in the same commit (or a human override when unaffected).
+structural=$(echo "$staged" | grep -E '^(AI_WORKSPACE_RULES\.md|\.brain/CHECKLISTS\.md|\.brain/PIPELINE\.md|\.brain/PERSONAS\.md|\.brain/modes/|\.brain/skills/INDEX\.md)')
+if [ -n "$structural" ]; then
+    docs=$(echo "$staged" | grep -E '^\.brain/(PROMPT_GUIDE|BOOT_DIGEST)\.md$')
+    if [ -z "$docs" ]; then
+        echo "DOC-SYNC LOCK: structural brain files staged without documentation:" >&2
+        echo "$structural" | sed 's/^/  /' >&2
+        echo "" >&2
+        echo "Update .brain/PROMPT_GUIDE.md and/or .brain/BOOT_DIGEST.md in this commit," >&2
+        echo "or, if this change genuinely needs no documentation update, re-run with:" >&2
+        echo "  ALLOW_GOVERNANCE_EDIT=1 git commit ..." >&2
+        exit 1
+    fi
+fi
+
+# Registry Law 1: skill and mode registries are additive-only for agents.
+# Deleted lines in a registry mean an existing entry was modified or removed.
+for reg in .brain/skills/INDEX.md .brain/modes/INDEX.md; do
+    if git diff --cached --name-only | grep -Fxq "$reg"; then
+        deletions=$(git diff --cached --numstat -- "$reg" | awk '{print $2}')
+        if [ -n "$deletions" ] && [ "$deletions" -gt 0 ] 2>/dev/null; then
+            echo "REGISTRY LOCK: $reg has $deletions deleted line(s)." >&2
+            echo "Agents may only ADD to registries (Registry Law 1); modifying or removing" >&2
+            echo "existing entries is human-only. If human-directed, re-run with:" >&2
+            echo "  ALLOW_GOVERNANCE_EDIT=1 git commit ..." >&2
+            exit 1
+        fi
+    fi
+done
+
+exit 0

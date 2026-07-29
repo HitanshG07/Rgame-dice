@@ -1,0 +1,4 @@
+# Deep QA binary artifacts stay out of history (deep_qa mode run ontology);
+# verdicts, interaction/console logs, and run-tracker.json remain tracked.
+qa_runs/*/screenshots/
+qa_runs/*/logs/layout-dumps/

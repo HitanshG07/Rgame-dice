@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "deny": [
+      "Edit(.brain/PERSONAS.md)",
+      "Write(.brain/PERSONAS.md)",
+      "Edit(.brain/PIPELINE.md)",
+      "Write(.brain/PIPELINE.md)"
+    ]
+  }
+}
