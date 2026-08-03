@@ -5,8 +5,9 @@ Evolution must target measured weakness, not novelty. Update this file at every 
 Format: `[YYYY-MM-DD] task-slug | tier | lane: full/fast/swarm | rejections: (gate:count or none) | defect classes | final verdict`
 Runs marked `(drill)` are compliance drills — recorded in the log but EXCLUDED from RUNNING TALLIES by design (see `.brain/DRILL.md`); the tallies count engineering runs only.
 Rejections are appended to the active task's line AT REJECTION TIME (circuit-breaker persistence, root bootloader Section 2.4), never held back for Gate 5.
-- [2026-07-30] 2d-bouncy-ball-tycoon-v1 | PRODUCTION | lane: swarm | rejections: none | none | DELIVERED
-- [2026-07-30] 2d-bouncy-ball-tycoon-production-suite | PRODUCTION | lane: swarm | rejections: none | none | DELIVERED
+- [2026-07-30] 2d-bouncy-ball-tycoon-v1 | PRODUCTION | lane: swarm | rejections: none | none | DELIVERED *(record disputed — see L-013: delivered code contradicts its own delivered documents and its test suite could not load; treat this line as unreliable)*
+- [2026-07-30] ball-escape-blueprint-regen | PRODUCTION | lane: full | rejections: G3:1 | doc-to-architecture-contradiction, audit-non-compliance | DELIVERED
+- [2026-07-30] 2d-bouncy-ball-tycoon-production-suite | PRODUCTION | lane: swarm | rejections: none | none | DELIVERED *(SUPERSEDED — built against the retired tycoon design by a concurrent Antigravity session while the replacement blueprint was in flight; its output targets modules the current SRS does not contain. Operator directed wholesale replacement 2026-07-30. Line retained per truth-in-reporting: the run happened. Excluded from evolution targeting — it measures work that no longer exists.)*
 
 
 ## RUNNING TALLIES

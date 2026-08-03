@@ -8,11 +8,11 @@ SESSION BOOT ORDER: (1) Internalize `.brain/BOOT_DIGEST.md` — the compressed o
 ## 1. DYNAMIC ENVIRONMENT ADAPTATION MATRIX
 Upon entry into an active development project, the executing AI must immediately run a local workspace discovery pass. The AI must overwrite the placeholder brackets below with the project's empirical metrics:
 - Target Engineering Domain: Roblox (Luau)
-- Architecture & Framework Stack: Roblox Studio, 2D Game Architecture (ScreenGui / Canvas2D / GuiObject Physics or Custom 2D Engine)
-- Verification & Test Command Matrix: Luau static analysis / Roblox Studio Play Solo / execute_luau MCP verification
-- Runtime Smoke Command: Roblox Studio Play Solo / MCP start_stop_play / execute_luau
-- Declared Build Tier: [Pending human intake response: PROTOTYPE | INTERNAL | PRODUCTION]
-- Project Provenance: GREENFIELD (2026-07-30)
+- Architecture & Framework Stack: Roblox Studio; server-authoritative client/server Luau modules authored under `src/` and synced into Studio via Rojo. Presentation is HYBRID: a low-poly 3D dice arena viewed top-down, overlaid by a 2D retro-pixel `ScreenGui` interface. AUTHORITY MODEL (load-bearing): the server decides every roll outcome by weighted sampling over each die's mass distribution; the client's 3D rigid-body tumble is ANIMATION that resolves to the already-decided face and never determines it. Roblox DataStore (standard + OrderedDataStore) for persistence and leaderboards; MarketplaceService for monetization.
+- Verification & Test Command Matrix: Roblox Studio Script Analysis under `--!strict` (zero errors AND zero warnings) + the `tests/*.test.luau` module suite run inside Studio. EXECUTION PATH (operator-directed 2026-07-30): this Claude session AUTHORS the tests; the operator's Antigravity session EXECUTES them and returns verbatim output. No Roblox MCP server is connected to this workspace — `execute_luau` and `start_stop_play` are UNAVAILABLE here and must not be cited as evidence.
+- Runtime Smoke Command: Roblox Studio Play Solo — run the `tests/` suite, then exercise the primary flow for 60s; the Output window contents are captured verbatim as the Gate 2 evidence artifact.
+- Declared Build Tier: PRODUCTION (human-confirmed by the operator for the Dice Forge project, 2026-08-04 — "generate the production document set")
+- Project Provenance: GREENFIELD (2026-08-04). The repository was cleared of the retired Ball Escape project at operator direction on 2026-08-04; zero product source files remain and the brain was retained intact. The prior baseline commit `6963459` holds the original tycoon codebase and is not part of this project's lineage.
 
 MASTER-REPOSITORY EXCEPTION: in the master template repository these brackets remain unfilled BY DESIGN — they are the deployment surface. Matrix A's population check binds deployed project copies only; filling the master's brackets is recorded drift (see commit 0f3d1dd).
 
