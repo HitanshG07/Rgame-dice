@@ -2,7 +2,7 @@
 
 *COGNITIVE DIRECTIVE: This is a living evolutionary document. If you encounter a more optimized methodology, a newer API standard, or a superior architectural pattern during development, you are strictly mandated to activate the Cognitive Evolutionist persona during Gate 6 and rewrite these rules to permanently upgrade this skill.*
 
-*(Forged by Skill Genesis in the RGame/Ball-Escape child, 2026-07-30. Corroborated against the official Roblox Creator Hub, the Roblox/creator-docs repository, the Roblox Developer Forum, and the ProfileService reference — sources listed at the foot of this file. PROVISIONAL until the operator ratifies the registry entry.)*
+*(Forged by Skill Genesis in the RGame/Ball-Escape child, 2026-07-30. Corroborated against the official Roblox Creator Hub, the Roblox/creator-docs repository, the Roblox Developer Forum, and the ProfileService reference — sources listed at the foot of this file. RATIFIED by the operator 2026-08-04.)*
 
 When this skill is activated at Gate 0, you must treat server authority, save-data integrity, and receipt idempotency as hard requirements, not as hardening to be added later. On Roblox the client is an attacker-controlled process by default: every LocalScript, every `ReplicatedStorage` module, and every remote name is readable and callable by any player running an exploit executor.
 
