@@ -135,18 +135,71 @@ local function run(): (boolean, string?, number)
 		"mass well beyond EPSILON was accepted — the invariant leaks")
 
 	--------------------------------------------------------------------------
-	-- T-27: repeated forge cycles must not accumulate drift into acceptance
+	-- T-27: residual accumulation.
+	--
+	-- NOTE ON A CORRECTED TEST: the first version of this block moved 0.1 from
+	-- one face to another 500 times and asserted the result stayed valid. It
+	-- failed -- correctly -- because after 90 iterations the donor face fell
+	-- below the mass floor. The sum never drifted at all. The test was wrong,
+	-- not the validator, and it modelled a flow that does not exist: the client
+	-- submits a COMPLETE distribution each time, validated fresh against the
+	-- server-held budget, so residuals cannot accumulate ACROSS operations by
+	-- construction. What follows tests the real properties instead.
 	--------------------------------------------------------------------------
-	local d = { 10, 10, 10, 10, 10, 10 }
-	for _ = 1, 500 do
-		d[1] = ForgeMath.snap(d[1] + 0.1)
-		d[2] = ForgeMath.snap(d[2] - 0.1)
-		local o = ForgeMath.validate(d, FACES, BUDGET, FLOOR)
-		if not o then
-			e = e or check(false, "snapped round-trip forging drifted out of tolerance")
-			break
+
+	-- snap is idempotent: re-snapping never moves a value again
+	for _, v in ipairs({ 0.1, 1 / 3, 9.99995, 1e-5, 12345.678912 }) do
+		local once = ForgeMath.snap(v)
+		e = e or check(ForgeMath.snap(once) == once,
+			string.format("snap not idempotent for %.9f", v))
+	end
+
+	-- a long sequence of independently-valid proposals each validates, and the
+	-- floor is respected throughout. This is the real flow.
+	local rng = Random.new(4242)
+	local cur = { 10, 10, 10, 10, 10, 10 }
+	for iter = 1, 2000 do
+		local from = rng:NextInteger(1, FACES)
+		local to = rng:NextInteger(1, FACES)
+		if from ~= to then
+			-- transfer amounts are themselves snapped, mirroring the server
+			-- storing only snapped masses
+			local amount = ForgeMath.snap(rng:NextNumber(0.0001, 0.5))
+			if cur[from] - amount >= FLOOR then
+				local candidate = table.clone(cur)
+				candidate[from] = ForgeMath.snap(candidate[from] - amount)
+				candidate[to] = ForgeMath.snap(candidate[to] + amount)
+				local o, r = ForgeMath.validate(candidate, FACES, BUDGET, FLOOR)
+				if not o then
+					e = e or check(false, string.format(
+						"iteration %d: a snapped transfer of %.4f from %d to %d was "
+						.. "rejected as '%s' -- residuals are accumulating",
+						iter, amount, from, to, tostring(r)))
+					break
+				end
+				cur = candidate
+			end
 		end
 	end
+
+	-- and after all that churn the invariant still holds exactly
+	if not e then
+		local total = 0.0
+		for i = 1, FACES do total += cur[i] end
+		e = e or check(math.abs(total - BUDGET) <= ForgeMath.EPSILON,
+			string.format("after 2000 transfers the total is %.9f, expected %d", total, BUDGET))
+	end
+
+	-- the floor genuinely blocks a transfer that would breach it. This is the
+	-- behaviour the broken test stumbled into, now asserted deliberately.
+	local atFloor = { 55, FLOOR, FLOOR, FLOOR, FLOOR, FLOOR }
+	ok = ForgeMath.validate(atFloor, FACES, BUDGET, FLOOR)
+	e = e or check(ok, "a distribution sitting exactly on the floor should be valid")
+
+	local belowFloor = { 55.5, FLOOR - 0.1, FLOOR, FLOOR, FLOOR, FLOOR }
+	ok, reason = ForgeMath.validate(belowFloor, FACES, BUDGET, FLOOR)
+	e = e or check(not ok and reason == "below_floor",
+		"a face one notch below the floor was not rejected")
 
 	-- every shape validates at its own face count
 	for _, faces in ipairs({ 4, 6, 8, 12, 20 }) do
