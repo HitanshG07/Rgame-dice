@@ -92,7 +92,7 @@ Built first and richest, per `.brain/modes/blueprint.md`. The Cyber Security Mas
 
 **T-13 — Profile payload exceeds the DataStore key limit.**
 *Vector:* per-purchase and per-code records accumulate forever until the profile exceeds the per-key ceiling, at which point **every subsequent save fails** — permanent, total loss for the longest-playing, highest-spending players.
-*M-13:* `purchaseIds` is a **bounded** structure — most recent 200 entries, insertion-ordered, older entries evicted, which is safe because receipt replays occur within a bounded window after purchase. `codesRedeemed` is naturally bounded by the server-held code catalog. The writer **asserts a serialised payload ceiling before every save** and refuses to write beyond it, logging the refusal, so no future field can silently reintroduce unbounded growth. *(Carried forward from the previous project, where this was found only at Gate 4 audit.)*
+*M-13:* `purchaseIds` is a **bounded** structure — most recent 200 entries, insertion-ordered, older entries evicted. **AMENDED 2026-08-04** *(triggering fact: Gate 4 cross-vendor audit, TM-5.1)* — the original justification, "safe because replays occur within a bounded window after purchase", was **wrong**: the bound is on entry COUNT, not on TIME. A player exceeding 200 lifetime purchases can have a still-replayable receipt evicted, and a platform retry then double-grants. Corrected mitigation: eviction is **time-aware, not count-only** — an entry is evictable only once it is older than the platform's maximum receipt-retry window, and if the 200-entry ceiling is reached while all entries are still inside that window, older ids are **archived to a cold DataStore key** rather than dropped. The payload ceiling assertion still governs total size. `codesRedeemed` is naturally bounded by the server-held code catalog. The writer **asserts a serialised payload ceiling before every save** and refuses to write beyond it, logging the refusal, so no future field can silently reintroduce unbounded growth. *(Carried forward from the previous project, where this was found only at Gate 4 audit.)*
 
 **T-14 — DataStore outage causes silent progress loss.**
 *Vector:* Roblox DataStore is unavailable; saves fail; the player plays for an hour and loses everything.
@@ -149,6 +149,22 @@ Built first and richest, per `.brain/modes/blueprint.md`. The Cyber Security Mas
 **T-25 — Forge validator arithmetic abuse.**
 *Vector:* `NaN`, `math.huge`, `-0`, or a denormal is submitted as a face mass. `NaN` fails every comparison, so a naive `sum == budget` check passes and the budget invariant breaks.
 *M-25:* every inbound numeric is checked for finiteness explicitly (`n == n` for NaN, plus finite bounds) **before** any arithmetic or comparison. This is called out as its own threat because a sum-based validator is exactly the shape that `NaN` defeats. *(Matrix E-1.)*
+
+**T-26 — Post-yield mutation of a released profile.**
+*Vector:* a service checks `profile:IsActive()`, then **yields** (a DataStore call, a MarketplaceService query, a `task.wait`), and during that yield `ListenToRelease` fires. The subsequent mutation is applied to a released profile and is silently lost — or worse, applied after another server has claimed the session.
+*M-26:* the active check must be **synchronous with the mutation** — no yield may occur between `IsActive()` and the write. Where a yield is unavoidable, the check is re-performed immediately after it and immediately before applying state. This is a code-shape rule, verifiable by review, and it is why FR-14.7 now specifies synchronicity rather than merely requiring a check. *(Added 2026-08-04; triggering fact: Gate 4 cross-vendor audit, TM-5.2.)*
+
+**T-27 — Floating-point residual accumulation defeats the forge sum invariant.**
+*Vector:* mass values are floats. Repeated forge operations accumulate IEEE 754 residuals, so `sum(distribution)` drifts against the stored budget. Drift either exceeds `EPSILON` and locks the player out of forging entirely, or — if `EPSILON` is loosened to compensate — permits real mass inflation across many operations.
+*M-27:* per-face masses are **snapped to a fixed decimal precision before sum validation and before storage**, so residuals cannot compound across operations. `EPSILON` then guards only single-operation representation error, not accumulated drift. *(Added 2026-08-04; triggering fact: Gate 4 cross-vendor audit, TM-5.5.)*
+
+**T-28 — Non-finite value reaches the leaderboard transform.**
+*Vector:* the published value is `math.clamp(math.floor(math.log10(math.max(raw, 1)) * 1e6), 0, 9e15)`. `NaN` propagates through every one of those operations — `math.max(NaN, 1)` does not sanitise it — and `OrderedDataStore:SetAsync` then throws, breaking leaderboard publication for that player permanently.
+*M-28:* `raw` is asserted **finite** (`raw == raw`, plus finite bounds) before the transform; a non-finite value is refused, logged, and the previous published value retained. **This is the same hazard as T-25, which was closed for the forge validator and left open here** — the inconsistency is the actual defect, so finiteness assertion is hereby a rule at *every* numeric boundary, not only inbound ones. *(Added 2026-08-04; triggering fact: Gate 4 cross-vendor audit, TM-5.4.)*
+
+**T-29 — Cross-cluster clock skew inflates the offline vault.**
+*Vector:* `os.time()` may differ slightly between Roblox hardware clusters. A profile saved on a forward-skewed server and loaded on a backward-skewed one yields an inflated elapsed time.
+*M-29:* already **bounded** by M-23's clamp to `[0, capacity]` — the worst case is one extra full vault, not unbounded currency, so this is a hardening item rather than an exploit. Additional hardening: elapsed time is sanity-checked against server uptime, and a `LastSeen` timestamp in the future is treated as zero elapsed and logged. *(Added 2026-08-04; triggering fact: Gate 4 cross-vendor audit, TM-5.3. Severity assessed lower than the auditor stated, because the existing clamp already caps the damage.)*
 
 ---
 

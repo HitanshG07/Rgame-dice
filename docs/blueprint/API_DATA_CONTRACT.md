@@ -59,7 +59,7 @@ Every inbound handler runs, in this order: **rate limit → arity → type → f
 2. `distribution` is an array whose length **exactly equals** the die's face count.
 3. Every element is a `number` and **explicitly finite** — checked with `n == n` (rejects `NaN`) plus finite upper/lower bounds (rejects `math.huge`, `-math.huge`).
 4. Every element is `>= MASS_FLOOR` for that shape.
-5. `|sum(distribution) − serverHeldBudget| <= EPSILON`.
+5. Every element is **snapped to a fixed decimal precision (4 dp)**, then `|sum(distribution) − serverHeldBudget| <= EPSILON`. Snapping precedes summation so IEEE 754 residuals cannot compound across repeated forges (threat T-27).
 6. The player can afford the forge cost, which is computed **server-side** from the magnitude of mass moved (SRS FR-3.3).
 
 **Step 3 must precede step 5.** `NaN` fails every comparison, so a sum check alone passes when `NaN` is present and the budget invariant breaks silently — this is threat **T-25** and it is the reason ordering is specified rather than left to the implementer.
@@ -174,6 +174,8 @@ Three `OrderedDataStore`s: `LB_NetWorth`, `LB_HighestRoll`, `LB_Prestiges`.
 key   = tostring(UserId)
 value = math.clamp(math.floor(math.log10(math.max(raw, 1)) * 1e6), 0, 9e15)
 ```
+
+**`raw` must be asserted finite (`raw == raw`, plus finite bounds) BEFORE the transform.** `NaN` propagates through `math.max`, `math.log10`, `math.floor` and `math.clamp` untouched, and `SetAsync` then throws, permanently breaking publication for that player. A non-finite value is refused, logged, and the previous published value retained (threat T-28). *(Amended 2026-08-04, triggering fact: Gate 4 audit TM-5.4 — the identical hazard was closed for the forge validator at T-25 and left open here.)*
 
 Monotonic, so ordering is preserved exactly. Bounded, so overflow is impossible by construction — **verified against `raw = 1e300`** in the test plan. Display values come from the profile, not from the decoded key.
 

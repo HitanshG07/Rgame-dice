@@ -10,11 +10,13 @@ Rejections are appended to the active task's line AT REJECTION TIME (circuit-bre
 - [2026-07-30] 2d-bouncy-ball-tycoon-production-suite | PRODUCTION | lane: swarm | rejections: none | none | DELIVERED *(SUPERSEDED — built against the retired tycoon design by a concurrent Antigravity session while the replacement blueprint was in flight; its output targets modules the current SRS does not contain. Operator directed wholesale replacement 2026-07-30. Line retained per truth-in-reporting: the run happened. Excluded from evolution targeting — it measures work that no longer exists.)*
 
 
+- [2026-08-04] dice-forge-blueprint | PRODUCTION | lane: full | rejections: none | audit-finding-misclassification (G4, corrected at verification) | DELIVERED
+
 ## RUNNING TALLIES
-- Total pipeline runs: 2
-- Rejections by gate: G2: 0 | G3: 0 | G4: 0 | G5: 0 | G6 vetoes: 0
-- Most recurrent defect classes: none yet
-- Weakest gate (most rejections over the trailing 10 runs): none yet
+- Total pipeline runs: 3 (one superseded, one disputed — see run-log annotations)
+- Rejections by gate: G2: 0 | G3: 1 | G4: 0 | G5: 0 | G6 vetoes: 0
+- Most recurrent defect classes: **audit-classification failure, 2 occurrences** (2026-07-30 audit-non-compliance; 2026-08-04 findings misrecorded as "no findings"). Both were caught only because the authoring session verified the auditor's factual claims against the repo before accepting the verdict. Enumerated briefs fixed COMPLETENESS (L-014); they have not fixed CLASSIFICATION.
+- Weakest gate: **Gates 3-4 (audit reliability)** — not from rejections, but because every cross-vendor audit so far has needed correction at verification. Gate 6 evolution should target this.
 - Fast-lane share of runs: 0% (watch this: a rising share with rising G2-G4 rejections means triviality is being misclassified)
 
 ## EVOLUTION TARGETING RULE
