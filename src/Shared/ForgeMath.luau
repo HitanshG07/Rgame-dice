@@ -22,12 +22,12 @@
 local ForgeMath = {}
 
 -- Payout exponent. Superlinearity is a correctness requirement (SRS FR-2.4).
-ForgeMath.ALPHA: number = 2.0
+ForgeMath.ALPHA = 2.0
 
 -- Masses snap to this precision before any sum check, so IEEE 754 residuals
 -- cannot compound across repeated forges and drift past EPSILON (threat T-27).
-ForgeMath.PRECISION: number = 4
-ForgeMath.EPSILON: number = 1e-3
+ForgeMath.PRECISION = 4
+ForgeMath.EPSILON = 1e-3
 
 local POW10 = 10 ^ ForgeMath.PRECISION
 

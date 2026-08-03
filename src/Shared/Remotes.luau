@@ -28,7 +28,9 @@ export type FunctionName =
 export type EventName =
 	"RollResult" | "StateSync" | "ForgeResult" | "VaultSummary" | "EventState" | "Notice"
 
-Remotes.Fn: { [string]: FunctionName } = {
+-- Typed via a local: Luau does not permit a type annotation on a table-field
+-- assignment (`T.x: Type = v` is a syntax error), so the annotation lives here.
+local FN: { [string]: FunctionName } = {
 	Roll = "Roll",
 	Forge = "Forge",
 	SetElement = "SetElement",
@@ -46,8 +48,9 @@ Remotes.Fn: { [string]: FunctionName } = {
 	ClaimGroupReward = "ClaimGroupReward",
 	GetLeaderboard = "GetLeaderboard",
 }
+Remotes.Fn = FN
 
-Remotes.Ev: { [string]: EventName } = {
+local EV: { [string]: EventName } = {
 	RollResult = "RollResult",
 	StateSync = "StateSync",
 	ForgeResult = "ForgeResult",
@@ -55,6 +58,7 @@ Remotes.Ev: { [string]: EventName } = {
 	EventState = "EventState",
 	Notice = "Notice",
 }
+Remotes.Ev = EV
 
 -- Enumerated Notice codes. The client is told a CODE, never an internal detail:
 -- no stack traces, paths, query text, or configuration values cross the
@@ -137,10 +141,10 @@ function Remotes.createAll(): ()
 	if not RunService:IsServer() then
 		error("[Remotes] createAll is server-only", 2)
 	end
-	for _, name in pairs(Remotes.Fn) do
+	for _, name in pairs(FN) do
 		Remotes.getFunction(name)
 	end
-	for _, name in pairs(Remotes.Ev) do
+	for _, name in pairs(EV) do
 		Remotes.getEvent(name)
 	end
 end
