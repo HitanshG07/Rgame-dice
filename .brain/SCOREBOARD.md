@@ -16,6 +16,8 @@ Rejections are appended to the active task's line AT REJECTION TIME (circuit-bre
 
 - [2026-08-06] dice-forge-block2-rollservice | PRODUCTION | lane: full (sequenced) | rejections: none | none | G2 CLEAN (2771 assertions, 4/4 suites, first MCP-verified run); G3-G4 PENDING
 
+- [2026-08-06] dice-forge-blocks12-audit | PRODUCTION | lane: full | rejections: none | 7 audit findings folded (4 verified real, 3 informational) | G3 AUDIT-APPROVED, G4 SECURE, findings remediated, G2 re-run CLEAN (2779 assertions)
+
 ## RUNNING TALLIES
 - Total pipeline runs: 3 (one superseded, one disputed — see run-log annotations)
 - Rejections by gate: G2: 2 | G3: 1 | G4: 0 | G5: 0 | G6 vetoes: 0

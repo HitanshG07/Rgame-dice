@@ -86,7 +86,12 @@ local TEMPLATE: Profile = {
 		Elements = { None = true },
 		Shapes = { D6 = true },
 	},
-	Upgrades = { AutoRollSpeed = 0, VaultCapacity = 0, VaultEfficiency = 0, Luck = 0 },
+	-- BadRollShield is a GAMEPASS entitlement, not a Cash upgrade. It is
+	-- declared here with a 0 default so no read path can hit nil, and so the
+	-- field's existence is explicit rather than implied. MonetizationService
+	-- (unbuilt) will be the only writer. Declared 2026-08-06 from Gate 3
+	-- finding F-G3-2. Absent-means-off remains the fail-closed default.
+	Upgrades = { AutoRollSpeed = 0, VaultCapacity = 0, VaultEfficiency = 0, Luck = 0, BadRollShield = 0 },
 	Vault = { LastSeen = 0, AccrualId = 0, AvgIncomePerSec = 0 },
 	PurchaseIds = {},
 	PurchaseOrder = {},

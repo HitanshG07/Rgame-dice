@@ -1,0 +1,24 @@
+GATE 2 RE-RUN — Blocks 1+2 after folding in Gate 3/4 audit findings
+Executed live via Roblox Studio MCP, 2026-08-06.
+
+BEFORE fixes:  UT-4 = 54 assertions, total 2771
+AFTER  fixes:  UT-4 = 62 assertions, total 2779
+
+The +8 assertion delta is the verification that the fixes actually reached the
+running code. An unchanged count would have meant the edits never synced -- see
+ledger L-019, which fired during this very session: a first post-fix run
+reported a clean 4/4 at the OLD count of 2771 because the Rojo plugin had
+silently dropped its connection. Never accept a green suite without checking
+the expected count moved.
+
+=== DICE FORGE TEST SUITE ===
+[PASS] UT-1 ForgeMath (38 assertions)
+[PASS] UT-2 ForgeValidation (52 assertions)
+[PASS] UT-4 Payout (62 assertions)
+[PASS] UT-3 Sampling (2627 assertions)
+total assertions: 2779
+=== SUITE COMPLETE: 4 passed, 0 failed ===
+DataStoreService: StudioAccessToApisNotAllowed (expected in Studio; ProfileStore
+  correctly degrades to not-saving rather than crashing -- fail-closed working)
+
+VERDICT: MECHANICALLY-CLEAN.

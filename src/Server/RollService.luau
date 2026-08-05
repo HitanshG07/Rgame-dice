@@ -42,6 +42,23 @@ RollService.B_PER_LEVEL = 0.01           -- StreakStrength level -> b
 RollService.MAX_STREAK_MULTIPLIER = 1e6  -- hard ceiling; compounding is explosive
 RollService.SHIELD_COOLDOWN = 30         -- seconds, server-clocked (SRS FR-5.6)
 
+-- A face is a Void only if it is the lightest AND sits at or near the mass
+-- floor (SRS FR-5.2: "a face at or near the mass floor"). Without the
+-- proximity test an UN-FORGED flat die has its face 1 treated as a Void, so a
+-- brand-new player breaks their streak 1-in-n rolls with no way to avoid it.
+-- Fixed 2026-08-06 from Gate 3 finding F-G3-1: the code contradicted the spec,
+-- and the spec was right.
+RollService.MASS_FLOOR = 1               -- moves to DiceCatalog per-shape later
+RollService.VOID_FLOOR_FACTOR = 1.5      -- "near" = within 1.5x the floor
+
+-- Offline vault rate is earned/elapsed. Without a minimum window a player who
+-- rolls once immediately after joining divides a real payout by ~0.05s and
+-- produces an astronomical rate, which then feeds Vault.AvgIncomePerSec and
+-- inflates their offline earnings. Added 2026-08-06 from Gate 4 finding
+-- F-G4-1 (threat T-30) -- a genuine currency exploit the threat model missed.
+RollService.MIN_RATE_WINDOW = 60         -- seconds before the rate is trusted
+RollService.MAX_RATE = 1e12              -- absolute ceiling on the reported rate
+
 export type Face = { Mass: number, Element: string }
 export type Die = { Shape: string, MassBudget: number, Faces: { Face } }
 
@@ -97,15 +114,23 @@ end
 
 -- A face at or near the mass floor is a Void (SRS FR-5.2). Because it is the
 -- lightest face it lands most often -- the visible cost of concentrating mass.
-function RollService.isVoidFace(die: Die, faceIndex: number): boolean
+function RollService.isVoidFace(die: Die, faceIndex: number, massFloor: number?): boolean
 	local faces = die.Faces
+	local floor = massFloor or RollService.MASS_FLOOR
 	local lightest = 1
 	for i = 2, #faces do
 		if faces[i].Mass < faces[lightest].Mass then
 			lightest = i
 		end
 	end
-	return faceIndex == lightest
+	if faceIndex ~= lightest then
+		return false
+	end
+	-- Proximity test: a flat, un-forged die has no face near the floor and so
+	-- has NO Void. Only mass deliberately stripped off a face creates one --
+	-- which is the design intent: the Void is the visible cost of concentrating
+	-- mass elsewhere, not a tax on players who have not forged yet.
+	return faces[lightest].Mass <= floor * RollService.VOID_FLOOR_FACTOR
 end
 
 --------------------------------------------------------------------------------
@@ -320,7 +345,16 @@ function RollService.averageIncomePerSecond(player: Player): number
 	if elapsed <= 0 then
 		return 0
 	end
-	return s.earnedThisSession / elapsed
+	-- Divide by at least MIN_RATE_WINDOW. A short session cannot manufacture a
+	-- huge rate by dividing a real payout by a near-zero elapsed time
+	-- (threat T-30). This makes the early-session rate CONSERVATIVE, which is
+	-- the correct direction to be wrong in for an offline-earnings input.
+	local window = math.max(elapsed, RollService.MIN_RATE_WINDOW)
+	local rate = s.earnedThisSession / window
+	if not ForgeMath.isFinite(rate) or rate < 0 then
+		return 0
+	end
+	return math.min(rate, RollService.MAX_RATE)
 end
 
 -- The wired entry point. Returns ok, reason. Called by RemoteGateway's `Roll`

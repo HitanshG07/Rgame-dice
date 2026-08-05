@@ -95,10 +95,26 @@ local function run(): (boolean, string?, number)
 	----------------------------------------------------------------------------
 	-- VOID DETECTION: the lightest face is the streak breaker (SRS FR-5.2)
 	----------------------------------------------------------------------------
-	local skewed = makeDie({ 30, 6, 6, 6, 6, 2 })
-	e = e or check(RollService.isVoidFace(skewed, 6), "face 6 (mass 2) should be the Void")
+	-- a face AT the floor is the Void
+	local skewed = makeDie({ 30, 6, 6, 6, 6, 1 })
+	e = e or check(RollService.isVoidFace(skewed, 6), "face 6 (mass 1, at the floor) should be the Void")
 	e = e or check(not RollService.isVoidFace(skewed, 1), "the heaviest face must not be the Void")
 	e = e or check(not RollService.isVoidFace(skewed, 3), "a mid-weight face must not be the Void")
+
+	-- F-G3-1: an UN-FORGED FLAT die must have NO Void at all. Before this fix
+	-- face 1 was treated as a Void on a starting die, so a brand-new player
+	-- broke their streak 1-in-6 rolls with no way to avoid it. SRS FR-5.2 says
+	-- a Void is "a face at or near the mass floor" -- a flat die has none.
+	local flat = makeDie({ 10, 10, 10, 10, 10, 10 })
+	for i = 1, 6 do
+		e = e or check(not RollService.isVoidFace(flat, i),
+			string.format("flat die face %d must NOT be a Void -- no face is near the floor", i))
+	end
+
+	-- the lightest face is only a Void if it is ALSO near the floor
+	local mild = makeDie({ 20, 12, 12, 8, 4, 4 })
+	e = e or check(not RollService.isVoidFace(mild, 5),
+		"mass 4 is the lightest but sits well above the floor -- not a Void")
 
 	----------------------------------------------------------------------------
 	-- GOLD: conditional AND mass-coupled. This is the single most important
@@ -181,12 +197,15 @@ local function run(): (boolean, string?, number)
 	e = e or check(approx(res.payout, res.baseTotal, 1e-6),
 		"with no elements, no streak strength and no bonus, payout should equal baseTotal")
 
-	-- a flat die has no distinct lightest face, so index 1 is treated as Void:
-	-- confirm the streak still advances or breaks coherently rather than erroring
-	e = e or check(res.streak == 0 or res.streak == 1, "streak took an impossible value")
+	-- F-G3-3: this previously asserted `streak == 0 or streak == 1`, which after
+	-- one throw from streak 0 is a TAUTOLOGY -- it could not fail and proved
+	-- nothing. Now that a flat die has no Void, the outcome is deterministic:
+	-- the streak MUST advance.
+	e = e or check(not res.voidHit, "a flat die must never register a Void hit")
+	e = e or check(res.streak == 1, "a non-Void throw from streak 0 must advance to 1")
 
 	-- shield: prevents the break when ready, does not when not
-	local voidDice = { makeDie({ 30, 10, 10, 10, 10, 2 }) }
+	local voidDice = { makeDie({ 30, 10, 10, 10, 8, 1 }) }
 	local brokeWithout, savedWith = false, false
 	for seed = 1, 400 do
 		local r = RollService.computeThrow(voidDice, Random.new(seed), {
