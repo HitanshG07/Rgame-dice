@@ -1,0 +1,40 @@
+GATE 2 EVIDENCE — Block 2 unit suite (all 4 suites)
+Executed live via Roblox Studio MCP (mcp__Roblox_Studio__execute_luau /
+start_stop_play / get_console_output), 2026-08-06. First MCP-verified run
+of this project — no manual paste round-trip.
+
+PRECEDING FIX: Rojo's local server process had died silently between sessions;
+RollService.luau, Sampling.test.luau and Payout.test.luau existed on disk and
+in git (commit 22af0ac) but had never synced into Studio. Restarted
+tools/rojo.exe serve --port 34872, operator reconnected the Studio plugin.
+Confirmed synced via execute_luau before running.
+
+Also deleted via MCP: 5 leftover instances from the retired Bouncy Ball Tycoon
+project in StarterPlayer.StarterPlayerScripts — Physics2DEngine, VFXManager,
+SFXManager, UIManager, ClientMain. These were the source of the
+'WaitForChild("Source")' infinite-yield warning seen in prior runs.
+
+=== DICE FORGE TEST SUITE ===
+[PASS] UT-1 ForgeMath (38 assertions)
+[PASS] UT-2 ForgeValidation (52 assertions)
+[PASS] UT-4 Payout (54 assertions)
+[PASS] UT-3 Sampling (2627 assertions)
+total assertions: 2771
+=== SUITE COMPLETE: 4 passed, 0 failed ===
+DataStoreService: StudioAccessToApisNotAllowed: Cannot write to DataStore from
+  studio if API access is not enabled. API: SetAsync, Data Store: ____PS
+[ProfileStore]: Roblox API services unavailable - data will not be saved
+
+VERDICT: MECHANICALLY-CLEAN for all 4 suites in scope (UT-1..UT-4).
+
+The DataStoreService notice is EXPECTED and NOT a defect: Studio API access is
+off by default, and ProfileStore's own fail-safe correctly degrades to
+"not saving" rather than crashing or fabricating a profile. This is the
+FAIL-CLOSED behaviour specified in HLD §5.2 rule 1, observed working live.
+
+Legacy leftover count went from 2 rounds (ServerMain/Source, then these 5) to
+zero known remaining. No further tycoon-project instances found in a sweep of
+ServerScriptService, ReplicatedStorage, and StarterPlayerScripts.
+
+STILL OUTSTANDING FOR BLOCKS 1+2: Gates 3-4 have not run. Author cannot audit
+own diff. UT-5..UT-11 and IT-1..IT-5 remain unwritten (Block 3+).
