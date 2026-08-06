@@ -59,3 +59,37 @@ Corroborating (independent): [Session locking explained — Roblox DevForum](htt
 1. **A type annotation is ILLEGAL on a table-field assignment.** `Module.CONST: number = 2.0` and `Module.Map: { [string]: T } = {}` are SYNTAX ERRORS, not type errors — the module fails to load entirely and every dependent test reports "Requested module experienced an error while loading". Annotations are permitted only on `local` declarations and function parameters/returns. To keep the type, annotate a local and bind it: `local MAP: { [string]: T } = {...}` then `Module.Map = MAP`. Verify with `grep -nE '^[A-Za-z_][A-Za-z0-9_]*\.[A-Za-z0-9_]+[[:space:]]*:[^=]+='` over `src/` before every commit.
 2. **Deleting a file from disk does not remove the instance from the place.** Rojo owns only the branches declared in `default.project.json`; instances created by earlier work persist inside the `.rbxl` and keep executing, emitting warnings that pollute every evidence artifact. Retiring a system means deleting its instances in the Explorer as well as its files.
 3. **A failing test is not evidence the CODE is wrong.** Identify which side is broken before changing anything. In this build a "drift" failure was the test driving a value below a floor it had itself defined — loosening the tolerance to make it pass would have punched a hole in the invariant the validator exists to protect. See ledger L-017.
+
+4. **`table.create(n)` with no fill value has type `{unknown}`, not `{number}`.** Assigning it to a typed target warns, and *annotating the local does not fix it* — that only makes the mismatch explicit. Supply a fill value (`table.create(n, 0)`, `table.create(n, "")`), or use `{}` where the elements are TABLES, because a fill value there shares ONE table across every slot. Read the warning's COLUMN, not just its line: a column pointing at `table.create` rather than at the variable is what distinguishes the two diagnoses.
+5. **`Players.LocalPlayer` is typed `Player?`.** Indexing it directly warns. Narrow it once at the top with a nil check that errors, not with a `:: Player` cast — the cast silences the checker and still indexes nil if the script is ever parented somewhere it does not belong.
+6. **`math.clamp(x, min, max)` ERRORS when `min > max`.** Wherever both bounds are derived from data (a catalog, a config, a profile), that is a live crash waiting on a constant change. If the bounds come from tunable data, assert `min <= max` in the test suite so a tuning pass fails at the bench rather than at a player's join.
+7. **`#` on a SPARSE array is undefined.** `{[1]=a,[3]=b}` may report 1 or 3. A length check therefore cannot prove a slot is populated; iterate to the expected count and type-check each element before indexing it.
+8. **Round-half-up is wrong for splitting a total.** Dividing a budget into `n` equal shares with a round-to-nearest snap makes the shares sum to MORE than the budget. Use a snap-toward-zero variant wherever parts must not exceed the whole, and write the residue direction into the assertion (`sum(parts) <= whole`), never just equality-within-epsilon.
+
+## 7. THE EXECUTABLE CONTRACT PATTERN
+*(Promoted from the Dice Forge Block 3 build, 2026-08-07. Five rejections, twelve findings, one circuit-breaker trip. This is the pattern that ended it — see ledger L-025.)*
+
+**A rule that lives as prose in more than one document will be re-derived, and re-derived wrongly, by every fix that touches it.**
+
+Dice Forge's `performSetShape` was wrong three times in three different directions — it confiscated purchased progression, then manufactured it, then inflated it by a rounding residue. Each fix satisfied the complaint in front of it and silently broke a clause nobody had written down, because the rules a die had to satisfy were scattered across two SRS requirements and a code comment. Nothing was thrashing; the *design* was missing.
+
+**The remedy, in order:**
+1. **Write the contract as ONE function** returning `(ok, reason)`, listing every clause. Not a comment, not a doc section — a function, so it can be called.
+2. **Gate every WRITE on a CANDIDATE**, before any currency or state moves. Checking a candidate rather than the stored result turns a violation into a clean refusal instead of a rollback.
+3. **Gate every READ too.** Guarding writes is worth nothing while reads are trusted: data written by an earlier version of the code is still in the database. Validate on load and *repair* rather than quarantine — a record can be illegal through no fault of the user, and repair clamping back into the contract can only ever reduce an illegal advantage.
+4. **Assert the contract from the suite after EVERY mutation**, over a fixture sweep, so "did we break a clause this time?" is answered on every run rather than re-derived by the next auditor.
+5. **Add new rules to that function**, never inline in a handler. A rule with one documented exception acquires a second.
+
+**The same move applies to call shape.** Declaring every remote's arity in one table and enforcing it centrally in `bind()` closed a defect that no unit test could reach — the suite calls handlers directly and never crosses a RemoteFunction.
+
+**The tell that you need this:** the same function is fixed twice in opposite directions. That is not bad luck and not a careless author; it is an unwritten contract being guessed at.
+
+## 8. VERIFICATION INTEGRITY ON THIS PLATFORM
+*(Dice Forge Blocks 1–3. Every line here was bought with a false green or a false alarm.)*
+
+- **Studio Script Analysis (P-1) is NOT substitutable by the unit suite and must never be skipped.** It catches what no test can reach: a call to a function that does not exist in a module nothing requires. A gate declared clean on the suite alone shipped exactly that. It is also not exposed to any MCP tooling — a human reads the panel.
+- **The assertion COUNT is the sync canary.** Record it before a change; require it to move by the expected delta after. A green suite at an unchanged count has run over stale code (ledger L-019, L-020).
+- **Verify sync BEFORE pressing Play, not after.** Read a marker your change introduced out of the live DataModel first. A green result is only evidence if you established beforehand that the runtime held the new code.
+- **The place file is a SUPERSET of the repository.** Rojo syncs disk *into* Studio; it never removes what disk never put there. Every prohibition grep must also sweep the live DataModel for `LuaSourceContainer`s outside the managed folders — a retired script assigning `ProcessReceipt` survived every repository-side check because it existed only in the `.rbxl` (ledger L-023).
+- **MCP `execute_luau` does not share the running VM's module cache.** Each call re-requires and gets a fresh instance, so every module-level state container reads as EMPTY. It is valid for pure evaluation and DataModel/`Source` reads, and INVALID for inspecting live service state — it will confidently report an empty session table and look exactly like a fail-open (ledger L-022).
+- **Cross the wire in at least one test.** Handlers called directly never exercise arity, serialisation, or the gateway. A real client invoking a real remote found a contract violation five audit rounds had missed.
