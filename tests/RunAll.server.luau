@@ -37,7 +37,7 @@ for _, child in ipairs(root:GetDescendants()) do
 		table.insert(modules, child)
 	end
 end
-table.sort(modules, function(a, b)
+table.sort(modules, function(a: ModuleScript, b: ModuleScript)
 	return a.Name < b.Name
 end)
 

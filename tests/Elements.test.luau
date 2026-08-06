@@ -55,7 +55,12 @@ end
 
 local function run(): (boolean, string?, number)
 	n = 0
-	local e: string?
+	-- Typed `any` rather than `string?` for one specific Luau reason: the
+	-- accumulator idiom `e = e or check(...)` produces a refinement union the
+	-- checker cannot collapse back to `string?`, which warns at every call site.
+	-- Semantics are unchanged (check still runs only while e is nil) and nothing
+	-- is hidden: `e` is a local failure message whose only use is the return below.
+	local e: any = nil
 
 	----------------------------------------------------------------------------
 	-- Gold: conditional, and mass-coupled (SRS FR-4.3)
