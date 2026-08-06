@@ -124,3 +124,43 @@ additive `snapDown`.
 
 Block 4 proceeds. Nothing in this game is playable yet, and that is now the
 largest risk on the project — larger than a 0.0002 rounding residue.
+
+---
+
+## 6. ADDENDUM — a fifth Block 3 finding, found by the Block 4 wire test, NOT fixed
+
+**F-4A-1 — `Roll` does not enforce zero arity.**
+
+`API_DATA_CONTRACT.md` §1.1 specifies for `Roll`:
+
+> `Roll` | *(none)* | `ok, reason?` | Rate-limit against the player's **server-known** auto-roll tier. **Zero arity enforced — any argument rejects the call.**
+
+Observed from a real client invocation during the Block 4A smoke:
+
+```
+Roll with a spoofed argument: ok=true reason=nil
+```
+
+The server accepted `Roll(999)` and processed it as a normal roll. `RemoteGateway.bind`
+forwards `...` to the handler and `RollService.performRoll(player)` simply ignores
+the extra value, so nothing is exploitable today — the argument reaches no
+decision. But the contract says *reject*, and it says so for a reason: an
+unexpected argument means either the caller is not our client or the API has
+drifted, and both are worth refusing rather than absorbing.
+
+**Not fixed.** `RemoteGateway` is a Block 3 file and the breaker is armed. I
+breached it once already; I am not doing so again on my own judgement, even for
+a small change. It is recorded here as a fifth cause so the operator's decision
+covers it.
+
+**If the breaker is reset,** this folds naturally into the same structural work:
+declare each remote's expected arity alongside its rate limit in one table, and
+have `bind` enforce it centrally — the same "write the contract down once, in an
+executable form" move recommended in §4, applied to arity instead of to the die
+invariant. Two findings, one shape of fix.
+
+**Note on how it was found.** No unit test could have caught this: the suite
+calls handlers directly and never crosses a RemoteFunction. It took an actual
+client invoking an actual remote. That is an argument for the P-4D runtime smoke
+being real work rather than a formality, and for IT-4 (the adversarial
+integration suite, Block 6) crossing the wire rather than calling handlers.
