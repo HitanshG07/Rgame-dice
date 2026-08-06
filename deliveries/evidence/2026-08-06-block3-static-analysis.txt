@@ -77,17 +77,31 @@ additionally make the complete list of profile fields the sole currency writer
 can touch readable at a glance (SRS FR-14.8).
 
 --------------------------------------------------------------------------------
-RUN 4 — after class E fixed
+RUN 4 — after class E fixed  (operator-read 2026-08-07)
 --------------------------------------------------------------------------------
   0 of 0 Errors
-  <OPERATOR TO CONFIRM> Warnings
+  8 of 8 Warnings
 
-EXPECTED: 8, all in ServerScriptService.Server.Vendor.ProfileStore.
-FIRST-PARTY EXPECTED: 0.
+  FIRST-PARTY WARNINGS: 0
+  VENDOR WARNINGS:      8   (all ServerScriptService.Server.Vendor.ProfileStore)
 
-The expected vendor warnings, all of the same form
-(`string.len` receiving `*error-type* & string`):
-  ProfileStore 1370, 1372, 1639, 1641, 1737, 1739, 1813, 2044
+Verbatim, the complete panel:
+
+  ServerScriptService.Server.Vendor.ProfileStore
+    Type Error: (1370, 20) the function 'string.len' expects to get a string as its 1st argument, but is being given a *error-type* & string
+    Type Error: (1372, 20) the function 'string.len' expects to get a string as its 1st argument, but is being given a *error-type* & string
+    Type Error: (1639, 20) the function 'string.len' expects to get a string as its 1st argument, but is being given a *error-type* & unknown & string
+    Type Error: (1641, 20) the function 'string.len' expects to get a string as its 1st argument, but is being given a *error-type* & unknown & string
+    Type Error: (1737, 20) the function 'string.len' expects to get a string as its 1st argument, but is being given a *error-type* & string
+    Type Error: (1739, 20) the function 'string.len' expects to get a string as its 1st argument, but is being given a *error-type* & string
+    Type Error: (1813, 49) the function 'string.len' expects to get a string as its 1st argument, but is being given a a & string
+    Type Error: (2044, 49) the function 'string.len' expects to get a string as its 1st argument, but is being given a a & string
+
+  No first-party file appears in the panel. 149 -> 144 -> 128 -> 8.
+
+  THIS COUNT IS THE BASELINE. The pin is fixed at 45c9847, so the count is
+  fixed at 8. Any future run reporting more than 8, or reporting any warning
+  outside Vendor/, is a FINDING.
 
 --------------------------------------------------------------------------------
 SEPARATE FINDING — an unmanaged script only P-1 could have seen
@@ -131,10 +145,19 @@ Recorded in SRS NFR-8 and DEVOPS_RECORD §"Accepted static-analysis warnings".
 --------------------------------------------------------------------------------
 VERDICT
 --------------------------------------------------------------------------------
-P-1: PASS PENDING ONE CONFIRMATION — 0 errors; first-party warnings expected 0;
-     vendor warnings accepted per the policy above. The Run 4 count must be
-     transcribed above before this artifact is complete.
+P-1: PASS — 0 errors place-wide; 0 first-party warnings; 8 vendor warnings
+     accepted under the bounded policy above (SRS NFR-8, DEVOPS_RECORD).
+     Operator-read from the panel 2026-08-07 and transcribed verbatim.
 
-     Gate 2 is NOT closed until that number is in this file. A missing or
-     assumed count is exactly the shortcut that let the previous Block 3 gate
-     ship a crash.
+GATE 2 FOR BLOCK 3: MECHANICALLY-CLEAN.
+  P-1 static analysis        PASS  (this file)
+  P-2 automated suite        PASS  9 suites / 0 failed / 3,046 assertions
+                                   (2026-08-06-block3-remediated-unit-suite.txt)
+  P-3 prohibition greps      PASS  (2026-08-06-block3-remediated-prohibitions.txt)
+  P-4 runtime smoke          N/A   requires the client, which is Block 4. Recorded
+                                   as NOT PERFORMED, never as passing.
+
+All three applicable procedures ran and produced artifacts on disk. This is the
+first Block 3 gate where that is true: the previous one was declared
+MECHANICALLY-CLEAN on P-2 and P-3 alone, and the P-1 it skipped is what would
+have caught the ElementCatalog.getElement crash on day one.
