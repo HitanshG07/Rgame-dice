@@ -104,7 +104,7 @@ function ForgeService.performForge(player: Player, dieIndex: number, distributio
 		return false, reason or Remotes.Notice.InvalidRequest
 	end
 
-	local oldDist: { number } = table.create(#die.Faces)
+	local oldDist: { number } = table.create(#die.Faces, 0)
 	for i = 1, #die.Faces do
 		oldDist[i] = die.Faces[i].Mass
 	end
@@ -249,7 +249,7 @@ function ForgeService.performSetShape(player: Player, dieIndex: number, shapeId:
 	-- proposal fails validation against a budget the faces cannot reach.
 	local exactBudget = ForgeMath.snap(faceMass * shape.faceCount)
 
-	local carriedElements: { string } = table.create(shape.faceCount)
+	local carriedElements: { string } = table.create(shape.faceCount, "")
 	for i = 1, shape.faceCount do
 		local prior = oldDie.Faces[i]
 		carriedElements[i] = if prior ~= nil and ElementCatalog.exists(prior.Element)
@@ -258,7 +258,7 @@ function ForgeService.performSetShape(player: Player, dieIndex: number, shapeId:
 	end
 
 	local applied, applyReason = PlayerProfile.mutate(player, function(d)
-		local faces: { PlayerProfile.Face } = table.create(shape.faceCount)
+		local faces: { PlayerProfile.Face } = {}
 		for i = 1, shape.faceCount do
 			faces[i] = { Mass = faceMass, Element = carriedElements[i] }
 		end

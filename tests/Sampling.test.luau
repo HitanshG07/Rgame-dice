@@ -30,7 +30,7 @@ local function approx(a: number, b: number, tol: number): boolean
 end
 
 local function makeDie(masses: { number }, element: string?): RollService.Die
-	local faces: { RollService.Face } = table.create(#masses)
+	local faces: { RollService.Face } = {}
 	for i, m in ipairs(masses) do
 		faces[i] = { Mass = m, Element = element or "None" }
 	end
@@ -40,7 +40,7 @@ local function makeDie(masses: { number }, element: string?): RollService.Die
 end
 
 local function flatMasses(faces: number, budget: number): { number }
-	local t: { number } = table.create(faces)
+	local t: { number } = table.create(faces, 0)
 	for i = 1, faces do t[i] = budget / faces end
 	return t
 end

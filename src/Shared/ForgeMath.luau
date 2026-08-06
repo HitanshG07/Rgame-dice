@@ -72,7 +72,7 @@ function ForgeMath.snap(n: number): number
 end
 
 function ForgeMath.snapAll(mass: Distribution): Distribution
-	local out: Distribution = table.create(#mass)
+	local out: Distribution = table.create(#mass, 0)
 	for i = 1, #mass do
 		out[i] = ForgeMath.snap(mass[i])
 	end
@@ -154,7 +154,7 @@ function ForgeMath.landingProbabilities(mass: Distribution): { number }
 	end
 
 	local denom = total * (n - 1)
-	local out: Distribution = table.create(n)
+	local out: Distribution = table.create(n, 0)
 	for i = 1, n do
 		local p = (total - mass[i]) / denom
 		-- A face holding the entire budget would yield p = 0; clamp so no face is
@@ -180,7 +180,7 @@ function ForgeMath.faceValue(faceMass: number): number
 end
 
 function ForgeMath.faceValues(mass: Distribution): { number }
-	local out: { number } = table.create(#mass)
+	local out: { number } = table.create(#mass, 0)
 	for i = 1, #mass do
 		out[i] = ForgeMath.faceValue(mass[i])
 	end

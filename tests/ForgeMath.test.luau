@@ -23,7 +23,7 @@ local function approx(a: number, b: number, tol: number): boolean
 end
 
 local function flat(faces: number, budget: number): { number }
-	local t: { number } = table.create(faces)
+	local t: { number } = table.create(faces, 0)
 	for i = 1, faces do
 		t[i] = budget / faces
 	end
@@ -49,7 +49,7 @@ local function run(): (boolean, string?, number)
 			string.format("D%d flat face probability %.9f, expected %.9f", faces, p[1], 1 / faces))
 
 		-- concentrated: one heavy face, remainder even
-		local conc: { number } = table.create(faces)
+		local conc: { number } = table.create(faces, 0)
 		conc[1] = budget * 0.5
 		for i = 2, faces do conc[i] = (budget * 0.5) / (faces - 1) end
 		local pc = ForgeMath.landingProbabilities(conc)

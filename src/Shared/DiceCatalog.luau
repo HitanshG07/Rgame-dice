@@ -92,7 +92,7 @@ function DiceCatalog.getAllShapes(): { ShapeDef }
 	for _, shape in pairs(SHAPES) do
 		table.insert(list, shape)
 	end
-	table.sort(list, function(a, b)
+	table.sort(list, function(a: ShapeDef, b: ShapeDef)
 		return a.faceCount < b.faceCount
 	end)
 	return list
