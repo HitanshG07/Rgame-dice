@@ -1,0 +1,79 @@
+=== BLOCK 4A — P-3 PROHIBITION SWEEP, INCLUDING THE CLIENT-BOUNDARY RULES ===
+Date: 2026-08-07   Commit: 11b775b
+
+TWO METHOD NOTES, both earned during this sweep:
+
+1. The client-boundary rules below were first written as RUNTIME assertions
+   and failed: reading ScriptInstance.Source needs PluginOrOpenCloud
+   capability, which a game script does not have. They were not wrong, they
+   were in the wrong place. Anything provable only from the TEXT belongs in
+   P-3, which greps from disk; anything provable from the loaded module
+   belongs in UT-13.
+
+2. EVERY PROHIBITION GREP MUST EXCLUDE COMMENTS. The cast check below first
+   reported a violation, and the match was the source comment EXPLAINING why
+   a cast must not be used. A grep that trips on the documentation of its own
+   rule punishes writing the rule down. All text checks now strip comment
+   lines before matching.
+
+$ grep -rn "InvokeClient" src/Client/ | grep -vE "^[^:]+:[0-9]+:[[:space:]]*--"
+   EXPECT: empty (T-8)
+   <none>
+
+$ grep -rnE "ProcessReceipt|SetAsync|MessagingService" src/Client/ | grep -vE "^[^:]+:[0-9]+:[[:space:]]*--"
+   EXPECT: empty
+   <none>
+
+$ grep -rnE "TODO|FIXME|TBD" src/Client/ | grep -vE "^[^:]+:[0-9]+:[[:space:]]*--"
+   EXPECT: empty
+   <none>
+
+--- NetClient is the SOLE outbound boundary ---
+$ for f in $(ls src/Client/*.luau | grep -v NetClient.luau); do grep -vE "^[[:space:]]*--" "$f" | grep -qE "Remotes\.getFunction|Remotes\.getEvent|OnClientEvent|:InvokeServer" && echo "$f"; done
+   EXPECT: empty -- only NetClient may touch a remote
+   <none>
+
+--- NFR-5: no outbound wrapper may name an economic value ---
+$ grep -nE "^function NetClient\.[A-Za-z]+\(.*(price|cost|amount|balance|reward|payout|multiplier|duration|level|score|cash|gems|diamonds)" src/Client/NetClient.luau
+   EXPECT: empty
+   <none>
+
+$ grep -nE "^function NetClient\.(invoke|fire|send|call|request)\b" src/Client/NetClient.luau
+   EXPECT: empty -- no generic escape hatch
+   <none>
+
+$ grep -c "^function NetClient.buyUpgrade(upgradeId: string)" src/Client/NetClient.luau
+   EXPECT: 1 -- an id, never a price
+   1
+
+$ grep -c "^function NetClient.setAutoRoll(enabled: boolean)" src/Client/NetClient.luau
+   EXPECT: 1 -- a boolean, never an interval
+   1
+
+--- the throttle must declare itself a courtesy, not a control ---
+$ grep -cin "courtesy" src/Client/NetClient.luau
+   EXPECT: at least 1
+   1
+
+--- ClientBootstrap must fail loudly, and not confuse unbuilt with broken ---
+$ grep -c "local function fatal" src/Client/ClientBootstrap.client.luau
+   EXPECT: 1
+   1
+
+$ grep -c "PlayerGui" src/Client/ClientBootstrap.client.luau
+   EXPECT: at least 1
+   2
+
+$ grep -c "still under construction" src/Client/ClientBootstrap.client.luau
+   EXPECT: 1 -- absent module != failed module
+   1
+
+$ grep -vE "^[[:space:]]*--" src/Client/ClientBootstrap.client.luau | grep -cE ":: *Player\b"
+   EXPECT: 0 -- narrowed by a check, not silenced by a cast (comments stripped)
+   0
+
+--- strict everywhere ---
+   OK   src/Client/ClientBootstrap.client.luau
+   OK   src/Client/NetClient.luau
+
+VERDICT: PASS -- all client-boundary rules hold.

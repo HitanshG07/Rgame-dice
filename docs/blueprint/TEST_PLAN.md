@@ -50,7 +50,7 @@ return {
 3. Copy the **entire** Output panel — every line, including warnings and tracebacks.
 4. Save to `deliveries/evidence/<date>-unit-suite.txt`.
 
-**PASS = `failed` is 0 AND every suite that EXISTS at this point in construction ran.** At the final pre-launch sweep the count must equal the full §4 + §5 set (12 unit + 5 integration = 17); mid-construction it must equal the suites written so far, enumerated by name in the gate record. A suite that exists on disk but is absent from the run is a failure, not a pass — that is a sync fault, and it has produced a false green on this project twice.
+**PASS = `failed` is 0 AND every suite that EXISTS at this point in construction ran.** At the final pre-launch sweep the count must equal the full §4 + §5 set (13 unit + 5 integration = 18); mid-construction it must equal the suites written so far, enumerated by name in the gate record. A suite that exists on disk but is absent from the run is a failure, not a pass — that is a sync fault, and it has produced a false green on this project twice.
 
 **AND the total assertion count must have MOVED by the delta the construction step predicted.** A suite reporting `X passed, 0 failed` at an *unchanged* assertion count has run over stale code — twice on this project a dead Rojo sync produced exactly that (ledger L-019, L-020). The assertion count is the sync canary; a green result without a moved count is not evidence.
 
@@ -67,6 +67,8 @@ grep -rn "MessagingService" src/ --exclude-dir=Vendor   # V1 scope — MUST be e
 # internals. Our own code using it still fails this check.
 grep -rnE "TODO|FIXME|TBD"        src/                  # Matrix B    — MUST be empty
 ```
+
+**EVERY TEXT CHECK MUST STRIP COMMENT LINES BEFORE MATCHING.** Amended 2026-08-07, triggering fact: the Block 4A sweep reported a `:: Player` cast violation, and the match was the source comment *explaining why a cast must not be used*. A grep that trips on the documentation of its own rule punishes writing the rule down, and the reflex fix — deleting the comment — destroys the explanation instead of the defect. Pipe through `grep -vE '^[[:space:]]*--'` first.
 
 **PASS = each line matches its stated expectation.** These are silent-failure classes: nothing at runtime tells you a second `ProcessReceipt` assignment overwrote the first.
 
@@ -102,6 +104,7 @@ Save the **entire** Output panel to `deliveries/evidence/<date>-smoke.txt`.
 | Outcome sampling & payout | UT-3, UT-4 |
 | Boundary validation | UT-5, UT-6 |
 | Forge application | UT-12 |
+| Client boundary | UT-13 |
 | Persistence | UT-7, UT-8 |
 | Monetization | UT-9 |
 | Leaderboard | UT-10 |
@@ -126,6 +129,11 @@ Save the **entire** Output panel to `deliveries/evidence/<date>-smoke.txt`.
 | **UT-10** | `tests/Leaderboard.test.luau` | The log-scale transform is monotonic across 0 → 1e300; the result stays within the signed 64-bit bound at `raw = 1e300` (threat T-20); ordering matches raw ordering; `GetSortedAsync` is called at most once per interval regardless of request volume. |
 | **UT-11** | `tests/Vault.test.luau` | `earnings = min(elapsed, capacity) × rate × efficiency`; **negative elapsed credits exactly zero** (threat T-23); elapsed clamps at capacity; claiming consumes the vault so a second claim yields zero (threat T-24); the 2× receipt is bound to its `AccrualId` and cannot be replayed against a later window. |
 | **UT-12** | `tests/Forge.test.luau` | Forge cost scales with the **magnitude of mass moved** and is non-trivial (FR-3.3); a rejected proposal leaves the distribution, the budget **and** Cash byte-identical (FR-3.2); an unknown or **locked** element id is refused (FR-4.1, threat T-5); a shape change **carries the purchased mass budget and the assigned elements across** rather than confiscating them (FR-6.1), and the resulting die is immediately forgeable because its faces sum to its stored budget. |
+| **UT-13** | `tests/ClientContract.test.luau` | The client module LOADS (the assertion whose absence let a call to a nonexistent function ship); one `NetClient` wrapper exists per remote in `Remotes.Fn` and one subscription per event in `Remotes.Ev`; **no generic `invoke`/`fire`/`send`/`call`/`request` escape hatch**; every remote has a declared server-side arity; `readyIn` answers for a known and an unknown remote; `awaitReady` REFUSES to run off-client rather than reporting a false ready. |
+
+> **UT-13 amendment, 2026-08-07.** Triggering fact: `NetClient` and `ClientBootstrap` were built, statically cleaned, hand-tested over the wire and audited as secondary scope — and required by **no suite at all**. That is precisely the property UT-12's header names as the reason a call to a nonexistent function survived a clean gate.
+>
+> **Scope split, learned the hard way.** A first draft asserted structural rules by reading `ScriptInstance.Source` and failed at runtime: `Source` requires `PluginOrOpenCloud` capability, which a game script does not have. The rules were correct and misplaced. **Anything provable only from the TEXT belongs in P-3**, which greps the repository from disk — sole-boundary enforcement, forbidden parameter names, the fatal path. **Anything provable from the LOADED MODULE belongs here.**
 
 > **UT-12 amendment, 2026-08-06.** Triggering fact: `ForgeService` shipped calling `ElementCatalog.getElement`, an accessor that has never existed — every element assignment would have crashed. It passed a `MECHANICALLY-CLEAN` Gate 2 and a zero-finding cross-vendor Gate 3/4 because **no suite required the module** (the forge was covered only at integration level in IT-2, three blocks later) and **procedure P-1 was never run**. A service module that no suite requires is a module whose symbols are never resolved. UT-12 closes that gap at unit level; IT-2 still runs in Block 6 and is not replaced by it.
 
