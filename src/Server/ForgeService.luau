@@ -678,16 +678,22 @@ function ForgeService.performSetShape(player: Player, dieIndex: number, shapeId:
 	return true, nil
 end
 
-function ForgeService.registerHandlers(): ()
-	RemoteGateway.register("Forge", function(player, dieIndex, distribution)
+-- `wrap` is supplied by the composition root so every successful mutation
+-- announces a fresh StateSync. Optional so the suite can register handlers
+-- without a snapshot pipeline; identity when absent.
+function ForgeService.registerHandlers(wrap: ((any) -> any)?): ()
+	local w = wrap or function(f: any): any
+		return f
+	end
+	RemoteGateway.register("Forge", w(function(player, dieIndex, distribution)
 		return ForgeService.performForge(player, dieIndex, distribution)
-	end)
-	RemoteGateway.register("SetElement", function(player, dieIndex, faceIndex, elementId)
+	end))
+	RemoteGateway.register("SetElement", w(function(player, dieIndex, faceIndex, elementId)
 		return ForgeService.performSetElement(player, dieIndex, faceIndex, elementId)
-	end)
-	RemoteGateway.register("SetShape", function(player, dieIndex, shapeId)
+	end))
+	RemoteGateway.register("SetShape", w(function(player, dieIndex, shapeId)
 		return ForgeService.performSetShape(player, dieIndex, shapeId)
-	end)
+	end))
 end
 
 return ForgeService

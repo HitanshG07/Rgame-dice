@@ -222,15 +222,56 @@ end
 -- Lightest means most likely, so this is the visible cost of concentrating
 -- mass elsewhere. This -- not the hit-frequency of the best face -- is the
 -- consistency metric the design is balanced against.
-function ForgeMath.voidProbability(mass: Distribution): number
-	local p = ForgeMath.landingProbabilities(mass)
+-- "Near" the floor. A face at or below floor * this factor is a Void.
+-- THE SINGLE DEFINITION -- RollService.isVoidFace delegates here rather than
+-- restating it, because it already drifted once.
+ForgeMath.VOID_FLOOR_FACTOR = 1.5
+
+-- Is this face a Void? Lightest AND at or near the mass floor (SRS FR-5.2).
+--
+-- Both halves matter. Without the proximity test an UN-FORGED flat die has its
+-- face 1 treated as a Void, so a new player breaks their streak 1-in-n rolls
+-- with no way to avoid it. Without the lightest test every face on a heavily
+-- stripped die would count.
+function ForgeMath.isVoidFace(mass: Distribution, faceIndex: number, massFloor: number): boolean
 	local lightest = 1
 	for i = 2, #mass do
 		if mass[i] < mass[lightest] then
 			lightest = i
 		end
 	end
-	return p[lightest]
+	if faceIndex ~= lightest then
+		return false
+	end
+	return mass[lightest] <= massFloor * ForgeMath.VOID_FLOOR_FACTOR
+end
+
+-- P(this die lands a Void this throw).
+--
+-- `massFloor` IS REQUIRED, and that is the fix. This function used to return
+-- P(lightest face) unconditionally, with no floor argument and no proximity
+-- gate -- so for a starting D6 (six faces at mass 10, floor 1) it reported
+-- 16.7% while the server's own isVoidFace reported that NO face is a Void and
+-- the true probability is ZERO.
+--
+-- The divergence dates from the F-G3-1 fix, which added the proximity gate to
+-- RollService and left this function untouched. It survived five Block 3 audit
+-- rounds because no SERVER code calls it -- only the client does, and the client
+-- did not exist yet. It is the number FR-3.4 puts in front of the player to
+-- optimise against, and it was wrong by its entire value for every un-forged
+-- die. Found by the Block 4 HUD verifier. Third instance of ledger L-025: a rule
+-- living in two places drifts, and the copy nobody executes drifts silently.
+function ForgeMath.voidProbability(mass: Distribution, massFloor: number): number
+	local lightest = 1
+	for i = 2, #mass do
+		if mass[i] < mass[lightest] then
+			lightest = i
+		end
+	end
+	if not ForgeMath.isVoidFace(mass, lightest, massFloor) then
+		return 0
+	end
+	return ForgeMath.landingProbabilities(mass)[lightest]
 end
 
 -- Everything the forge preview needs, in one pass (SRS FR-3.4).
@@ -241,12 +282,12 @@ export type Preview = {
 	voidProbability: number,
 }
 
-function ForgeMath.preview(mass: Distribution): Preview
+function ForgeMath.preview(mass: Distribution, massFloor: number): Preview
 	return {
 		probabilities = ForgeMath.landingProbabilities(mass),
 		values = ForgeMath.faceValues(mass),
 		expectedValue = ForgeMath.expectedValue(mass),
-		voidProbability = ForgeMath.voidProbability(mass),
+		voidProbability = ForgeMath.voidProbability(mass, massFloor),
 	}
 end
 

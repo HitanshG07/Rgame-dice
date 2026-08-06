@@ -68,6 +68,7 @@ local PlayerProfile = require(Server:WaitForChild("PlayerProfile"))
 local RemoteGateway = require(Server:WaitForChild("RemoteGateway"))
 local RollService = require(Server:WaitForChild("RollService"))
 local ForgeService = require(Server:WaitForChild("ForgeService"))
+local StateSyncService = require(Server:WaitForChild("StateSyncService"))
 
 -- Persistence comes up FIRST and explicitly. A lazy init hidden inside load()
 -- would make the failure surface at a player's join instead of at server start.
@@ -77,11 +78,26 @@ PlayerProfile.init()
 -- joins early resolves its WaitForChild immediately instead of racing first use.
 Remotes.createAll()
 
-RemoteGateway.register("Roll", function(player: Player)
-	return RollService.performRoll(player)
-end)
+-- EVERY state change owes the client a snapshot, or the display silently drifts
+-- from the truth. Wrapping the handlers here rather than pushing from inside
+-- each service keeps that obligation in ONE place: a future handler added
+-- without a push is visible as a missing wrapper, not as a UI that quietly
+-- stops updating.
+local function announcing<T...>(handler: (Player, T...) -> (boolean, string?))
+	return function(player: Player, ...: T...): (boolean, string?)
+		local ok, reason = handler(player, ...)
+		if ok then
+			StateSyncService.push(player)
+		end
+		return ok, reason
+	end
+end
 
-ForgeService.registerHandlers()
+RemoteGateway.register("Roll", announcing(function(player: Player)
+	return RollService.performRoll(player)
+end))
+
+ForgeService.registerHandlers(announcing)
 
 RemoteGateway.bind()
 
@@ -122,6 +138,12 @@ admitPlayer = function(player: Player)
 	local repaired = ForgeService.validateStoredDice(player)
 
 	RollService.beginSession(player)
+
+	-- The client displays NOTHING until this lands: no balances, no die shapes,
+	-- no entitlements, no settings. Pushed after beginSession so the snapshot
+	-- carries a real streak rather than a zero that is about to change.
+	StateSyncService.push(player)
+
 	print(string.format("[Bootstrap] admitted UserId=%d%s", player.UserId,
 		if repaired > 0 then string.format(" (%d die/dice repaired)", repaired) else ""))
 end

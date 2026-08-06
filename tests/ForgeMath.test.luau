@@ -84,16 +84,32 @@ local function run(): (boolean, string?, number)
 	e = e or check(ForgeMath.isFinite(evFlat) and evFlat > 0,
 		"expectedValue(flat D6) not finite-positive")
 
+	-- voidProbability is GATED on proximity to the mass floor, exactly as the
+	-- server's isVoidFace is -- they are now the same function. It used to
+	-- return P(lightest) unconditionally while the server applied a 1.5x
+	-- proximity gate, so a starting D6 previewed 16.7% against a true 0%.
+	-- Four Block 4 verifiers found the divergence independently.
+	e = e or check(ForgeMath.voidProbability(flat(6, 60), 1) == 0,
+		"an UN-FORGED flat die has no face near the floor and must report 0% Void")
+	e = e or check(ForgeMath.voidProbability({ 55, 1, 1, 1, 1, 1 }, 1) > 0,
+		"a die stripped to the floor must report a non-zero Void")
+	e = e or check(ForgeMath.isVoidFace({ 55, 1, 1, 1, 1, 1 }, 2, 1),
+		"the lightest face at the floor IS a Void")
+	e = e or check(not ForgeMath.isVoidFace({ 55, 1, 1, 1, 1, 1 }, 1, 1),
+		"the heaviest face is never a Void")
+	e = e or check(not ForgeMath.isVoidFace(flat(6, 60), 1, 1),
+		"no face of a flat die is a Void")
+
 	-- voidProbability tracks the LIGHTEST face, which is the streak breaker
 	local d = { 30, 6, 6, 6, 6, 6 }
 	local pv = ForgeMath.landingProbabilities(d)
-	e = e or check(approx(ForgeMath.voidProbability(d), pv[2], 1e-12),
+	e = e or check(approx(ForgeMath.voidProbability(d, 1e9), pv[2], 1e-12),
 		"voidProbability did not return the lightest face's probability")
 	-- and a flat die's void probability is exactly 1/n
-	e = e or check(approx(ForgeMath.voidProbability(flat(20, 200)), 1 / 20, 1e-9),
+	e = e or check(approx(ForgeMath.voidProbability(flat(20, 200), 1e9), 1 / 20, 1e-9),
 		"flat D20 void probability should be 1/20")
 	-- D4 must be meaningfully more volatile than D20 (SRS FR-6.2)
-	e = e or check(ForgeMath.voidProbability(flat(4, 40)) > ForgeMath.voidProbability(flat(20, 200)),
+	e = e or check(ForgeMath.voidProbability(flat(4, 40), 1e9) > ForgeMath.voidProbability(flat(20, 200), 1e9),
 		"D4 should break streaks more often than D20")
 
 	-- snapping is deterministic and kills residual accumulation (threat T-27)

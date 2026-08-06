@@ -53,6 +53,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Format = require(Shared:WaitForChild("Format"))
 local ForgeMath = require(Shared:WaitForChild("ForgeMath"))
+local DiceCatalog = require(Shared:WaitForChild("DiceCatalog"))
 
 local ClientRoot = script.Parent
 local UITheme = require(ClientRoot:WaitForChild("UITheme"))
@@ -409,7 +410,11 @@ local function dieVoidText(die: any): string
 	if #mass < 2 then
 		return EMPTY
 	end
-	local ok, p = pcall(ForgeMath.voidProbability, mass)
+	local shapeId = readString(die, "Shape")
+	if shapeId == nil then
+		return EMPTY
+	end
+	local ok, p = pcall(ForgeMath.voidProbability, mass, DiceCatalog.getMassFloor(shapeId))
 	if not ok or type(p) ~= "number" or not ForgeMath.isFinite(p) then
 		return EMPTY
 	end

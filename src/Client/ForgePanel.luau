@@ -1076,7 +1076,7 @@ render = function(): ()
 	-- on the exact array that would be sent. No local arithmetic on masses.
 	local probabilities = ForgeMath.landingProbabilities(draft)
 	local expected = ForgeMath.expectedValue(draft)
-	local voidChance = ForgeMath.voidProbability(draft)
+	local voidChance = ForgeMath.voidProbability(draft, floor)
 
 	for i = 1, MAX_FACES do
 		local row = faceRows[i]

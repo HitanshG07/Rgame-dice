@@ -39,11 +39,16 @@ All remotes live under `ReplicatedStorage.Remotes`, are created by the server, a
 | Event | Payload | Notes |
 |---|---|---|
 | `RollResult` | `{ faces: {number}, payout: number, streak: number, multiplier: number, elementsFired: {string}, voidHit: boolean }` | `faces` drives the animation target. Arrives **after** Cash is already credited. |
-| `StateSync` | `{ cash, gems, diamonds, dice, upgrades, streak, boosts, serverTime }` | Authoritative snapshot. Sent on join and after any state change. |
+| `StateSync` | `{ cash, gems, diamonds, dice, upgrades, diamondTree, settings, streak, boosts, serverTime }` | Authoritative snapshot. Sent on join and after any state change. **`dice` carries the full per-die record including `PurchasedBudget`** (schema v2). **`diamondTree` carries `Elements` and `Shapes`** — the unlocked sets, without which the forge cannot honestly show what is available and defaults to showing everything locked. **`settings`** carries the FR-13.6 particle/motion-blur/audio toggles. |
 | `ForgeResult` | `{ dieIndex, distribution, cost, ok, reason? }` | Confirms or rejects; client re-renders from this, never from its own optimism. |
 | `VaultSummary` | `{ accrued, wouldHaveAccruedAtPeak, capacity, efficiency }` | The peak comparison is deliberate — it teaches that leaving well-tuned pays more (SRS FR-8.5). |
 | `EventState` | `{ likeGoalProgress, likeGoalTarget, eventActive, eventEndsAt }` | **Per server instance in V1** — MessagingService is out of scope (risk R-8). |
 | `Notice` | `{ severity: string, code: string }` | Enumerated codes only. **No stack traces, paths, or internal values** (threat T-7, Matrix E-8). |
+
+
+**Amended 2026-08-07 — `StateSync` gains `diamondTree` and `settings`.** Triggering fact: **three swarm workers in isolated contexts independently reported that `StateSync` was specified here and emitted by nothing.** Each hit a different consequence — `DiceRenderer` could not learn shape or mass so every die rendered as a uniform dim D6 (FR-1.3 unverifiable); `HUD` showed Cash and Gems as `--` for want of any balance source; `ForgePanel` showed every element locked. Two further audits then found `FeedbackFX` reading toggles from a field the payload never declared, leaving FR-13.6 unmet end to end.
+
+The convergence is the point: a contract row that no code implements reads exactly like one that does, and it stayed invisible through five audit rounds on the server because every one of those rounds audited what the server DID rather than what the contract PROMISED. **A specified-but-unimplemented event is a defect in the contract, not merely an absence in the code.**
 
 ---
 

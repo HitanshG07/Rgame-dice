@@ -54,7 +54,9 @@ RollService.SHIELD_COOLDOWN = 30         -- seconds, server-clocked (SRS FR-5.6)
 -- here: two sources of truth for a validation threshold is how a forge accepts
 -- a distribution the roller then treats as a Void. Read it via
 -- DiceCatalog.getMassFloor(die.Shape).
-RollService.VOID_FLOOR_FACTOR = 1.5      -- "near" = within 1.5x the floor
+-- Kept as a re-export so existing callers and tests keep resolving; the
+-- authoritative value lives in ForgeMath, which both sides can reach.
+RollService.VOID_FLOOR_FACTOR = ForgeMath.VOID_FLOOR_FACTOR
 
 -- Offline vault rate is earned/elapsed. Without a minimum window a player who
 -- rolls once immediately after joining divides a real payout by ~0.05s and
@@ -122,21 +124,19 @@ end
 function RollService.isVoidFace(die: Die, faceIndex: number, massFloor: number?): boolean
 	local faces = die.Faces
 	local floor = massFloor or DiceCatalog.getMassFloor(die.Shape)
-	local lightest = 1
-	for i = 2, #faces do
-		if faces[i].Mass < faces[lightest].Mass then
-			lightest = i
-		end
+	-- DELEGATES to ForgeMath. The rule used to live here AND, differently, in
+	-- ForgeMath.voidProbability: this side got the proximity gate from the
+	-- F-G3-1 fix and the shared side never did, so the client showed 16.7% Void
+	-- on a starting D6 whose true probability is ZERO. Four Block 4 verifiers
+	-- found it independently. One definition now, in the shared module, because
+	-- that is the copy both sides can reach (ledger L-025, third instance).
+	local masses = table.create(#faces, 0)
+	for i = 1, #faces do
+		masses[i] = faces[i].Mass
 	end
-	if faceIndex ~= lightest then
-		return false
-	end
-	-- Proximity test: a flat, un-forged die has no face near the floor and so
-	-- has NO Void. Only mass deliberately stripped off a face creates one --
-	-- which is the design intent: the Void is the visible cost of concentrating
-	-- mass elsewhere, not a tax on players who have not forged yet.
-	return faces[lightest].Mass <= floor * RollService.VOID_FLOOR_FACTOR
+	return ForgeMath.isVoidFace(masses, faceIndex, floor)
 end
+
 
 --------------------------------------------------------------------------------
 -- PURE: sampling

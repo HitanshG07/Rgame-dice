@@ -39,6 +39,7 @@ local RunService = game:GetService("RunService")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Format = require(Shared:WaitForChild("Format"))
 local ForgeMath = require(Shared:WaitForChild("ForgeMath"))
+local DiceCatalog = require(Shared:WaitForChild("DiceCatalog"))
 
 local ClientRoot = script.Parent
 
@@ -170,7 +171,14 @@ local function loadoutVoidProbability(dice: any): number?
 
 		-- ForgeMath raises on degenerate input (zero total mass, for instance).
 		-- A snapshot that trips it is a display problem, never a crash.
-		local ok, p = pcall(ForgeMath.voidProbability, mass)
+		-- The floor is per-shape and REQUIRED: without it voidProbability cannot
+		-- apply the proximity gate and reports the lightest face's landing
+		-- probability as if it were the streak-break chance.
+		local shapeId = if type(die) == "table" and type(die.Shape) == "string" then die.Shape else nil
+		if shapeId == nil then
+			return nil
+		end
+		local ok, p = pcall(ForgeMath.voidProbability, mass, DiceCatalog.getMassFloor(shapeId))
 		if not ok or type(p) ~= "number" or not ForgeMath.isFinite(p) then
 			return nil
 		end
