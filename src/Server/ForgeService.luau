@@ -183,6 +183,119 @@ function ForgeService.assertDieInvariant(die: CandidateDie, shape: DiceCatalog.S
 end
 
 -- Convenience for callers holding a stored die whose shape must be looked up.
+-- Bring an illegal die back inside the contract, in place.
+--
+-- WHY REPAIR RATHER THAN QUARANTINE. A die can be illegal through no fault of
+-- the player -- four defects in this block WROTE invalid dice before they were
+-- caught, and any profile touched by that code still carries the result.
+-- Refusing the load would kick a player over data our own bugs produced.
+-- Repairing clamps them back to what the contract allows, which can only ever
+-- reduce an illegal advantage, never grant one.
+--
+-- Deliberately NOT clever: it does not try to preserve a layout that was
+-- illegal. It keeps what is defensible -- the shape, the elements, and the
+-- purchased entitlement clamped into range -- and redistributes mass evenly,
+-- which is the same neutral result a shape change produces.
+local function repairDie(die: any, shape: DiceCatalog.ShapeDef): CandidateDie
+	local maxCeiling = DiceCatalog.maxDiamondCeiling()
+
+	local purchased = if type(die) == "table" then die.PurchasedBudget else nil
+	if not ForgeMath.isFinite(purchased) or (purchased :: number) <= 0 then
+		purchased = if type(die) == "table" and ForgeMath.isFinite(die.MassBudget)
+			then die.MassBudget
+			else shape.defaultBudget
+	end
+	local minViable = shape.massFloor * shape.faceCount
+	purchased = math.clamp(purchased :: number, minViable, maxCeiling)
+
+	local budget = math.clamp(purchased :: number, minViable, shape.diamondCeiling)
+	local faceMass = ForgeMath.snapDown(budget / shape.faceCount)
+	if faceMass < shape.massFloor then
+		faceMass = shape.massFloor
+	end
+	local exact = ForgeMath.snap(faceMass * shape.faceCount)
+
+	local faces: { PlayerProfile.Face } = {}
+	local priorFaces = if type(die) == "table" and type(die.Faces) == "table" then die.Faces else {}
+	for i = 1, shape.faceCount do
+		local prior = priorFaces[i]
+		local element = "None"
+		if type(prior) == "table" and type(prior.Element) == "string"
+			and ElementCatalog.exists(prior.Element) then
+			element = prior.Element
+		end
+		faces[i] = { Mass = faceMass, Element = element }
+	end
+
+	return {
+		Shape = shape.id,
+		MassBudget = exact,
+		PurchasedBudget = purchased :: number,
+		Faces = faces,
+	}
+end
+
+-- Validate every stored die at LOAD and repair any that breaks the contract.
+--
+-- THE GAP THIS CLOSES. The invariant gated every WRITE and nothing on READ.
+-- `PlayerProfile._reconcile` and `_migrate` both write `data.Dice` directly, and
+-- neither passes the gate, so a die that was already illegal in storage loaded
+-- cleanly and was then honoured -- `performForge` validates a proposal against
+-- `die.MassBudget`, so a stored 99999 is simply believed.
+--
+-- Found by carrying the round-4 brief's own question one step further: the
+-- invariant was complete as a STATEMENT and incomplete as an ENFORCEMENT
+-- SURFACE. Guarding writes is worth nothing if reads are trusted.
+--
+-- Returns the number of dice repaired, so the caller can log a real number
+-- rather than a boolean.
+function ForgeService.validateStoredDice(player: Player): number
+	local data = PlayerProfile.get(player)
+	if not data or type(data.Dice) ~= "table" then
+		return 0
+	end
+
+	local repairs: { { index: number, die: CandidateDie, reason: string } } = {}
+	for i = 1, #data.Dice do
+		local ok, reason = ForgeService.checkStoredDie(data.Dice[i])
+		if not ok then
+			local stored = data.Dice[i]
+			local shape = if type(stored) == "table" then DiceCatalog.getShape(stored.Shape) else nil
+			-- An unrecognisable shape falls back to the starting shape rather
+			-- than deleting the die: losing a die is worse than resetting one.
+			local target = shape or DiceCatalog.getShape("D6")
+			if target then
+				table.insert(repairs, {
+					index = i,
+					die = repairDie(stored, target),
+					reason = tostring(reason),
+				})
+			end
+		end
+	end
+
+	if #repairs == 0 then
+		return 0
+	end
+
+	local applied = PlayerProfile.mutate(player, function(d)
+		for _, r in ipairs(repairs) do
+			d.Dice[r.index] = r.die
+		end
+	end)
+	if not applied then
+		return 0
+	end
+
+	for _, r in ipairs(repairs) do
+		warn(string.format(
+			"[ForgeService] repaired an illegal stored die for UserId=%d: die %d violated '%s'"
+			.. " -- reset to %s budget %s",
+			player.UserId, r.index, r.reason, r.die.Shape, tostring(r.die.MassBudget)))
+	end
+	return #repairs
+end
+
 function ForgeService.checkStoredDie(die: any): (boolean, string?)
 	if type(die) ~= "table" then
 		return false, "die_not_a_table"

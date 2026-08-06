@@ -114,8 +114,16 @@ admitPlayer = function(player: Player)
 		return
 	end
 
+	-- Validate the loaded profile against the die contract BEFORE the session
+	-- starts, so the first roll cannot be resolved against an illegal die. The
+	-- invariant guards every write in ForgeService; without this it guarded
+	-- nothing on the way IN, and four defects in this block wrote invalid dice
+	-- before they were caught. Repairs are logged with a count, never silent.
+	local repaired = ForgeService.validateStoredDice(player)
+
 	RollService.beginSession(player)
-	print(string.format("[Bootstrap] admitted UserId=%d", player.UserId))
+	print(string.format("[Bootstrap] admitted UserId=%d%s", player.UserId,
+		if repaired > 0 then string.format(" (%d die/dice repaired)", repaired) else ""))
 end
 
 local function onPlayerRemoving(player: Player)

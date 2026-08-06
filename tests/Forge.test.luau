@@ -747,6 +747,103 @@ local function run(): (boolean, string?, number)
 		d.Dice[1].MassBudget = 60
 	end)
 
+	----------------------------------------------------------------------------
+	-- F-SELF-1: the invariant must guard the LOAD path, not only writes
+	----------------------------------------------------------------------------
+
+	-- Guarding every write is worth nothing if reads are trusted. `_reconcile`
+	-- and `_migrate` both write `data.Dice` without the gate, so a die that was
+	-- already illegal in storage used to load cleanly and then be honoured --
+	-- performForge validates a proposal against die.MassBudget, so a stored
+	-- 99999 was simply believed. Four defects in this block WROTE invalid dice.
+
+	local function storeIllegal(mutateDie: (any) -> ())
+		PlayerProfile.mutate(player, function(d)
+			local f: { any } = {}
+			for i = 1, 6 do
+				f[i] = { Mass = 10, Element = "None" }
+			end
+			d.Dice[1] = { Shape = "D6", MassBudget = 60, PurchasedBudget = 60, Faces = f }
+			mutateDie(d.Dice[1])
+		end)
+	end
+
+	-- An inflated budget -- exactly what F-AD-1 and F-AD-4 used to write.
+	storeIllegal(function(die) die.MassBudget = 99999 end)
+	e = e or check(not (ForgeService.checkStoredDie(data.Dice[1])),
+		"a die with an inflated budget must be recognised as illegal")
+	local n1 = ForgeService.validateStoredDice(player)
+	e = e or check(n1 == 1, string.format("expected 1 repair, got %d", n1))
+	local ok1, reason1 = ForgeService.checkStoredDie(data.Dice[1])
+	e = e or check(ok1, string.format("the repaired die is still illegal: %s", tostring(reason1)))
+	e = e or check(data.Dice[1].MassBudget <= data.Dice[1].PurchasedBudget,
+		"repair must not leave the budget above what was purchased")
+
+	-- A purchased budget above every shape's ceiling.
+	storeIllegal(function(die) die.PurchasedBudget = 500000 end)
+	e = e or check(ForgeService.validateStoredDice(player) == 1, "an over-ceiling entitlement must be repaired")
+	e = e or check(data.Dice[1].PurchasedBudget <= DiceCatalog.maxDiamondCeiling(),
+		"repair must clamp PurchasedBudget to the global ceiling")
+	e = e or check(ForgeService.checkStoredDie(data.Dice[1]), "the repaired die must satisfy the invariant")
+
+	-- Faces that do not sum to the budget.
+	storeIllegal(function(die) die.Faces[1].Mass = 40 end)
+	e = e or check(ForgeService.validateStoredDice(player) == 1, "a non-summing die must be repaired")
+	local sumRepaired = 0
+	for _, f in ipairs(data.Dice[1].Faces) do
+		sumRepaired += f.Mass
+	end
+	e = e or check(math.abs(sumRepaired - data.Dice[1].MassBudget) < ForgeMath.EPSILON,
+		"the repaired faces must sum to the repaired budget")
+
+	-- A face below the floor, and an unknown element, repaired together.
+	storeIllegal(function(die)
+		die.Faces[1].Mass = 0
+		die.Faces[2].Element = "Plutonium"
+	end)
+	e = e or check(ForgeService.validateStoredDice(player) == 1, "a floor/element violation must be repaired")
+	e = e or check(ForgeService.checkStoredDie(data.Dice[1]), "the repaired die must satisfy the invariant")
+	local keptKnown = true
+	for _, f in ipairs(data.Dice[1].Faces) do
+		if not ElementCatalog.exists(f.Element) then
+			keptKnown = false
+		end
+	end
+	e = e or check(keptKnown, "repair must replace an unknown element, not preserve it")
+
+	-- REPAIR MUST NEVER BE A REWARD. Starting from an inflated die, the repaired
+	-- budget must not exceed what a legitimate die of that shape could hold.
+	storeIllegal(function(die)
+		die.MassBudget = 99999
+		die.PurchasedBudget = 99999
+	end)
+	ForgeService.validateStoredDice(player)
+	local d6cap = DiceCatalog.getShape("D6")
+	if d6cap then
+		e = e or check(data.Dice[1].MassBudget <= d6cap.diamondCeiling,
+			"repairing an inflated die must not leave it above the shape ceiling")
+	end
+
+	-- A LEGAL die must be left completely alone: repair is not a reset.
+	PlayerProfile.mutate(player, function(d)
+		local f: { any } = {}
+		for i = 1, 6 do
+			f[i] = { Mass = 10, Element = "None" }
+		end
+		f[1].Mass = 30
+		f[2].Mass = 6
+		f[3].Mass = 6
+		f[4].Mass = 6
+		f[5].Mass = 6
+		f[6].Mass = 6
+		d.Dice[1] = { Shape = "D6", MassBudget = 60, PurchasedBudget = 60, Faces = f }
+	end)
+	e = e or check(ForgeService.checkStoredDie(data.Dice[1]), "the hand-built die should be legal")
+	e = e or check(ForgeService.validateStoredDice(player) == 0,
+		"a LEGAL die must not be repaired -- repair is not a reset")
+	e = e or check(data.Dice[1].Faces[1].Mass == 30,
+		"a legal forged layout must survive the load-time check untouched")
+
 	ForgeService._setResultEmitterForTesting(nil)
 	PlayerProfile.release(player)
 
