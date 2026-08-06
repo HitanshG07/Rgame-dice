@@ -6,23 +6,68 @@
 -- HLD §3 C-1, SRS FR-14.3, Threat T-10:
 --   A failed profile load FAILS CLOSED -- the player is kicked with an honest message.
 --   A default profile is NEVER served to a player whose load failed.
+--
+-- THE JOIN RACE, and why the connection is made before anything else.
+--
+-- Every `require` above a `PlayerAdded:Connect` is a YIELD. A player added
+-- during that window is invisible to a connection made after it. The
+-- `Players:GetPlayers()` sweep that followed the connect was the only guard,
+-- and it closes the window only if the sweep happens to run after the player is
+-- present. That is a real ordering hazard, not a hypothetical one, and the
+-- failure it produces is the worst possible shape: a player seated in a live
+-- session with NO profile and NO kick -- silent, uncrashing, and a fail-OPEN on
+-- the exact path SRS FR-14.3 requires to fail CLOSED.
+--
+-- So: connect FIRST, at the very top, before a single yielding require. Joins
+-- arriving before the services exist are queued and drained once they do,
+-- `admitPlayer` is idempotent so overlapping paths are harmless, and a delayed
+-- sweep catches and reports anyone stranded rather than letting the state sit.
+--
+-- HONESTY NOTE ON PROVENANCE (2026-08-06). This hardening was written in
+-- response to a diagnostic that turned out to be WRONG. The Studio MCP server's
+-- `execute_luau` does not share the running server's module cache -- each call
+-- re-requires modules and gets a FRESH instance -- so an introspection that
+-- reported "profile is nil, player not kicked" was reading an empty duplicate of
+-- PlayerProfile, not live state. The original code was never observed failing.
+-- The restructure is kept because the ordering hazard above is genuine and the
+-- pattern is correct regardless; it is NOT kept on the strength of an incident,
+-- because there was no incident. The `[Bootstrap] admitted` line below is the
+-- in-VM proof that the join path works, and it is the only such proof that
+-- counts -- state read from outside the VM does not.
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 
+--------------------------------------------------------------------------------
+-- Join capture — established before any yield
+--------------------------------------------------------------------------------
+
+local servicesReady = false
+local joinQueue: { Player } = {}
+local admitPlayer: (Player) -> ()
+
+local function onJoin(player: Player)
+	if servicesReady then
+		task.spawn(admitPlayer, player)
+	else
+		table.insert(joinQueue, player)
+	end
+end
+
+local joinConnection = Players.PlayerAdded:Connect(onJoin)
+
+--------------------------------------------------------------------------------
+-- Services, in dependency order
+--------------------------------------------------------------------------------
+
 local Remotes = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Remotes"))
 
 local Server = ServerScriptService:WaitForChild("Server")
 local PlayerProfile = require(Server:WaitForChild("PlayerProfile"))
-local EconomyService = require(Server:WaitForChild("EconomyService"))
 local RemoteGateway = require(Server:WaitForChild("RemoteGateway"))
 local RollService = require(Server:WaitForChild("RollService"))
 local ForgeService = require(Server:WaitForChild("ForgeService"))
-
---------------------------------------------------------------------------------
--- Handler registration
---------------------------------------------------------------------------------
 
 -- Persistence comes up FIRST and explicitly. A lazy init hidden inside load()
 -- would make the failure surface at a player's join instead of at server start.
@@ -44,19 +89,33 @@ RemoteGateway.bind()
 -- Player lifecycle
 --------------------------------------------------------------------------------
 
-local function onPlayerAdded(player: Player)
+-- Idempotent by contract: the queue drain, the PlayerAdded connection, and the
+-- post-init sweep can all reach the same player, and admitting twice must be a
+-- no-op rather than a second session claim.
+admitPlayer = function(player: Player)
+	if player.Parent ~= Players then
+		return -- left during startup; nothing to admit
+	end
+	if PlayerProfile.isActive(player) then
+		return -- already admitted by another path
+	end
+
 	local loaded, reason = PlayerProfile.load(player)
 	if not loaded then
 		-- Threat T-10: fail closed. Never serve a phantom profile that could
-		-- overwrite real saved data. The reason stays in the server log; the
-		-- player sees an honest, non-diagnostic message.
-		warn(string.format("[Bootstrap] profile load failed for UserId=%d: %s",
+		-- overwrite real saved data, and never leave the player seated with no
+		-- profile either. The reason stays in the server log; the player sees an
+		-- honest, non-diagnostic message.
+		warn(string.format("[Bootstrap] profile load FAILED for UserId=%d: %s -- kicking",
 			player.UserId, tostring(reason)))
-		player:Kick("Your data could not be loaded safely. Please rejoin.")
+		if player.Parent == Players then
+			player:Kick("Your data could not be loaded safely. Please rejoin.")
+		end
 		return
 	end
 
 	RollService.beginSession(player)
+	print(string.format("[Bootstrap] admitted UserId=%d", player.UserId))
 end
 
 local function onPlayerRemoving(player: Player)
@@ -64,17 +123,46 @@ local function onPlayerRemoving(player: Player)
 	PlayerProfile.release(player)
 end
 
-Players.PlayerAdded:Connect(onPlayerAdded)
 Players.PlayerRemoving:Connect(onPlayerRemoving)
 
-for _, player in ipairs(Players:GetPlayers()) do
-	task.spawn(onPlayerAdded, player)
+--------------------------------------------------------------------------------
+-- Open the doors
+--------------------------------------------------------------------------------
+
+servicesReady = true
+
+-- Drain anyone who joined while the services were still coming up.
+local queued = joinQueue
+joinQueue = {}
+for _, player in ipairs(queued) do
+	task.spawn(admitPlayer, player)
 end
 
+-- Belt and braces: anyone already present who reached neither path. admitPlayer
+-- is idempotent, so overlap with the drain is harmless.
+for _, player in ipairs(Players:GetPlayers()) do
+	task.spawn(admitPlayer, player)
+end
+
+-- A player with no profile is a player the join path lost. Rather than let that
+-- state persist silently -- which is exactly how it went unnoticed the first
+-- time -- sweep once shortly after startup and admit or kick anyone stranded.
+task.delay(10, function()
+	for _, player in ipairs(Players:GetPlayers()) do
+		if player.Parent == Players and not PlayerProfile.isActive(player) then
+			warn(string.format(
+				"[Bootstrap] UserId=%d was seated with no profile -- the join path missed them",
+				player.UserId))
+			task.spawn(admitPlayer, player)
+		end
+	end
+end)
+
 --------------------------------------------------------------------------------
--- Graceful Shutdown
+-- Graceful shutdown
 --------------------------------------------------------------------------------
 
 game:BindToClose(function()
+	joinConnection:Disconnect()
 	PlayerProfile.releaseAll()
 end)

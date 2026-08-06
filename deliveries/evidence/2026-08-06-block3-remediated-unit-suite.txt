@@ -113,3 +113,58 @@ P-1: NOT RUN — Roblox Script Analysis is not exposed through the MCP server an
      GATE 2 IS THEREFORE NOT COMPLETE. Per the TEST_PLAN amendment of this date,
      a missing P-1 artifact is a REJECTED gate, never a pass with a caveat —
      which is precisely how the previous Block 3 shipped a crash.
+
+================================================================================
+ADDENDUM — 2026-08-06, after Studio API access was enabled
+================================================================================
+
+Re-ran with "Enable Studio Access to API Services" ON.
+
+  === SUITE COMPLETE: 9 passed, 0 failed ===
+  total assertions: 3046
+  [ProfileStore]: Roblox API services available - data will be saved
+  [Bootstrap] admitted UserId=1272229789
+
+The DataStore warning is gone and ProfileStore now persists. `[Bootstrap]
+admitted` is printed from INSIDE admitPlayer, after PlayerProfile.load returned
+true and RollService.beginSession ran, so it is in-VM proof that the real join
+path loads a real, session-locked profile end to end. That path had never
+executed successfully before this run.
+
+--------------------------------------------------------------------------------
+TOOLING LIMITATION FOUND, AND A FALSE ALARM IT CAUSED
+--------------------------------------------------------------------------------
+
+The Studio MCP server's `execute_luau` DOES NOT SHARE THE RUNNING SERVER'S
+MODULE CACHE. Each invocation re-requires modules and receives a FRESH instance
+with empty state.
+
+Proved directly: a counter was set on the PlayerProfile module table in one call
+and read back in a second call. Expected 2 if the cache were shared. Got 1.
+
+  call 1 -> "probe value now: 1"
+  call 2 -> "probe value on second call: 1"
+
+CONSEQUENCE, and the mistake it produced: an introspection run through
+`execute_luau` reported that the live player had a nil profile and had not been
+kicked -- apparently a fail-open on threat T-10. That reading was FALSE. It was
+looking at an empty duplicate of PlayerProfile, never at the running server's
+instance. ServerBootstrap was never observed failing.
+
+BINDING RULE GOING FORWARD:
+  * `execute_luau` is valid for PURE evaluation -- calling pure functions,
+    reading the DataModel tree, reading Instance properties such as
+    ScriptInstance.Source. All such use in this evidence file stands.
+  * `execute_luau` is INVALID for reading live service state held in module
+    upvalues: active sessions, rate-limiter buckets, roll sessions, caches.
+    It will confidently report empty state that is not empty.
+  * Live service state is verified only from INSIDE the VM -- by a print from
+    the running code, or by the test suite, which runs as a Script in the same
+    VM. This is the same failure family as ledger L-019 and L-020: a tool that
+    returns a confident answer about the wrong thing.
+
+ServerBootstrap was restructured anyway (connect-before-yield, queued joins,
+idempotent admit, delayed stranded-player sweep). The ordering hazard it closes
+is real and the pattern is correct. The file carries an explicit provenance note
+recording that it was NOT written in response to an observed failure, so nobody
+later reads it as a bug report for an incident that never happened.
