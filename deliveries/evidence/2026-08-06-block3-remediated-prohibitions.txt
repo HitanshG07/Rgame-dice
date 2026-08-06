@@ -1,0 +1,42 @@
+=== BLOCK 3 (REMEDIATED) — PROCEDURE P-3, STATIC PROHIBITION GREP ===
+Date: 2026-08-06   Commit: c9fc91d
+Run verbatim from the repo root. Each block shows the command, the
+expectation, and the literal output (empty output shown as <none>).
+
+$ grep -rn "InvokeClient" src/ --include=*.luau | grep -v Vendor
+   EXPECT: empty (threat T-8)
+   src/Shared/Remotes.luau:7:--   * RemoteFunction:InvokeClient() is PROHIBITED project-wide (threat T-8):
+
+$ grep -rn "ProcessReceipt" src/ --include=*.luau | grep -v Vendor
+   EXPECT: exactly 1 at launch; 0 now, MonetizationService is Block 5 (threat T-17)
+   <none>
+
+$ grep -rn "SetAsync" src/ --include=*.luau | grep -v Vendor
+   EXPECT: empty for profile data (threat T-11)
+   <none>
+
+$ grep -rn "MessagingService" src/ --include=*.luau | grep -v Vendor
+   EXPECT: empty — V1 scope, risk R-8
+   <none>
+
+$ grep -rnE "TODO|FIXME|TBD" src/ --include=*.luau | grep -v Vendor
+   EXPECT: empty — Matrix B
+   <none>
+
+$ grep -rn "DUMMY_ID_" src/ --include=*.luau | grep -v Vendor
+   EXPECT: placeholders only; no real asset ids yet (FR-12.6)
+   <none>
+
+=== SUPPLEMENTARY: seams that must be Studio-only ===
+$ grep -rn "ForTesting" src/ --include=*.luau | grep -v Vendor
+   EXPECT: each definition guarded by RunService:IsStudio()
+   src/Server/ForgeService.luau:45:function ForgeService._setResultEmitterForTesting(fn: ((Player, any) -> ())?): ()
+   src/Server/PlayerProfile.luau:410:function PlayerProfile._injectProfileForTesting(player: Player, profile: any): ()
+   src/Server/RollService.luau:363:function RollService._setResultEmitterForTesting(fn: ((Player, any) -> ())?): ()
+
+$ grep -rn -B0 -A2 "ForTesting.*: ()" src/ --include=*.luau | grep -c "IsStudio"
+   EXPECT: 3 — one guard per seam
+   3
+
+=== --!strict coverage ===
+   24 files scanned, 0 missing --!strict

@@ -1,0 +1,115 @@
+=== BLOCK 3 (REMEDIATED) — PROCEDURE P-2, AUTOMATED SUITE ===
+Date:    2026-08-06
+Commit:  c9fc91d
+Method:  Roblox Studio Play Solo, driven and read via the Studio MCP server.
+Sync:    VERIFIED BEFORE THE RUN. Nine source markers were read out of the live
+         Studio DataModel and confirmed present (see the sync-verification block
+         below) before Play was pressed. This step exists because a dropped Rojo
+         plugin has twice produced a clean run over stale code on this project
+         (ledger L-019, L-020).
+
+--- SYNC VERIFICATION (Edit mode, prior to Play) ---
+Tests:  Elements.test, Fakes, Forge.test, ForgeMath.test, ForgeValidation.test,
+        Payout.test, ProfileLifecycle.test, ProfileSchema.test, RateLimit.test,
+        RunAll, Sampling.test
+Server: EconomyService, ForgeService, PlayerProfile, RateLimiter, RemoteGateway,
+        RollService, ServerBootstrap, Vendor
+Shared: DiceCatalog, ElementCatalog, ForgeMath, Format, Remotes, UpgradeCatalog
+  [OK ] getElement fix          (ForgeService contains ElementCatalog.exists)
+  [OK ] forge emitter seam
+  [OK ] roll emitter seam
+  [OK ] freeze re-roll split    (RollService.sampleDie present)
+  [OK ] deep copy fix           (PlayerProfile deepCopy present)
+  [OK ] backdoor guard          (injection seam is Studio-only)
+  [OK ] bootstrap wiring        (Remotes.createAll present)
+  [OK ] clock seam              (RateLimiter atTime present)
+  [OK ] no live getElement call (zero occurrences outside comments)
+
+--- OUTPUT (verbatim) ---
+=== DICE FORGE TEST SUITE ===
+[PASS] UT-5 Elements (32 assertions)
+[PASS] UT-12 ForgeService (99 assertions)
+[PASS] UT-1 ForgeMath (38 assertions)
+[PASS] UT-2 ForgeValidation (52 assertions)
+[PASS] UT-4 Payout (77 assertions)
+[PlayerProfile] write refused on released profile for 8888
+[PlayerProfile] write refused on released profile for 8888
+[PASS] UT-8 ProfileLifecycle (38 assertions)
+[PASS] UT-7 ProfileSchema (41 assertions)
+[PASS] UT-6 RateLimit (42 assertions)
+[PASS] UT-3 Sampling (2627 assertions)
+total assertions: 3046
+=== SUITE COMPLETE: 9 passed, 0 failed ===
+DataStoreService: StudioAccessToApisNotAllowed: Cannot write to DataStore from studio if API access is not enabled. API: SetAsync, Data Store: ____PS
+[ProfileStore]: Roblox API services unavailable - data will not be saved
+
+--- NOTES ON THE OUTPUT ---
+1. The two `[PlayerProfile] write refused on released profile for 8888` lines
+   are NOT errors. They are UT-8 exercising the released-profile guard
+   (SRS FR-14.7, threat T-26) and the module logging the refusal as designed.
+   Their ABSENCE would indicate the guard was not reached.
+
+2. The trailing DataStoreService warning is an ENVIRONMENT setting, not a code
+   defect: "Enable Studio Access to API Services" is off in Game Settings →
+   Security. No unit test touches a live service (all persistence runs through
+   tests/Fakes.luau), so the suite is unaffected. It DOES block the P-4 runtime
+   smoke row 11 (leave and rejoin restores state), which cannot be exercised
+   until the operator enables it. Recorded as not-yet-tested, not as passing.
+
+--- ASSERTION DELTA (the sync canary, ledger L-020) ---
+Previous run (stale, pre-remediation): 2,827 across 8 suites
+This run:                              3,046 across 9 suites
+Delta:                                   +219, and one NEW suite appeared.
+
+Per suite:
+  UT-1  ForgeMath          38    unchanged
+  UT-2  ForgeValidation    52    unchanged
+  UT-3  Sampling         2627    unchanged
+  UT-4  Payout             77    was 65   (+12: performRoll driven through the
+                                           emitter seam; credit-before-emit,
+                                           payload shape, ten-roll monotonicity,
+                                           the T-30 rate floor, and refusal for
+                                           a player with no session)
+  UT-5  Elements           32    was 13   (+19: Freeze keep-the-better over 400
+                                           seeded trials, Multiplier multiplies
+                                           rather than adds, no positional input)
+  UT-6  RateLimit          42    was 16   (+26: refill at the sustained rate,
+                                           refill capped at burst, per-remote
+                                           independence, hostile-clock rejection)
+  UT-7  ProfileSchema      41    was 11   (+30: full template key sweep, wrong-type
+                                           repair, existing-data preservation,
+                                           template-isolation after migration)
+  UT-8  ProfileLifecycle   38    was  5   (+33: fail-closed load, foreign lock,
+                                           RELEASED-PROFILE IMMUTABILITY, the
+                                           ceiling-reached-all-live branch, and
+                                           deep-copy template isolation)
+  UT-12 ForgeService       99    NEW      (the suite whose absence let a call to
+                                           a nonexistent function ship)
+
+--- SUPPLEMENTARY: modules with no consumer yet ---
+Format and UpgradeCatalog are required by nothing until Blocks 4 and 5, so the
+suite never loaded them. Both were required and exercised explicitly:
+
+  require Format: true
+    0=>0  1=>1  -1=>-1  999.999=>1000  1000=>1.00K  1234567=>1.23M
+    1e12=>1.00T  1e100=>10.00Dtg  1e300=>1.00e300  -1e300=>-1.00e300
+    nan=>NaN  inf=>Inf  -inf=>-Inf  0.5=>0.5
+  require UpgradeCatalog: true
+    cash upgrades missing from profile template: none
+    profile Upgrades keys missing from catalog:  none
+    diamond nodes missing from profile template: none
+    cost curve L0=100 L1=250 L5=9765.625 maxed=inf negative=inf
+    unknown id cost: inf
+
+  COSMETIC NIT, not a gate failure: Format.formatNumber(999.999) renders "1000"
+  rather than "999.99" or "1.00K", because the sub-1000 branch rounds up into
+  four digits. Display-only, no economic effect. Logged, not fixed.
+
+--- VERDICT ---
+P-2: PASS — 9 suites, 0 failed, 3,046 assertions, sync verified before the run.
+P-3: PASS — see 2026-08-06-block3-remediated-prohibitions.txt.
+P-1: NOT RUN — Roblox Script Analysis is not exposed through the MCP server and
+     requires the operator to open View → Script Analysis and copy the panel.
+     GATE 2 IS THEREFORE NOT COMPLETE. Per the TEST_PLAN amendment of this date,
+     a missing P-1 artifact is a REJECTED gate, never a pass with a caveat —
+     which is precisely how the previous Block 3 shipped a crash.
