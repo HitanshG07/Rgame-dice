@@ -87,7 +87,18 @@ export type CandidateDie = {
 }
 
 function ForgeService.assertDieInvariant(die: CandidateDie, shape: DiceCatalog.ShapeDef): (boolean, string?)
-	-- 1. The die is the shape it claims to be.
+	-- 0. Shape of the ARGUMENT before any clause about its contents. This
+	--    function is called on stored data of unknown provenance, so it must
+	--    RETURN false, never throw: `#die.Faces` on a nil errors, and a caller
+	--    that gets an exception where it expected a verdict cannot fail closed.
+	--    (F-AD-7.)
+	if type(die) ~= "table" then
+		return false, "die_not_a_table"
+	end
+	if type(die.Faces) ~= "table" then
+		return false, "faces_not_a_table"
+	end
+
 	if die.Shape ~= shape.id then
 		return false, "shape_mismatch"
 	end
@@ -95,10 +106,30 @@ function ForgeService.assertDieInvariant(die: CandidateDie, shape: DiceCatalog.S
 		return false, "face_count_mismatch"
 	end
 
+	-- 1. Every slot up to the face count actually holds a face table. `#` on a
+	--    SPARSE array is undefined in Lua -- {[1]=a,[3]=b} may report 1 or 3 --
+	--    so the length check above can pass while a slot is nil, and the loop
+	--    below would then index nil. Verified here rather than assumed.
+	for i = 1, shape.faceCount do
+		if type(die.Faces[i]) ~= "table" then
+			return false, "face_missing_or_not_a_table"
+		end
+	end
+
 	-- 2. Purchased budget is a real, positive quantity. It is what the player
 	--    owns (FR-3.6) and every other clause is measured against it.
 	if not ForgeMath.isFinite(die.PurchasedBudget) or die.PurchasedBudget <= 0 then
 		return false, "purchased_budget_invalid"
+	end
+	-- ...and BOUNDED ABOVE. Without this the invariant answered "is this die
+	-- valid?" with no opinion on the one field the whole design rests on: a die
+	-- carrying a PurchasedBudget of a million passed every clause, and a
+	-- corrupted or hand-edited profile would have kept that entitlement forever
+	-- (F-AD-5). The bound is the maximum ceiling across ALL shapes, because
+	-- PurchasedBudget is shape-independent -- a player who bought up to D20's
+	-- ceiling still owns it while standing on a D4.
+	if die.PurchasedBudget > DiceCatalog.maxDiamondCeiling() + ForgeMath.EPSILON then
+		return false, "purchased_budget_exceeds_ceiling"
 	end
 
 	-- 3. The usable budget sits inside the shape's legal range and NEVER above
@@ -108,7 +139,14 @@ function ForgeService.assertDieInvariant(die: CandidateDie, shape: DiceCatalog.S
 		return false, "mass_budget_invalid"
 	end
 	local minViable = shape.massFloor * shape.faceCount
-	local ceiling = math.min(die.PurchasedBudget, shape.cashBudgetCap)
+	-- `diamondCeiling`, NOT `cashBudgetCap`. FR-3.6: "Mass budget increases are
+	-- purchased with Cash up to a per-shape cap, AND BEYOND THAT WITH PRESTIGE
+	-- DIAMONDS." cashBudgetCap is where the Cash path stops, not where the die
+	-- stops. Clamping the usable budget at cashBudgetCap made the entire Diamond
+	-- budget tier unreachable and would have silently confiscated any budget
+	-- bought with Diamonds -- a fourth direction of wrongness in this same
+	-- function, surfaced by asking whether the invariant was complete (F-AD-5).
+	local ceiling = math.min(die.PurchasedBudget, shape.diamondCeiling)
 	if die.MassBudget < minViable - ForgeMath.EPSILON then
 		return false, "mass_budget_below_viable"
 	end
@@ -346,6 +384,33 @@ function ForgeService.performSetElement(player: Player, dieIndex: number, faceIn
 		return false, Remotes.Notice.InsufficientFunds
 	end
 
+	-- THE INVARIANT GATE. This handler only writes `Element`, so no mass clause
+	-- can move -- but the ELEMENT clause can, and more to the point the rule is
+	-- "every write to d.Dice passes the gate". A rule with one documented
+	-- exception is a rule the next author will add a second exception to
+	-- (F-AD-6). It also catches a die that was already invalid before this call.
+	local elementShape = DiceCatalog.getShape(die.Shape)
+	if elementShape then
+		local candidateFaces: { PlayerProfile.Face } = {}
+		for i = 1, #die.Faces do
+			candidateFaces[i] = {
+				Mass = die.Faces[i].Mass,
+				Element = if i == faceIndex then elementId else die.Faces[i].Element,
+			}
+		end
+		local invOk, invReason = ForgeService.assertDieInvariant({
+			Shape = die.Shape,
+			MassBudget = die.MassBudget,
+			PurchasedBudget = die.PurchasedBudget,
+			Faces = candidateFaces,
+		}, elementShape)
+		if not invOk then
+			warn(string.format("[ForgeService] element write refused by the die invariant for UserId=%d: %s",
+				player.UserId, tostring(invReason)))
+			return false, Remotes.Notice.InvalidRequest
+		end
+	end
+
 	local spent, spendReason = EconomyService.spend(player, "Cash", ELEMENT_SET_COST, "set_element")
 	if not spent then
 		return false, spendReason
@@ -416,7 +481,9 @@ function ForgeService.performSetShape(player: Player, dieIndex: number, shapeId:
 		purchased = if ForgeMath.isFinite(oldDie.MassBudget) then oldDie.MassBudget else shape.defaultBudget
 	end
 	local minViable = shape.massFloor * shape.faceCount
-	local newBudget = math.clamp(purchased, minViable, shape.cashBudgetCap)
+	-- diamondCeiling, not cashBudgetCap -- see the invariant's clause 3. The
+	-- Cash cap is where one PURCHASE PATH stops, never where the die stops.
+	local newBudget = math.clamp(purchased, minViable, shape.diamondCeiling)
 
 	-- snapDOWN, not snap. Rounding each face's share to NEAREST rounds it up
 	-- half the time, and faceCount shares each rounded up sum to more than the

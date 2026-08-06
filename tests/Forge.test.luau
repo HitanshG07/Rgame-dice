@@ -415,8 +415,8 @@ local function run(): (boolean, string?, number)
 		e = e or check(downOk, "D6 -> D4 should succeed once D4 is unlocked")
 		local d4 = DiceCatalog.getShape("D4")
 		if d4 then
-			e = e or check(data.Dice[1].MassBudget <= d4.cashBudgetCap,
-				"the usable budget must be capped by the shape")
+			e = e or check(data.Dice[1].MassBudget <= d4.diamondCeiling,
+				"the usable budget must be capped by the shape's absolute ceiling")
 			e = e or check(data.Dice[1].PurchasedBudget == 800,
 				"a small-capped shape must CAP the usable budget, not destroy what was purchased")
 		end
@@ -462,7 +462,11 @@ local function run(): (boolean, string?, number)
 				local okShape = ForgeService.performSetShape(player, 1, shapeId)
 				if okShape then
 					local stored = data.Dice[1].MassBudget
-					local cap = math.min(budget, target.cashBudgetCap)
+					-- diamondCeiling, not cashBudgetCap: FR-3.6 puts budget beyond the
+					-- Cash cap behind Diamonds, so the Cash cap is not the die's limit.
+					-- This assertion previously encoded the wrong ceiling and would have
+					-- locked in the confiscation of Diamond-purchased budget.
+					local cap = math.min(budget, target.diamondCeiling)
 					e = e or check(stored <= cap, string.format(
 						"budget %d on %s stored %s, which EXCEEDS what was purchased (F-AD-4)",
 						budget, shapeId, tostring(stored)))
@@ -625,6 +629,123 @@ local function run(): (boolean, string?, number)
 	e = e or check(not (ForgeService.checkStoredDie("cheese" :: any)), "checkStoredDie must refuse a non-table")
 	e = e or check(not (ForgeService.checkStoredDie({ Shape = "D99" } :: any)),
 		"checkStoredDie must refuse an unknown shape")
+
+	----------------------------------------------------------------------------
+	-- ROUND 3 FINDINGS: F-AD-5, F-AD-6, F-AD-7
+	----------------------------------------------------------------------------
+
+	local maxCeiling = DiceCatalog.maxDiamondCeiling()
+	e = e or check(maxCeiling > 0, "the catalog must report a maximum diamond ceiling")
+	for _, id in ipairs({ "D4", "D6", "D8", "D12", "D20" }) do
+		local sd = DiceCatalog.getShape(id)
+		if sd then
+			e = e or check(sd.diamondCeiling <= maxCeiling, string.format(
+				"%s's ceiling exceeds the reported maximum", id))
+			e = e or check(sd.diamondCeiling >= sd.cashBudgetCap, string.format(
+				"%s: the Diamond ceiling must be at or above the Cash cap (FR-3.6)", id))
+		end
+	end
+
+	local d6r3 = DiceCatalog.getShape("D6")
+	if d6r3 then
+		local function dieAt(purchased: number, mass: number): any
+			local f: { any } = {}
+			for i = 1, 6 do
+				f[i] = { Mass = mass / 6, Element = "None" }
+			end
+			return { Shape = "D6", MassBudget = mass, PurchasedBudget = purchased, Faces = f }
+		end
+
+		-- F-AD-5: an absurd PurchasedBudget used to pass every clause.
+		local absurd = dieAt(1000000, 60)
+		local okAbsurd, reasonAbsurd = ForgeService.assertDieInvariant(absurd, d6r3)
+		e = e or check(not okAbsurd,
+			"a PurchasedBudget of 1,000,000 must be rejected -- it is above every shape's ceiling (F-AD-5)")
+		e = e or check(reasonAbsurd == "purchased_budget_exceeds_ceiling", string.format(
+			"expected 'purchased_budget_exceeds_ceiling', got '%s'", tostring(reasonAbsurd)))
+
+		-- Exactly at the maximum ceiling is legal; a hair above is not.
+		local atMax = dieAt(maxCeiling, 60)
+		e = e or check(ForgeService.assertDieInvariant(atMax, d6r3),
+			"a PurchasedBudget exactly at the maximum ceiling must be accepted")
+		local overMax = dieAt(maxCeiling + 1, 60)
+		e = e or check(not (ForgeService.assertDieInvariant(overMax, d6r3)),
+			"a PurchasedBudget one unit above the maximum ceiling must be rejected")
+
+		-- FR-3.6: budget beyond the CASH cap is reachable with Diamonds, so the
+		-- usable ceiling is diamondCeiling. Clamping at cashBudgetCap would have
+		-- made the Diamond tier unreachable and confiscated what it bought.
+		e = e or check(d6r3.diamondCeiling > d6r3.cashBudgetCap,
+			"D6's Diamond ceiling should exceed its Cash cap, or the tier is pointless")
+		local aboveCash = dieAt(d6r3.diamondCeiling, d6r3.diamondCeiling)
+		local okAboveCash, reasonAboveCash = ForgeService.assertDieInvariant(aboveCash, d6r3)
+		e = e or check(okAboveCash, string.format(
+			"a budget above the CASH cap but within the Diamond ceiling must be legal "
+			.. "(FR-3.6), got '%s'", tostring(reasonAboveCash)))
+
+		-- F-AD-7: malformed input must RETURN false, never throw. A caller that
+		-- gets an exception where it expected a verdict cannot fail closed.
+		local function survives(label: string, d: any): ()
+			local callOk, res = pcall(ForgeService.assertDieInvariant, d, d6r3)
+			e = e or check(callOk, string.format("assertDieInvariant THREW on %s instead of returning false", label))
+			if callOk then
+				e = e or check(res == false, string.format("assertDieInvariant accepted %s", label))
+			end
+		end
+
+		survives("nil", nil)
+		survives("a string", "cheese")
+		survives("a number", 42)
+		survives("a die with no Faces", { Shape = "D6", MassBudget = 60, PurchasedBudget = 60 })
+		survives("a die whose Faces is a string", { Shape = "D6", MassBudget = 60, PurchasedBudget = 60, Faces = "no" })
+		survives("a SPARSE Faces array", {
+			Shape = "D6", MassBudget = 60, PurchasedBudget = 60,
+			Faces = { [1] = { Mass = 10, Element = "None" }, [6] = { Mass = 10, Element = "None" } },
+		})
+		survives("a Faces array holding a non-table", {
+			Shape = "D6", MassBudget = 60, PurchasedBudget = 60,
+			Faces = { 1, 2, 3, 4, 5, 6 },
+		})
+		survives("a die with no Shape", { MassBudget = 60, PurchasedBudget = 60, Faces = {} })
+
+		-- checkStoredDie wraps the same guarantees for arbitrary stored data.
+		local storedOk = pcall(ForgeService.checkStoredDie, {
+			Shape = "D6", MassBudget = 60, PurchasedBudget = 60, Faces = nil,
+		} :: any)
+		e = e or check(storedOk, "checkStoredDie THREW on a die with no Faces")
+	end
+
+	-- F-AD-6: performSetElement now passes the gate like every other write to
+	-- d.Dice. Prove it still succeeds on a valid die, and that the die remains
+	-- invariant-clean afterwards.
+	PlayerProfile.mutate(player, function(d)
+		local f: { any } = {}
+		for i = 1, 6 do
+			f[i] = { Mass = 10, Element = "None" }
+		end
+		d.Dice[1] = { Shape = "D6", MassBudget = 60, PurchasedBudget = 60, Faces = f }
+		d.Diamond.Elements.Fire = true
+	end)
+	EconomyService.credit(player, "Cash", 100000, "test_setup")
+	local elOk, elReason = ForgeService.performSetElement(player, 1, 2, "Fire")
+	e = e or check(elOk, string.format(
+		"a valid element assignment must still succeed through the gate, got '%s'", tostring(elReason)))
+	e = e or check(data.Dice[1].Faces[2].Element == "Fire", "the element was not stored")
+	local afterEl, afterElReason = ForgeService.checkStoredDie(data.Dice[1])
+	e = e or check(afterEl, string.format(
+		"INVARIANT BROKEN after an element assignment: %s", tostring(afterElReason)))
+
+	-- And a die already corrupted must have the element write REFUSED rather
+	-- than persisting a second wrong on top of the first.
+	PlayerProfile.mutate(player, function(d)
+		d.Dice[1].MassBudget = 99999
+	end)
+	local corruptEl = ForgeService.performSetElement(player, 1, 3, "Fire")
+	e = e or check(not corruptEl,
+		"an element write onto an already-invalid die must be refused by the gate (F-AD-6)")
+	PlayerProfile.mutate(player, function(d)
+		d.Dice[1].MassBudget = 60
+	end)
 
 	ForgeService._setResultEmitterForTesting(nil)
 	PlayerProfile.release(player)

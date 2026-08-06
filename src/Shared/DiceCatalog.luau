@@ -87,6 +87,24 @@ function DiceCatalog.getMassFloor(shapeId: string): number
 	return if shape then shape.massFloor else DEFAULT_MASS_FLOOR
 end
 
+-- The highest budget ANY shape can hold. `PurchasedBudget` is shape-independent
+-- -- a player who buys up to D20's ceiling keeps that entitlement when they
+-- switch to a D4, where it is merely capped for as long as they stay. So the
+-- absolute bound on what may be owned is the maximum ceiling across all shapes,
+-- while the bound on what is USABLE right now is this shape's own ceiling.
+-- Block 3 Gate 3 round 3, finding F-AD-5: the die invariant had no upper bound
+-- on PurchasedBudget at all, and `diamondCeiling` was declared here and read
+-- nowhere.
+function DiceCatalog.maxDiamondCeiling(): number
+	local highest = 0
+	for _, shape in pairs(SHAPES) do
+		if shape.diamondCeiling > highest then
+			highest = shape.diamondCeiling
+		end
+	end
+	return highest
+end
+
 function DiceCatalog.getAllShapes(): { ShapeDef }
 	local list: { ShapeDef } = {}
 	for _, shape in pairs(SHAPES) do

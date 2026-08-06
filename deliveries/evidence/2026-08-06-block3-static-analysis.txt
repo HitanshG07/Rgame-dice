@@ -225,3 +225,13 @@ there is no LocalPlayer there is also no PlayerGui to report a failure into, so
 erroring is the only honest option.
 
   RUN 7 expectation: 0 errors, 8 warnings, first-party 0. NOT YET READ.
+
+================================================================================
+RUN 7 — after the Block 4A warning fix.  Operator-read 2026-08-07
+================================================================================
+  0 of 0 Errors
+  8 of 8 Warnings
+  FIRST-PARTY WARNINGS: 0
+  VENDOR WARNINGS:      8   (ProfileStore only; identical to the Run 4 baseline)
+
+P-1 PASS. Back to the recorded baseline after the ClientBootstrap narrowing fix.
