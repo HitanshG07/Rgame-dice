@@ -42,13 +42,17 @@ return {
 
 **PASS = zero errors AND zero warnings.** A warning is a gate failure under Global Pipeline Law 5, not a nit. Do not filter any line.
 
+**P-1 IS NOT OPTIONAL AND NOT SUBSTITUTABLE.** No Gate 2 verdict may be issued without `deliveries/evidence/<date>-static-analysis.txt` on disk. Amended 2026-08-06, triggering fact: a Block 3 Gate 2 was declared `MECHANICALLY-CLEAN` on P-2 and P-3 alone, with no P-1 artifact. `--!strict` analysis would have flagged the call to a nonexistent `ElementCatalog.getElement` immediately; the unit suite could not, because no suite required the module. **A missing evidence file is a missing procedure, and a missing procedure is a REJECTED gate — never a pass with a caveat.**
+
 ### P-2 — Automated suite
 1. Press **Play Solo** (F5). Open **View → Output**.
 2. Wait for `=== SUITE COMPLETE: X passed, Y failed ===`.
 3. Copy the **entire** Output panel — every line, including warnings and tracebacks.
 4. Save to `deliveries/evidence/<date>-unit-suite.txt`.
 
-**PASS = `failed` is 0 AND the suite count equals the number of suites in §4 + §5 (11 unit + 5 integration = 16).** A missing suite is a failure, not a pass.
+**PASS = `failed` is 0 AND every suite that EXISTS at this point in construction ran.** At the final pre-launch sweep the count must equal the full §4 + §5 set (12 unit + 5 integration = 17); mid-construction it must equal the suites written so far, enumerated by name in the gate record. A suite that exists on disk but is absent from the run is a failure, not a pass — that is a sync fault, and it has produced a false green on this project twice.
+
+**AND the total assertion count must have MOVED by the delta the construction step predicted.** A suite reporting `X passed, 0 failed` at an *unchanged* assertion count has run over stale code — twice on this project a dead Rojo sync produced exactly that (ledger L-019, L-020). The assertion count is the sync canary; a green result without a moved count is not evidence.
 
 ### P-3 — Static prohibition grep
 Run from the repo root and paste the output verbatim into `deliveries/evidence/<date>-prohibitions.txt`:
@@ -95,6 +99,7 @@ Save the **entire** Output panel to `deliveries/evidence/<date>-smoke.txt`.
 | Forge maths | UT-1, UT-2 |
 | Outcome sampling & payout | UT-3, UT-4 |
 | Boundary validation | UT-5, UT-6 |
+| Forge application | UT-12 |
 | Persistence | UT-7, UT-8 |
 | Monetization | UT-9 |
 | Leaderboard | UT-10 |
@@ -118,6 +123,9 @@ Save the **entire** Output panel to `deliveries/evidence/<date>-smoke.txt`.
 | **UT-9** | `tests/Receipt.test.luau` | The same `PurchaseId` grants **exactly once** across repeated calls; a restart with a persisted id still refuses (proving the ledger is in the DataStore, not memory — threat T-15); a failed save returns `NotProcessedYet`, never `PurchaseGranted` (threat T-16); an unknown product fails closed; player-offline returns `NotProcessedYet`. |
 | **UT-10** | `tests/Leaderboard.test.luau` | The log-scale transform is monotonic across 0 → 1e300; the result stays within the signed 64-bit bound at `raw = 1e300` (threat T-20); ordering matches raw ordering; `GetSortedAsync` is called at most once per interval regardless of request volume. |
 | **UT-11** | `tests/Vault.test.luau` | `earnings = min(elapsed, capacity) × rate × efficiency`; **negative elapsed credits exactly zero** (threat T-23); elapsed clamps at capacity; claiming consumes the vault so a second claim yields zero (threat T-24); the 2× receipt is bound to its `AccrualId` and cannot be replayed against a later window. |
+| **UT-12** | `tests/Forge.test.luau` | Forge cost scales with the **magnitude of mass moved** and is non-trivial (FR-3.3); a rejected proposal leaves the distribution, the budget **and** Cash byte-identical (FR-3.2); an unknown or **locked** element id is refused (FR-4.1, threat T-5); a shape change **carries the purchased mass budget and the assigned elements across** rather than confiscating them (FR-6.1), and the resulting die is immediately forgeable because its faces sum to its stored budget. |
+
+> **UT-12 amendment, 2026-08-06.** Triggering fact: `ForgeService` shipped calling `ElementCatalog.getElement`, an accessor that has never existed — every element assignment would have crashed. It passed a `MECHANICALLY-CLEAN` Gate 2 and a zero-finding cross-vendor Gate 3/4 because **no suite required the module** (the forge was covered only at integration level in IT-2, three blocks later) and **procedure P-1 was never run**. A service module that no suite requires is a module whose symbols are never resolved. UT-12 closes that gap at unit level; IT-2 still runs in Block 6 and is not replaced by it.
 
 ---
 

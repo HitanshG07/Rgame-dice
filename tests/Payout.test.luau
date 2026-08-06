@@ -254,6 +254,88 @@ local function run(): (boolean, string?, number)
 	e = e or check(ForgeMath.isFinite(bad.payout), "a NaN coinBonus produced a non-finite payout")
 	e = e or check(bad.payout > 0, "a NaN coinBonus zeroed a legitimate payout")
 
+	----------------------------------------------------------------------------
+	-- performRoll — the wired service shell, driven through the Studio-only
+	-- emitter seam so no test scaffolding lives in the production path.
+	----------------------------------------------------------------------------
+	local Fakes = require(script.Parent:WaitForChild("Fakes"))
+	local PlayerProfile = require(ServerScriptService:WaitForChild("Server"):WaitForChild("PlayerProfile"))
+	local EconomyService = require(ServerScriptService:WaitForChild("Server"):WaitForChild("EconomyService"))
+
+	local fakePlayer = Fakes.createFakePlayer(9999, "ShellTestPlayer")
+	local fakeData = PlayerProfile._reconcile({})
+	PlayerProfile._injectProfileForTesting(fakePlayer, Fakes.createFakeProfile(fakeData))
+	RollService.beginSession(fakePlayer)
+
+	-- Capture the emitted RollResult, and record the balance AT THE MOMENT OF
+	-- EMISSION. SRS FR-2.6 requires Cash to be credited BEFORE the event fires,
+	-- so that a dropped RollResult never costs the player their money.
+	local emitted: { any } = {}
+	local balanceAtEmit: number? = nil
+	RollService._setResultEmitterForTesting(function(player, payload)
+		balanceAtEmit = EconomyService.balance(player, "Cash")
+		table.insert(emitted, payload)
+	end)
+
+	local rollOk, rollReason = RollService.performRoll(fakePlayer)
+	e = e or check(rollOk, string.format("performRoll should succeed, got reason: %s", tostring(rollReason)))
+
+	local cashBal = EconomyService.balance(fakePlayer, "Cash")
+	e = e or check(cashBal ~= nil and cashBal > 0, "performRoll should credit Cash")
+	e = e or check(#emitted == 1, string.format("performRoll should emit exactly one RollResult, got %d", #emitted))
+
+	if #emitted == 1 then
+		local payload = emitted[1]
+		e = e or check(balanceAtEmit ~= nil and balanceAtEmit > 0,
+			"Cash must be credited BEFORE RollResult fires (SRS FR-2.6) -- balance was zero at emission")
+		e = e or check(type(payload.faces) == "table" and #payload.faces == #fakeData.Dice,
+			"RollResult must name one landed face per die")
+		e = e or check(ForgeMath.isFinite(payload.payout) and payload.payout >= 0,
+			"RollResult payout must be a finite, non-negative number")
+		e = e or check(type(payload.streak) == "number", "RollResult must carry the streak")
+		e = e or check(type(payload.voidHit) == "boolean", "RollResult must carry voidHit")
+		e = e or check(math.abs(payload.payout - (cashBal :: number)) < 1e-6, string.format(
+			"the reported payout (%.4f) must equal the credited amount (%.4f)",
+			payload.payout, cashBal :: number))
+	end
+
+	-- The vault rate is written back, and the T-30 floor keeps it conservative
+	-- rather than astronomical for a session that is barely a moment old.
+	e = e or check(ForgeMath.isFinite(fakeData.Vault.AvgIncomePerSec),
+		"performRoll must write a finite AvgIncomePerSec")
+	e = e or check(fakeData.Vault.AvgIncomePerSec <= (cashBal :: number) / 60 + 1e-6, string.format(
+		"AvgIncomePerSec (%.6f) exceeded the 60s minimum-window floor (threat T-30)",
+		fakeData.Vault.AvgIncomePerSec))
+
+	-- Ten more rolls: no errors, Cash rises monotonically, streak tracks.
+	local prevCash = cashBal :: number
+	local monotonic = true
+	for _ = 1, 10 do
+		local ok = RollService.performRoll(fakePlayer)
+		if not ok then
+			monotonic = false
+			break
+		end
+		local nowCash = EconomyService.balance(fakePlayer, "Cash") :: number
+		if nowCash < prevCash then
+			monotonic = false
+			break
+		end
+		prevCash = nowCash
+	end
+	e = e or check(monotonic, "ten consecutive rolls must all succeed with monotonically rising Cash")
+	e = e or check(#emitted == 11, string.format("expected 11 emitted results, got %d", #emitted))
+	e = e or check(RollService.getStreak(fakePlayer) >= 0, "performRoll should track the session streak")
+
+	-- A roll for a player with no session is refused, not defaulted.
+	local ghost = Fakes.createFakePlayer(9998, "NoSessionPlayer")
+	local ghostOk = RollService.performRoll(ghost)
+	e = e or check(not ghostOk, "performRoll must refuse a player with no session")
+
+	RollService._setResultEmitterForTesting(nil)
+	RollService.endSession(fakePlayer)
+	PlayerProfile.release(fakePlayer)
+
 	if e then
 		return false, e, n
 	end

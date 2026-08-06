@@ -108,6 +108,60 @@ function PlayerProfile.getTemplate(): Profile
 	return TEMPLATE
 end
 
+-- DEEP copy, not `table.clone`.
+--
+-- `table.clone` is SHALLOW: `table.clone(TEMPLATE.Dice)` produces a new ARRAY
+-- whose element [1] is still THE SAME TABLE as `TEMPLATE.Dice[1]`. Every profile
+-- built that way would share one die object with the template, so the first
+-- player to forge would rewrite the starting die for every player who joined
+-- afterwards on that server. Nothing at runtime reports this; it presents as
+-- new players mysteriously starting with someone else's mass layout.
+local function deepCopy(value: any): any
+	if type(value) ~= "table" then
+		return value
+	end
+	local out = {}
+	for k, v in pairs(value) do
+		out[k] = deepCopy(v)
+	end
+	return out
+end
+
+PlayerProfile._deepCopy = deepCopy
+
+-- Defensive template fill, layered UNDER ProfileStore's own Reconcile().
+--
+-- Reconcile() covers keys the library knows about; this covers a key that is
+-- present but nil-valued, a Dice array emptied by a bad write, and the three
+-- sub-tables the game dereferences on every roll. It runs on the live load path
+-- (threat T-12) -- it is deliberately NOT a test-only helper, because a helper
+-- that only tests exercise proves nothing about production.
+function PlayerProfile._reconcile(raw: any): Profile
+	local data = if type(raw) == "table" then raw else {}
+	for k, v in pairs(TEMPLATE) do
+		if data[k] == nil then
+			data[k] = deepCopy(v)
+		end
+	end
+	if type(data.Dice) ~= "table" or #data.Dice == 0 then
+		data.Dice = deepCopy(TEMPLATE.Dice)
+	end
+	if type(data.Upgrades) ~= "table" then
+		data.Upgrades = deepCopy(TEMPLATE.Upgrades)
+	end
+	if type(data.Diamond) ~= "table" then
+		data.Diamond = deepCopy(TEMPLATE.Diamond)
+	end
+	-- Sub-tables inside Diamond are dereferenced unguarded by ForgeService.
+	if type(data.Diamond.Elements) ~= "table" then
+		data.Diamond.Elements = deepCopy(TEMPLATE.Diamond.Elements)
+	end
+	if type(data.Diamond.Shapes) ~= "table" then
+		data.Diamond.Shapes = deepCopy(TEMPLATE.Diamond.Shapes)
+	end
+	return data :: Profile
+end
+
 --------------------------------------------------------------------------------
 -- Library binding. Vendored under src/Server/Vendor/ and PINNED -- an unpinned
 -- dependency on a moving target is prohibited at PRODUCTION tier.
@@ -167,7 +221,11 @@ end
 -- silently destroyed.
 function PlayerProfile.load(player: Player): (boolean, string?)
 	if not store then
-		return false, "store_not_initialised"
+		if ProfileStoreLib then
+			PlayerProfile.init()
+		else
+			return false, "store_not_initialised"
+		end
 	end
 	if active[player] then
 		return true, nil
@@ -194,6 +252,9 @@ function PlayerProfile.load(player: Player): (boolean, string?)
 
 	profile:AddUserId(player.UserId)      -- GDPR erasure support
 	profile:Reconcile()                    -- fill any key added since last save
+	-- Second, defensive layer under the library's own reconcile. Guarantees the
+	-- sub-tables the roll loop dereferences unguarded are present (threat T-12).
+	PlayerProfile._reconcile(profile.Data)
 
 	profile.OnSessionEnd:Connect(function()
 		active[player] = nil
@@ -316,6 +377,12 @@ function PlayerProfile._migrate(data: Profile): (boolean, string?)
 	if data.SchemaVersion > TEMPLATE.SchemaVersion then
 		return false, "profile_from_future_version"
 	end
+	if data.SchemaVersion < 1 then
+		data.SchemaVersion = 1
+		if type(data.Dice) ~= "table" or #data.Dice == 0 then
+			data.Dice = deepCopy(TEMPLATE.Dice)
+		end
+	end
 	-- v1 is current; future steps append here, each bumping SchemaVersion.
 	return true, nil
 end
@@ -331,6 +398,20 @@ function PlayerProfile.checkPayloadSize(data: Profile): (boolean, number)
 	end
 	local size = #(encoded :: string)
 	return size <= PAYLOAD_CEILING_BYTES, size
+end
+
+-- STUDIO-ONLY test seam.
+--
+-- This writes straight into the `active` table, bypassing session locking
+-- entirely -- exactly the thing this module exists to make impossible. It is
+-- guarded so it errors in a live server: an unguarded version would be a
+-- standing hole in the persistence boundary for the sake of a unit test
+-- (threats T-10, T-26).
+function PlayerProfile._injectProfileForTesting(player: Player, profile: any): ()
+	if not RunService:IsStudio() then
+		error("[PlayerProfile] the profile-injection seam is Studio-only", 2)
+	end
+	active[player] = profile
 end
 
 return PlayerProfile

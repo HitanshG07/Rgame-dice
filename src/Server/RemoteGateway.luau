@@ -23,72 +23,16 @@ local RunService = game:GetService("RunService")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Remotes = require(Shared:WaitForChild("Remotes"))
 local ForgeMath = require(Shared:WaitForChild("ForgeMath"))
+local RateLimiter = require(script.Parent:WaitForChild("RateLimiter"))
 
 local RemoteGateway = {}
 
 export type Handler = (player: Player, ...any) -> ...any
 
-type Bucket = { tokens: number, last: number }
-type Limit = { sustained: number, burst: number }
-
--- API_DATA_CONTRACT.md §2.2. `Roll` is refined at runtime against the player's
--- SERVER-KNOWN auto-roll tier; this is the hard ceiling no tier may exceed.
-local LIMITS: { [string]: Limit } = {
-	Roll = { sustained = 5, burst = 10 },
-	Forge = { sustained = 4, burst = 8 },
-	SetElement = { sustained = 4, burst = 8 },
-	SetShape = { sustained = 4, burst = 8 },
-	BuyUpgrade = { sustained = 4, burst = 8 },
-	BuyDiamondNode = { sustained = 4, burst = 8 },
-	AddDieSlot = { sustained = 4, burst = 8 },
-	GetLeaderboard = { sustained = 0.5, burst = 2 },
-	RedeemCode = { sustained = 0.2, burst = 3 },
-}
-local DEFAULT_LIMIT: Limit = { sustained = 2, burst = 5 }
-
 local MAX_STRING_CODE = 32
 local MAX_STRING_ID = 64
 
-local buckets: { [Player]: { [string]: Bucket } } = {}
-local rejections: { [Player]: number } = {}
 local handlers: { [string]: Handler } = {}
-
---------------------------------------------------------------------------------
--- Rate limiting (token bucket, per player per remote)
---------------------------------------------------------------------------------
-
-local function limitFor(name: string): Limit
-	return LIMITS[name] or DEFAULT_LIMIT
-end
-
-local function consume(player: Player, name: string): boolean
-	local perPlayer = buckets[player]
-	if not perPlayer then
-		perPlayer = {}
-		buckets[player] = perPlayer
-	end
-
-	local limit = limitFor(name)
-	local now = os.clock()
-	local bucket = perPlayer[name]
-	if not bucket then
-		bucket = { tokens = limit.burst, last = now }
-		perPlayer[name] = bucket
-	end
-
-	-- refill
-	local elapsed = now - bucket.last
-	if elapsed > 0 then
-		bucket.tokens = math.min(limit.burst, bucket.tokens + elapsed * limit.sustained)
-		bucket.last = now
-	end
-
-	if bucket.tokens < 1 then
-		return false
-	end
-	bucket.tokens -= 1
-	return true
-end
 
 --------------------------------------------------------------------------------
 -- Validators. Every one returns ok, reason -- never throws across the boundary.
@@ -177,9 +121,9 @@ RemoteGateway.MAX_STRING_ID = MAX_STRING_ID
 --------------------------------------------------------------------------------
 
 local function reject(player: Player, name: string, reason: string): (boolean, string)
-	rejections[player] = (rejections[player] or 0) + 1
+	RateLimiter.recordRejection(player)
 	warn(string.format("[Gateway] rejected %s from UserId=%d: %s (total %d)",
-		name, player.UserId, reason, rejections[player]))
+		name, player.UserId, reason, RateLimiter.rejectionCount(player)))
 	-- generic code outward; the detailed reason stays in the server log
 	return false, Remotes.Notice.InvalidRequest
 end
@@ -194,7 +138,7 @@ function RemoteGateway.register(name: string, handler: Handler): ()
 end
 
 function RemoteGateway.rejectionCount(player: Player): number
-	return rejections[player] or 0
+	return RateLimiter.rejectionCount(player)
 end
 
 -- Wires every registered handler onto its RemoteFunction. Called once by the
@@ -211,8 +155,7 @@ function RemoteGateway.bind(): ()
 				return false, Remotes.Notice.InvalidRequest
 			end
 
-			if not consume(player, name) then
-				rejections[player] = (rejections[player] or 0) + 1
+			if not RateLimiter.consume(player, name) then
 				return false, Remotes.Notice.RateLimited
 			end
 
@@ -229,8 +172,7 @@ function RemoteGateway.bind(): ()
 end
 
 function RemoteGateway.clearPlayer(player: Player): ()
-	buckets[player] = nil
-	rejections[player] = nil
+	RateLimiter.clearPlayer(player)
 end
 
 Players.PlayerRemoving:Connect(function(player)

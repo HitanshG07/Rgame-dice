@@ -1,0 +1,24 @@
+=== BLOCK 3 PROHIBITIONS VERIFICATION EVIDENCE ===
+Date: 2026-08-05
+
+1. InvokeClient Check:
+Query: InvokeClient
+Result: 0 executable invocations in src/ (1 comment in Shared/Remotes.luau documenting prohibition).
+
+2. ProcessReceipt Check:
+Query: ProcessReceipt
+Result: 0 invocations in src/ (MonetizationService handler unbuilt until Block 4).
+
+3. SetAsync Check:
+Query: SetAsync
+Result: 0 direct invocations in game source (6 occurrences inside vendored ProfileStore.luau library).
+
+4. MessagingService Check:
+Query: MessagingService (excluding Vendor)
+Result: 0 occurrences in src/.
+
+5. Placeholder Check:
+Query: TODO|FIXME|TBD
+Result: 0 occurrences in src/.
+
+VERDICT: MECHANICALLY-CLEAN

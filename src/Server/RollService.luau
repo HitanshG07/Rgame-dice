@@ -18,10 +18,12 @@
 -- wires those pure functions to profile state.
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local ForgeMath = require(Shared:WaitForChild("ForgeMath"))
 local ElementCatalog = require(Shared:WaitForChild("ElementCatalog"))
+local DiceCatalog = require(Shared:WaitForChild("DiceCatalog"))
 local Remotes = require(Shared:WaitForChild("Remotes"))
 
 local PlayerProfile = require(script.Parent:WaitForChild("PlayerProfile"))
@@ -48,7 +50,10 @@ RollService.SHIELD_COOLDOWN = 30         -- seconds, server-clocked (SRS FR-5.6)
 -- brand-new player breaks their streak 1-in-n rolls with no way to avoid it.
 -- Fixed 2026-08-06 from Gate 3 finding F-G3-1: the code contradicted the spec,
 -- and the spec was right.
-RollService.MASS_FLOOR = 1               -- moves to DiceCatalog per-shape later
+-- The mass floor itself lives in DiceCatalog, per shape. It is NOT duplicated
+-- here: two sources of truth for a validation threshold is how a forge accepts
+-- a distribution the roller then treats as a Void. Read it via
+-- DiceCatalog.getMassFloor(die.Shape).
 RollService.VOID_FLOOR_FACTOR = 1.5      -- "near" = within 1.5x the floor
 
 -- Offline vault rate is earned/elapsed. Without a minimum window a player who
@@ -116,7 +121,7 @@ end
 -- lightest face it lands most often -- the visible cost of concentrating mass.
 function RollService.isVoidFace(die: Die, faceIndex: number, massFloor: number?): boolean
 	local faces = die.Faces
-	local floor = massFloor or RollService.MASS_FLOOR
+	local floor = massFloor or DiceCatalog.getMassFloor(die.Shape)
 	local lightest = 1
 	for i = 2, #faces do
 		if faces[i].Mass < faces[lightest].Mass then
@@ -137,25 +142,30 @@ end
 -- PURE: sampling
 --------------------------------------------------------------------------------
 
+-- Samples ONE die. Split out of sampleOutcomes so the Freeze re-roll can draw a
+-- second independent sample for a single die without re-sampling the throw.
+function RollService.sampleDie(die: Die, dieIndex: number, rng: Random): DieOutcome
+	local masses = table.create(#die.Faces)
+	for f = 1, #die.Faces do
+		masses[f] = die.Faces[f].Mass
+	end
+	local faceIndex = ForgeMath.sampleFace(masses, rng)
+	local face = die.Faces[faceIndex]
+	return {
+		dieIndex = dieIndex,
+		faceIndex = faceIndex,
+		mass = face.Mass,
+		element = face.Element,
+		baseValue = ForgeMath.faceValue(face.Mass),
+	}
+end
+
 -- Samples one face per die. `rng` is injected so a seeded test reproduces
 -- exactly and so no hidden global RNG can drift between runs.
 function RollService.sampleOutcomes(dice: { Die }, rng: Random): { DieOutcome }
 	local outcomes: { DieOutcome } = {}
 	for d = 1, #dice do
-		local die = dice[d]
-		local masses = table.create(#die.Faces)
-		for f = 1, #die.Faces do
-			masses[f] = die.Faces[f].Mass
-		end
-		local faceIndex = ForgeMath.sampleFace(masses, rng)
-		local face = die.Faces[faceIndex]
-		outcomes[d] = {
-			dieIndex = d,
-			faceIndex = faceIndex,
-			mass = face.Mass,
-			element = face.Element,
-			baseValue = ForgeMath.faceValue(face.Mass),
-		}
+		outcomes[d] = RollService.sampleDie(dice[d], d, rng)
 	end
 	return outcomes
 end
@@ -236,12 +246,29 @@ export type ThrowConfig = {
 	hasShield: boolean,
 	shieldReady: boolean,
 	coinBonus: number?,   -- multiplicative, defaults to 1
+	-- Die index frozen by a Freeze element on the PREVIOUS throw. That die is
+	-- sampled twice this throw and the better of the two is kept (SRS FR-4.4).
+	frozenDie: number?,
 }
 
 -- The complete payout computation, with no Roblox dependency beyond Random.
 -- UT-3 and UT-4 drive this directly.
 function RollService.computeThrow(dice: { Die }, rng: Random, cfg: ThrowConfig): ThrowResult
 	local outcomes = RollService.sampleOutcomes(dice, rng)
+
+	-- Freeze resolution (SRS FR-4.4). A die frozen by the previous throw is
+	-- re-sampled once and the BETTER of the two results is kept. Done here,
+	-- before element resolution, so the kept face is the one every downstream
+	-- rule sees. Uses the same injected rng, so a seeded test is reproducible.
+	local frozenIn = cfg.frozenDie
+	if frozenIn ~= nil and dice[frozenIn] ~= nil then
+		local rerolled = RollService.sampleDie(dice[frozenIn], frozenIn, rng)
+		for i, o in ipairs(outcomes) do
+			if o.dieIndex == frozenIn and rerolled.baseValue > o.baseValue then
+				outcomes[i] = rerolled
+			end
+		end
+	end
 
 	local baseTotal = 0.0
 	for _, o in ipairs(outcomes) do
@@ -312,6 +339,33 @@ type Session = {
 }
 
 local sessions: { [Player]: Session } = {}
+
+--------------------------------------------------------------------------------
+-- Result-emission seam.
+--
+-- performRoll must be drivable by a unit test that has no real Player instance.
+-- The wrong way to allow that -- and the way it was first written -- is to put
+-- `typeof(player) == "Instance"` guards and an error-swallowing pcall into the
+-- production path: that ships test scaffolding, and it silently hides genuine
+-- FireClient failures in a live server.
+--
+-- Instead the emission is injected, exactly as `rng` already is. The setter is
+-- STUDIO-ONLY and errors in a live server, so no shipped code path can redirect
+-- a player's roll results.
+--------------------------------------------------------------------------------
+
+local function defaultEmit(player: Player, payload: any): ()
+	Remotes.getEvent("RollResult"):FireClient(player, payload)
+end
+
+local emitResult: (Player, any) -> () = defaultEmit
+
+function RollService._setResultEmitterForTesting(fn: ((Player, any) -> ())?): ()
+	if not RunService:IsStudio() then
+		error("[RollService] the result-emitter seam is Studio-only", 2)
+	end
+	emitResult = fn or defaultEmit
+end
 
 function RollService.beginSession(player: Player): ()
 	sessions[player] = {
@@ -385,6 +439,8 @@ function RollService.performRoll(player: Player): (boolean, string?)
 		hasShield = hasShield,
 		shieldReady = shieldReady,
 		coinBonus = 1,
+		-- Consumes the Freeze set by the previous throw (SRS FR-4.4).
+		frozenDie = session.frozenDie,
 	})
 
 	-- Shield consumed only when it actually prevented a break.
@@ -417,7 +473,7 @@ function RollService.performRoll(player: Player): (boolean, string?)
 		faces[i] = o.faceIndex
 	end
 
-	Remotes.getEvent("RollResult"):FireClient(player, {
+	emitResult(player, {
 		faces = faces,
 		payout = result.payout,
 		streak = result.streak,

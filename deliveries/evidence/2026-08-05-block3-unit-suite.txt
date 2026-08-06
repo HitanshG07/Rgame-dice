@@ -1,0 +1,11 @@
+=== DICE FORGE TEST SUITE ===
+[PASS] UT-5 Elements (13 assertions)
+[PASS] UT-1 ForgeMath (38 assertions)
+[PASS] UT-2 ForgeValidation (52 assertions)
+[PASS] UT-4 Payout (65 assertions)
+[PASS] UT-8 ProfileLifecycle (5 assertions)
+[PASS] UT-7 ProfileSchema (11 assertions)
+[PASS] UT-6 RateLimit (16 assertions)
+[PASS] UT-3 Sampling (2627 assertions)
+total assertions: 2827
+=== SUITE COMPLETE: 8 passed, 0 failed ===
