@@ -35,3 +35,27 @@ Ten decisions, one line each. Decisions, not tool catalogues. **Secret locations
 | **ProfileStore** (loleris) | **PINNED** `45c9847cbcf1fc260369c50eb335aba7c35aecdd` (2025-07-31), vendored at `src/Server/Vendor/ProfileStore.luau`, sha256 `ad43737203688b8e…` | **Apache-2.0** — permissive, not copyleft, not FLAGGED. *(Corrected 2026-08-04: earlier entries said MIT. Verified against the GitHub license API at vendoring time. Apache-2.0 carries an attribution/NOTICE obligation — the vendored header must be preserved verbatim and not stripped.)* | Session-locked persistence. Chosen over bespoke locking because this is the highest-consequence code in the project. **Maintenance posture: actively supported** — ProfileStore is the successor to ProfileService, which is stable but no longer supported. Selected specifically on that basis after the maintenance finding was surfaced at Gate 1 *(supersedes the same-day ProfileService entry; risk R-7 resolved, retained for provenance)*. Also cuts DataStore call volume ~10× via a 300s default auto-save. **Uses MessagingService internally** for session-conflict resolution — library internals, not a gameplay use, and `TEST_PLAN.md` P-3 excludes `Vendor/` from the R-8 prohibition grep so the distinction is enforced mechanically. All library contact is confined to the `PlayerProfile` wrapper, so replacement is a one-module change. |
 
 No other third-party dependency exists. Anything added later needs its own row here, a pinned version, and a Gate 4 review note.
+
+### Accepted static-analysis warnings in vendored code
+*(Global Pipeline Law 5 — documented-with-justification. Recorded 2026-08-06.)*
+
+`src/Server/Vendor/ProfileStore.luau` raises Luau type warnings of the form
+`the function 'string.len' expects to get a string as its 1st argument, but is
+being given a *error-type* & string`, at lines 1370, 1372, 1639, 1641, 1737,
+1739, 1813 and 2044. They are internal to the library's own typing and touch no
+call path we make.
+
+**Decision: accept, do not modify.** `--!nocheck` on the drop would clear the
+panel at the cost of byte-parity with upstream, and every future re-pin would
+have to remember to re-apply it — an invisible, easily-lost local modification
+sitting in the highest-consequence file in the project. An unmodified pin is
+worth more than a clean number. NFR-8 was scoped accordingly.
+
+**The acceptance is bounded, not open-ended:**
+1. It applies to `Vendor/` only. First-party warnings remain gate failures.
+2. Zero **errors** remains whole-place, vendored code included.
+3. The count is recorded in every P-1 evidence artifact, split first-party vs
+   vendor. **An increase is a finding** — the pin is fixed, so the count is
+   fixed, and a change in it means the vendored file changed.
+4. Re-evaluate on any version bump: a new drop gets a fresh count and a fresh
+   entry here, never an inherited exemption.

@@ -1,0 +1,140 @@
+=== BLOCK 3 — PROCEDURE P-1, ROBLOX SCRIPT ANALYSIS ===
+Date:   2026-08-06
+Commit: 44b2cf2
+Method: Roblox Studio, View -> Script Analysis, operator-read. Script Analysis
+        is NOT exposed through the MCP server, so the panel is read by the
+        operator and the counts transcribed here.
+
+THIS IS THE FIRST TIME P-1 HAS EVER RUN ON THIS PROJECT. It was skipped at the
+previous Block 3 gate, which was nonetheless declared MECHANICALLY-CLEAN. It
+found real defects on its first run, including one that no unit test could have
+caught.
+
+--------------------------------------------------------------------------------
+RUN 1 — initial
+--------------------------------------------------------------------------------
+  0 of 0 Errors
+  149 of 149 Warnings
+
+GATE 2 VERDICT: FAIL. Under Global Pipeline Law 5 and NFR-8 a warning is a
+failure, not a nit.
+
+Findings, grouped by class rather than by line (149 warnings, 4 root causes):
+
+  A. `table.create(n)` with no fill value has type `{unknown}`, not `{number}`.
+     Assigning it to a `{number}` / `{Face}` / `Distribution` target warns.
+     Sites: ForgeMath 75/157/183, ForgeService 107/252/261,
+            RollService 148/471, and 6 sites across the suites.
+
+  B. `data[currency] = value` on the sealed `Profile` type:
+     "Cannot add indexer to table 'Profile'". 6 sites in EconomyService.
+
+  C. `table.sort` comparator parameters uninferable:
+     "Unknown type used in < comparison". DiceCatalog, RunAll.
+
+  D. `pairs(TEMPLATE)` over a sealed type. PlayerProfile._reconcile.
+
+  E. The accumulator idiom `e = e or check(...)` against `local e: string?`
+     produces a refinement union the checker cannot collapse back to `string?`.
+     ~120 warnings, one per call site, across all nine suites.
+
+  F. ServerScriptService.MonetizationManager — see the separate finding below.
+
+--------------------------------------------------------------------------------
+RUN 2 — after the first attempt at class A
+--------------------------------------------------------------------------------
+  0 of 0 Errors
+  144 of 144 Warnings
+
+MY FIRST FIX FOR CLASS A WAS WRONG, and the panel said so. Annotating the local
+(`local out: Distribution = table.create(#mass)`) does not cure the mismatch, it
+only makes it explicit. The COLUMN NUMBERS were the tell: the warning moved to
+(75, 28), which points at `table.create` itself, not at the variable.
+
+Recorded because it is the useful lesson from this run: read the column, not
+just the line. Five warnings cleared out of the ~40 expected, and the shortfall
+is what exposed the wrong diagnosis.
+
+Correct fix: supply a fill value — `table.create(n, 0)` for number arrays,
+`table.create(n, "")` for the string array — and plain `{}` where the elements
+are TABLES, because a fill value there would share ONE table across every face.
+That would have been a real bug traded for a clean panel.
+
+--------------------------------------------------------------------------------
+RUN 3 — after classes A-D fixed correctly
+--------------------------------------------------------------------------------
+  0 of 0 Errors
+  128 of 128 Warnings
+
+Every `src/` warning cleared. DiceCatalog, ForgeMath, ForgeService, RollService,
+EconomyService and PlayerProfile no longer appear in the panel at all. The
+residue is class E (the nine test suites) plus Vendor.ProfileStore.
+
+Class B note: EconomyService was fixed with explicit `readBalance`/`writeBalance`
+branch helpers, NOT a `:: any` cast. The cast would have silenced the warning and
+also silenced a genuine typo writing to a field that does not exist. The branches
+additionally make the complete list of profile fields the sole currency writer
+can touch readable at a glance (SRS FR-14.8).
+
+--------------------------------------------------------------------------------
+RUN 4 — after class E fixed
+--------------------------------------------------------------------------------
+  0 of 0 Errors
+  <OPERATOR TO CONFIRM> Warnings
+
+EXPECTED: 8, all in ServerScriptService.Server.Vendor.ProfileStore.
+FIRST-PARTY EXPECTED: 0.
+
+The expected vendor warnings, all of the same form
+(`string.len` receiving `*error-type* & string`):
+  ProfileStore 1370, 1372, 1639, 1641, 1737, 1739, 1813, 2044
+
+--------------------------------------------------------------------------------
+SEPARATE FINDING — an unmanaged script only P-1 could have seen
+--------------------------------------------------------------------------------
+P-1 listed `ServerScriptService.MonetizationManager`, a 23-line module from the
+retired tycoon project. It existed in the `.rbxl` place file and in NO
+Rojo-managed directory, so no grep in procedure P-3 could ever have seen it.
+
+It assigned `MarketplaceService.ProcessReceipt` (a SECOND assignment, threat
+T-17), held its processed-receipt ledger in memory only so a server restart
+would re-grant (T-15), and returned `PurchaseGranted` before anything durably
+persisted (T-16). It was inert only because the `ReplicatedStorage.Source` tree
+it required had already been deleted.
+
+DELETED with operator authorisation. Full source archived in commit df6fa34,
+since the place file is not under version control. Post-deletion DataModel sweep
+reports zero unmanaged scripts remaining. TEST_PLAN P-3 amended to sweep the live
+DataModel, and ledger L-023 records the general rule.
+
+--------------------------------------------------------------------------------
+ACCEPTED WARNINGS (Global Pipeline Law 5, documented-with-justification)
+--------------------------------------------------------------------------------
+Scope: `src/Server/Vendor/ProfileStore.luau` ONLY — loleris's library, pinned at
+45c9847, vendored unmodified, 2,242 lines.
+
+Rationale: `--!nocheck` on the drop would clear the panel but break byte-parity
+with upstream, leaving an invisible local modification in the highest-consequence
+file in the project that every future re-pin must remember to re-apply. An
+unmodified pin is worth more than a clean count.
+
+Bounds, so this never becomes a general licence:
+  * Vendored code only. First-party warnings remain gate failures.
+  * Zero ERRORS remains whole-place and unscoped.
+  * The count is recorded here every run, split first-party vs vendor.
+    AN INCREASE IS A FINDING: the pin is fixed, so the count is fixed.
+  * A version bump gets a fresh count and a fresh decision, never an
+    inherited exemption.
+
+Recorded in SRS NFR-8 and DEVOPS_RECORD §"Accepted static-analysis warnings".
+
+--------------------------------------------------------------------------------
+VERDICT
+--------------------------------------------------------------------------------
+P-1: PASS PENDING ONE CONFIRMATION — 0 errors; first-party warnings expected 0;
+     vendor warnings accepted per the policy above. The Run 4 count must be
+     transcribed above before this artifact is complete.
+
+     Gate 2 is NOT closed until that number is in this file. A missing or
+     assumed count is exactly the shortcut that let the previous Block 3 gate
+     ship a crash.
