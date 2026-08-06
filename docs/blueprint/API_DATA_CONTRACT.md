@@ -83,9 +83,13 @@ Over-budget requests are dropped and counted. Sustained abuse is logged. **Never
 
 One ProfileStore *store object* keyed `Profile_{UserId}` (the library type, not our `PlayerProfile` wrapper). This table is the **complete** default template: every field has a default, so no load path can dereference `nil` (threat T-12). ProfileStore reconciles missing keys on load; the migration chain handles shape changes it cannot.
 
+**Amended 2026-08-07 — schema v2.** `PurchasedBudget` was split out of `MassBudget` (Block 3 Gate 3 finding F-AD-1). `PurchasedBudget` is what the player OWNS and is shape-independent; `MassBudget` is what the current shape may USE, derived as `clamp(PurchasedBudget, faceCount * massFloor, shape.diamondCeiling)`. They are separate because a shape change must be freely reversible (FR-6.1) without being a way to gain budget: a narrower shape caps what is usable, and returning to a wider one restores it, but neither ever mints more. The v1 -> v2 migration seeds `PurchasedBudget` from `MassBudget`, which is lossless because a v1 die's budget IS what was paid for.
+
+**The die contract is executable, not prose.** `ForgeService.assertDieInvariant(die, shape)` is the single definition of a valid die -- seven clauses covering argument shape, face count, entitlement bounds, usable-budget bounds, per-face floor and element validity, and zero-sum. Every mutating handler checks a CANDIDATE against it before persisting, `ForgeService.validateStoredDice` checks and repairs on join, and UT-12 checks the stored die after every mutation. **A new rule about dice is added to that function, never restated inline.** This exists because the rules previously lived as prose spread across FR-3.6, FR-6.1 and comments, and `performSetShape` was consequently wrong three times in three different directions.
+
 ```lua
 local PROFILE_TEMPLATE = {
-    SchemaVersion = 1,
+    SchemaVersion = 2,   -- v2 (2026-08-07): PurchasedBudget split out of MassBudget
 
     -- currencies (EconomyService is the ONLY writer)
     Cash            = 0,
@@ -101,8 +105,9 @@ local PROFILE_TEMPLATE = {
     -- dice: array of owned dice, index = slot
     Dice = {
         [1] = {
-            Shape      = "D6",          -- D4 | D6 | D8 | D12 | D20
-            MassBudget = 60,            -- server-held; the forge sum must equal this
+            Shape           = "D6",     -- D4 | D6 | D8 | D12 | D20
+            MassBudget      = 60,       -- USABLE now; the forge sum must equal this
+            PurchasedBudget = 60,       -- OWNED; shape-independent (FR-3.6)
             Faces = {
                 -- one entry per face; Mass sums to MassBudget
                 { Mass = 10, Element = "None" },
