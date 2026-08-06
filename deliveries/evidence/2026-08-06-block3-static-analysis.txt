@@ -161,3 +161,28 @@ All three applicable procedures ran and produced artifacts on disk. This is the
 first Block 3 gate where that is true: the previous one was declared
 MECHANICALLY-CLEAN on P-2 and P-3 alone, and the P-1 it skipped is what would
 have caught the ElementCatalog.getElement crash on day one.
+
+================================================================================
+RUN 5 — after the Gate 3/4 remediation (F-AD-1/2/3, schema v2)
+Operator-read 2026-08-07
+================================================================================
+  0 of 0 Errors
+  8 of 8 Warnings
+
+  FIRST-PARTY WARNINGS: 0
+  VENDOR WARNINGS:      8   (ProfileStore 1370, 1372, 1639, 1641, 1737, 1739,
+                             1813, 2044 — byte-identical to the Run 4 set)
+
+The count is UNCHANGED at the recorded baseline. That is the intended reading:
+the pin did not move, so the number did not move. Had it risen, the vendored
+file would have changed and that alone would be a finding.
+
+The remediation added a profile field (Die.PurchasedBudget), a schema version
+(v1 -> v2), a migration step, and a recursive reconcile — none of which
+introduced a first-party warning.
+
+GATE 2 FOR BLOCK 3 (re-closed after remediation): MECHANICALLY-CLEAN.
+  P-1  PASS   0 errors, 0 first-party warnings, 8 accepted vendor
+  P-2  PASS   9 suites / 0 failed / 3,086 assertions  (was 3,046 pre-remediation)
+  P-3  PASS   unchanged; no new prohibited construct introduced
+  P-4  N/A    needs the client (Block 4); NOT PERFORMED, not passing
