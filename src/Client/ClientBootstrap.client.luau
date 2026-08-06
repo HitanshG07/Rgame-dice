@@ -129,14 +129,18 @@ end
 -- construction: a module that is not on disk yet is skipped with a note, but a
 -- module that IS present and fails to load is FATAL. "Not built yet" and
 -- "broken" must never look the same.
+-- Order is DEPENDENCY order, not importance order. ArenaView owns the camera and
+-- the pit, so DiceRenderer needs it first; FeedbackFX anchors floating text into
+-- the arena, so it needs both. The 2D surfaces depend on none of them.
 local MODULE_ORDER: { string } = {
-	-- "ArenaView",       -- 4B
-	-- "DiceRenderer",    -- 4B
-	-- "FeedbackFX",      -- 4B
-	-- "HUD",             -- 4C
-	-- "ForgePanel",      -- 4C
-	-- "MenuPanel",       -- 4C
-	-- "AudioDirector",   -- 4C
+	"ArenaView",       -- 4B  owns the pit, the camera, and the die anchor points
+	"DiceRenderer",    -- 4B  tumble-to-target; needs ArenaView's anchors
+	"FeedbackFX",      -- 4B  floating payout text; needs the arena to anchor into
+	"HUD",             -- 4C  top and bottom bars
+	"ForgePanel",      -- 4C  the primary surface (FR-13.8)
+	"MenuPanel",       -- 4C  left and right sidebars
+	"AudioDirector",   -- 4C  depends on nothing; last so a sound fault cannot
+	                   --     stop a visual surface from being built
 }
 
 local loaded: { [string]: any } = {}
