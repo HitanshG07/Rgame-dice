@@ -300,7 +300,20 @@ function ForgeService.performSetShape(player: Player, dieIndex: number, shapeId:
 	end
 	local minViable = shape.massFloor * shape.faceCount
 	local newBudget = math.clamp(purchased, minViable, shape.cashBudgetCap)
-	local faceMass = ForgeMath.snap(newBudget / shape.faceCount)
+
+	-- snapDOWN, not snap. Rounding each face's share to NEAREST rounds it up
+	-- half the time, and faceCount shares each rounded up sum to more than the
+	-- budget: 70 across a D6 gives 11.6667 per face and 70.0002 stored, so the
+	-- die ends up holding more mass than the player bought. 0.0002 is worth
+	-- nothing; the violated invariant is worth something, and rounding drift in
+	-- an economic quantity is exactly the class of bug that grows teeth later.
+	-- (Block 3 Gate 3 round 2, finding F-AD-4.)
+	local faceMass = ForgeMath.snapDown(newBudget / shape.faceCount)
+	if faceMass < shape.massFloor then
+		-- Cannot happen while minViable = massFloor * faceCount, but the two are
+		-- computed independently and a future catalog edit could separate them.
+		faceMass = shape.massFloor
+	end
 	-- Re-derive the budget from the snapped face mass so the stored budget and
 	-- the stored faces sum to the same number. Otherwise the very next forge
 	-- proposal fails validation against a budget the faces cannot reach.

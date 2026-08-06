@@ -434,6 +434,91 @@ local function run(): (boolean, string?, number)
 			"faces must sum to the stored budget after a shape round trip")
 	end
 
+	----------------------------------------------------------------------------
+	-- F-AD-4: the stored budget must never EXCEED what was purchased
+	----------------------------------------------------------------------------
+
+	-- Why this was missed the first time: every budget the earlier assertions
+	-- used divided evenly by its face count (60/6, 60/20, 800/20, 800/4), so the
+	-- rounding path was never entered. A test that only feeds clean numbers to a
+	-- rounding bug reports success. These budgets are chosen NOT to divide.
+	local awkward = { 70, 100, 130, 250, 333, 617 }
+	local shapesToTry = { "D4", "D6", "D20" }
+
+	PlayerProfile.mutate(player, function(d)
+		d.Diamond.Shapes.D4 = true
+		d.Diamond.Shapes.D6 = true
+		d.Diamond.Shapes.D20 = true
+	end)
+	EconomyService.credit(player, "Diamonds", 500, "test_setup")
+
+	for _, budget in ipairs(awkward) do
+		for _, shapeId in ipairs(shapesToTry) do
+			local target = DiceCatalog.getShape(shapeId)
+			if target and data.Dice[1].Shape ~= shapeId then
+				PlayerProfile.mutate(player, function(d)
+					d.Dice[1].PurchasedBudget = budget
+				end)
+				local okShape = ForgeService.performSetShape(player, 1, shapeId)
+				if okShape then
+					local stored = data.Dice[1].MassBudget
+					local cap = math.min(budget, target.cashBudgetCap)
+					e = e or check(stored <= cap, string.format(
+						"budget %d on %s stored %s, which EXCEEDS what was purchased (F-AD-4)",
+						budget, shapeId, tostring(stored)))
+
+					-- The faces must still sum to exactly the stored budget, or the
+					-- next forge proposal fails validation against a total the faces
+					-- cannot reach.
+					local faceSum = 0
+					for _, f in ipairs(data.Dice[1].Faces) do
+						faceSum += f.Mass
+					end
+					e = e or check(math.abs(faceSum - stored) < ForgeMath.EPSILON, string.format(
+						"budget %d on %s: faces sum to %.6f but budget is %.6f",
+						budget, shapeId, faceSum, stored))
+
+					-- And every face still clears the floor.
+					local floorHere = DiceCatalog.getMassFloor(shapeId)
+					local allAbove = true
+					for _, f in ipairs(data.Dice[1].Faces) do
+						if f.Mass < floorHere then
+							allAbove = false
+						end
+					end
+					e = e or check(allAbove, string.format(
+						"budget %d on %s put a face below the mass floor", budget, shapeId))
+
+					-- PurchasedBudget itself is never touched by a shape change.
+					e = e or check(data.Dice[1].PurchasedBudget == budget, string.format(
+						"shape change altered PurchasedBudget: expected %d, got %s",
+						budget, tostring(data.Dice[1].PurchasedBudget)))
+				end
+			end
+		end
+	end
+
+	-- The direct arithmetic, stated once so the invariant is readable rather than
+	-- only implied by the loop above: dividing a budget into equal shares must
+	-- never produce shares that sum to more than the budget.
+	for _, pair in ipairs({ { 70, 6 }, { 100, 6 }, { 130, 12 }, { 333, 7 }, { 617, 20 } }) do
+		local budget, faces = pair[1], pair[2]
+		local share = ForgeMath.snapDown(budget / faces)
+		local total = ForgeMath.snap(share * faces)
+		e = e or check(total <= budget, string.format(
+			"%d split %d ways summed to %.6f, which exceeds the budget", budget, faces, total))
+		e = e or check(budget - total < faces * (10 ^ -ForgeMath.PRECISION) + ForgeMath.EPSILON,
+			string.format("%d split %d ways lost %.6f, more than rounding explains",
+				budget, faces, budget - total))
+	end
+
+	-- snapDown must round toward zero on both signs, and reject non-finite input.
+	e = e or check(ForgeMath.snapDown(1.99999) == 1.9999, "snapDown must truncate, not round up")
+	e = e or check(ForgeMath.snapDown(2.0) == 2.0, "snapDown must leave an exact value alone")
+	e = e or check(ForgeMath.snapDown(-1.99999) == -1.9999, "snapDown must round toward zero when negative")
+	e = e or check(not (pcall(ForgeMath.snapDown, 0 / 0)), "snapDown must reject NaN")
+	e = e or check(not (pcall(ForgeMath.snapDown, math.huge)), "snapDown must reject infinity")
+
 	ForgeService._setResultEmitterForTesting(nil)
 	PlayerProfile.release(player)
 

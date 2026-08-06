@@ -186,3 +186,11 @@ GATE 2 FOR BLOCK 3 (re-closed after remediation): MECHANICALLY-CLEAN.
   P-2  PASS   9 suites / 0 failed / 3,086 assertions  (was 3,046 pre-remediation)
   P-3  PASS   unchanged; no new prohibited construct introduced
   P-4  N/A    needs the client (Block 4); NOT PERFORMED, not passing
+
+================================================================================
+NOTE — P-1 must be re-run after the F-AD-4 remediation
+================================================================================
+ForgeMath gained `snapDown` and ForgeService changed one line. The Run 5 count
+(0 errors / 8 vendor / 0 first-party) is the expectation; it is NOT recorded as
+observed until the operator reads the panel again. An assumed count is not a
+count.

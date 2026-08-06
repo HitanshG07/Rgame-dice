@@ -71,6 +71,27 @@ function ForgeMath.snap(n: number): number
 	return -math.floor(-n * POW10 + 0.5) / POW10
 end
 
+-- Snap TOWARD ZERO instead of to nearest.
+--
+-- `snap` rounds half-up, which is right for a displayed value and wrong for
+-- dividing a budget into equal shares: rounding each share UP makes the shares
+-- sum to MORE than the budget. At 4dp that is 0.0002 on a 70-budget D6 --
+-- economically nothing, and still a violated invariant, because the die then
+-- holds more mass than the player bought. Use this wherever a total is being
+-- split and the parts must not exceed the whole. (Block 3 Gate 3 finding F-AD-4.)
+function ForgeMath.snapDown(n: number): number
+	if not ForgeMath.isFinite(n) then
+		error("[ForgeMath] snapDown received a non-finite value", 2)
+	end
+	if n >= 0 then
+		return math.floor(n * POW10) / POW10
+	end
+	-- floor, not ceil, on the MAGNITUDE. `-math.ceil(-n * POW10)` rounds a
+	-- negative away from zero, which is the opposite of what this function
+	-- promises: snapDown(-1.99999) would give -2.0 rather than -1.9999.
+	return -math.floor(-n * POW10) / POW10
+end
+
 function ForgeMath.snapAll(mass: Distribution): Distribution
 	local out: Distribution = table.create(#mass, 0)
 	for i = 1, #mass do
