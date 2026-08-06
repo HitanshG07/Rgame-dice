@@ -222,3 +222,54 @@ server constants — the same reasoning as A-1. FR-3.4 requires only the four
 preview numbers and FR-3.3's forge cost, both of which ARE shown, so this is
 compliant. It becomes displayable for free once A-1 moves the pricing into
 `ForgeMath`.
+
+### A-5 (S-1 **and** S-2, BLOCKING) — `StateSync` is specified and emitted by nothing
+
+**Two workers in isolated contexts, given different slices, independently
+reported the same gap.** That convergence is the strongest signal this swarm has
+produced: it is not one worker's misreading.
+
+`grep StateSync src/Server` returns nothing. `RollService` fires only
+`RollResult`. Consequences, both confirmed by the workers who hit them:
+
+- **`DiceRenderer` never learns die shape or mass.** Every die renders as a
+  uniform dim D6, so **FR-1.3 — "a die's mass distribution is legible without
+  opening a menu" — is unverifiable at the P-4 smoke.** The module is correct and
+  ready; the data never arrives.
+- **`FeedbackFX` never learns the Settings toggles**, so particles and motion
+  blur default to on regardless of what the player saved (FR-13.6).
+- **`ForgePanel` cannot see entitlements** and shows every element locked.
+
+**The contract is also incomplete, in two places:**
+1. §1.2's `StateSync` payload is `{ cash, gems, diamonds, dice, upgrades,
+   streak, boosts, serverTime }` — **no `settings`**, which FR-13.6 requires to
+   reach the client.
+2. It does not carry `Diamond.Elements` / `Diamond.Shapes`, which the forge needs
+   to show what is unlocked honestly.
+
+**ORCHESTRATOR ACTION:** amend `API_DATA_CONTRACT` §1.2, then implement the
+emitter — on join, and after any state change. Server-side, outside every
+worker's block. **This blocks the P-4 smoke**, so it is fan-in work, not
+follow-up work.
+
+### A-6 (S-1, note) — the face-index → geometry mapping is invented client-side
+
+Nothing in `DiceCatalog` or the SRS says which physical facet is "face 3". The
+worker generates normals deterministically per shape at module load, so the
+mapping is stable across clients and sessions.
+
+Presentation-only and coherent as long as `ForgePanel` and `DiceRenderer` agree
+that "face 3" means the same *index* — which they do, since both index the same
+array. **Not a defect.** Recorded because if a canonical mapping is ever
+specified it belongs in `DiceCatalog`, not in a renderer.
+
+### A-7 (S-1, decision) — `FeedbackFX` fires on `RollResult` arrival, not on landing
+
+FR-2.8 says "at the moment of credit". The credit precedes the message, so
+arrival is the earliest honest moment, and it keeps the payout visible to a
+player who drops every frame of the tumble (FR-2.6).
+
+The alternative — text on landing — reads better but couples a *credit
+notification* to an *animation completing*, which is the exact dependency FR-2.6
+exists to forbid. **Keeping arrival.** Flagged because it is a deliberate choice
+against the more satisfying option, and the smoke will make it visible.
