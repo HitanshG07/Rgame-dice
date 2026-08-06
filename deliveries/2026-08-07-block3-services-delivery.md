@@ -3,7 +3,7 @@
 **Date:** 2026-08-07
 **Head:** `778b493`
 **Tier:** PRODUCTION
-**Status:** **NOT YET DELIVERED — two items open.** See §7.
+**Status:** **DELIVERED** — 2026-08-07. Both open items closed; see §7.
 
 *(Matrix F durable delivery record. Written before sign-off, not after, so the
 open items are visible rather than discovered later.)*
@@ -37,9 +37,9 @@ Modified: `PlayerProfile` (deep copy, live `_reconcile`, schema v2),
 |---|---|---|
 | G1 Construct | DIFF-COMPLETE | commits `c9fc91d` … `778b493` |
 | G2 Validate | **MECHANICALLY-CLEAN** | `evidence/2026-08-06-block3-static-analysis.txt` (P-1, 7 runs), `-remediated-unit-suite.txt` (P-2), `-remediated-prohibitions.txt` (P-3) |
-| G3 Audit | **AUDIT-APPROVED / 0** on `30268f3` | `audit-briefs/…-round4.md` + returned report |
-| G4 Secure | **SECURE / 0** on `30268f3` | same |
-| G5 Deliver | **PENDING** | this document |
+| G3 Audit | **AUDIT-APPROVED / 0** on `30268f3` (round 4) and on `778b493` (round 5 delta) | `audit-briefs/…-round4.md`, `…-round5-delta.md` + returned reports |
+| G4 Secure | **SECURE / 0** on both | same |
+| G5 Deliver | **DELIVERED** | this document |
 | G6 Evolve | pending | L-021 amended; L-022, L-023, L-024 added |
 
 **P-4 runtime smoke: NOT PERFORMED.** It needs the client's view layer, which is
@@ -88,14 +88,14 @@ move applied to call shape.
 | F-AD-5 | FR-3.6 | Fixed `30268f3` — bounded entitlement; exposed the `cashBudgetCap`/`diamondCeiling` divergence |
 | F-AD-6 | — | Fixed `30268f3` — `performSetElement` gated |
 | F-AD-7 | — | Fixed `30268f3` — invariant returns instead of throwing |
-| **F-SELF-1** | T-12 | Fixed `778b493` — **awaiting delta audit** |
+| **F-SELF-1** | T-12 | Fixed `778b493` — delta-audited clean (round 5) |
 
 ## 5. WHAT WAS VERIFIED
 
 - **P-1:** 0 errors, 0 first-party warnings, 8 accepted vendor warnings (pinned
-  ProfileStore, bounded and recorded in `DEVOPS_RECORD`). **Re-read pending on
-  `778b493`.**
-- **P-2:** 9 suites, 0 failed, **3,307 assertions** (from 2,779 at block start).
+  ProfileStore, bounded and recorded in `DEVOPS_RECORD`). Re-read on `778b493`
+  by the operator: **8 of 8, all vendor.**
+- **P-2:** 9 suites, 0 failed, **3,337 assertions** (from 2,779 at block start).
 - **P-3:** all prohibition greps match, including the DataModel sweep added
   after `MonetizationManager`.
 - **Live wire:** client → server → client proven end to end. `Roll()` succeeds,
@@ -114,15 +114,30 @@ move applied to call shape.
 | `THREAT_MODEL.md` | Current — T-30 added in the Blocks 1–2 cycle |
 | `HLD.md` | Current |
 
-## 7. OPEN ITEMS — why this is not signed off
+## 7. OPEN ITEMS — both now closed
 
-1. **P-1 re-read on `778b493`.** Expected 0 errors / 8 vendor / 0 first-party.
-   Not claimed until read.
-2. **Round-5 delta audit** of `validateStoredDice` and `repairDie`
-   (`audit-briefs/…-round5-delta.md`). This code landed **after** the round-4
-   approval, so HEAD is not the audited commit. It is additive and narrows the
-   attack surface, but it touches the load path and "one more thing after
-   approval" is how unaudited code accumulates.
+1. **P-1 re-read on `778b493`** — operator-read: **8 of 8 warnings, all
+   `Vendor.ProfileStore`, zero first-party.** PASS.
+2. **Round-5 delta audit** — `AUDIT-APPROVED / 0` and `SECURE / 0` on
+   `778b493`. Citations verified 5 of 7 verbatim-exact, two off by one line.
+   R-1, the whole safety argument for repairing rather than quarantining, was
+   attacked directly and held: repair clamps into legal bounds and can only
+   reduce an illegal advantage or restore the minimum legal baseline.
+
+**One thing the delta audit asserted that deserved a footnote.** R-2 called
+`repairDie`'s output "mathematically guaranteed" to satisfy the invariant. It
+is — **given the catalog.** The guarantee rests on `minViable <= diamondCeiling`
+holding for every shape, because `math.clamp(x, min, max)` ERRORS when
+`min > max`, and that call sits on the join path where the failure mode is a
+player who is never admitted and never kicked. It holds today (minViable 4–20
+against ceilings of 1000–5000) and `DiceCatalog` states in its own header that
+every constant in it is provisional until the P-6B balance sweep.
+
+Rather than edit production code that had just been audited clean, the
+assumption was made **executable in the suite**: UT-12 now asserts
+`minViable <= diamondCeiling`, `defaultBudget` within range, positive mass
+floors and at least two faces, for all five shapes. P-6B will now fail at the
+bench instead of quietly at someone's join.
 
 ## 8. RESIDUAL RISK, STATED
 

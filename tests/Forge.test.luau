@@ -844,6 +844,42 @@ local function run(): (boolean, string?, number)
 	e = e or check(data.Dice[1].Faces[1].Mass == 30,
 		"a legal forged layout must survive the load-time check untouched")
 
+	----------------------------------------------------------------------------
+	-- CATALOG PRECONDITIONS the repair path silently depends on
+	----------------------------------------------------------------------------
+
+	-- The round-5 delta audit called repairDie's output "mathematically
+	-- guaranteed" to satisfy the invariant. It is -- GIVEN the catalog. The
+	-- guarantee rests on two unstated preconditions, and `DiceCatalog` says in
+	-- its own header that every constant in it is provisional until the P-6B
+	-- balance sweep. If that sweep breaks one of these, `math.clamp(x, min, max)`
+	-- with min > max ERRORS, inside the join path, and the failure mode is a
+	-- player who is never admitted and never kicked.
+	--
+	-- Asserted here rather than guarded in the production path on purpose: the
+	-- production code was audited clean at 778b493, and encoding the assumption
+	-- in the suite makes P-6B fail loudly at the bench instead of quietly at
+	-- someone's join.
+	for _, id in ipairs({ "D4", "D6", "D8", "D12", "D20" }) do
+		local sd = DiceCatalog.getShape(id)
+		if sd then
+			local minViable = sd.massFloor * sd.faceCount
+			e = e or check(minViable <= sd.diamondCeiling, string.format(
+				"%s: minViable (%s) exceeds diamondCeiling (%s) -- math.clamp would ERROR "
+				.. "inside the join path", id, tostring(minViable), tostring(sd.diamondCeiling)))
+			e = e or check(minViable <= DiceCatalog.maxDiamondCeiling(), string.format(
+				"%s: minViable exceeds the global ceiling -- repair could not produce a legal die", id))
+			e = e or check(sd.defaultBudget >= minViable, string.format(
+				"%s: defaultBudget (%s) is below minViable (%s) -- a fresh die would be born illegal",
+				id, tostring(sd.defaultBudget), tostring(minViable)))
+			e = e or check(sd.defaultBudget <= sd.diamondCeiling, string.format(
+				"%s: defaultBudget exceeds the shape's own ceiling", id))
+			e = e or check(sd.massFloor > 0, string.format("%s: massFloor must be positive", id))
+			e = e or check(sd.faceCount > 1, string.format(
+				"%s: a die needs at least 2 faces, or landing probability is undefined", id))
+		end
+	end
+
 	ForgeService._setResultEmitterForTesting(nil)
 	PlayerProfile.release(player)
 
