@@ -23,7 +23,7 @@ local function approx(a: number, b: number, tol: number): boolean
 end
 
 local function flat(faces: number, budget: number): { number }
-	local t = table.create(faces)
+	local t: { number } = table.create(faces)
 	for i = 1, faces do
 		t[i] = budget / faces
 	end
@@ -49,7 +49,7 @@ local function run(): (boolean, string?, number)
 			string.format("D%d flat face probability %.9f, expected %.9f", faces, p[1], 1 / faces))
 
 		-- concentrated: one heavy face, remainder even
-		local conc = table.create(faces)
+		local conc: { number } = table.create(faces)
 		conc[1] = budget * 0.5
 		for i = 2, faces do conc[i] = (budget * 0.5) / (faces - 1) end
 		local pc = ForgeMath.landingProbabilities(conc)
@@ -117,7 +117,7 @@ local function run(): (boolean, string?, number)
 	e = e or check(inRange, "sampleFace returned an out-of-range index")
 
 	-- empirical frequency must match the declared distribution
-	local counts = table.create(6, 0)
+	local counts: { number } = table.create(6, 0)
 	local rng = Random.new(99)
 	local N = 60000
 	for _ = 1, N do

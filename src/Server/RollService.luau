@@ -145,7 +145,7 @@ end
 -- Samples ONE die. Split out of sampleOutcomes so the Freeze re-roll can draw a
 -- second independent sample for a single die without re-sampling the throw.
 function RollService.sampleDie(die: Die, dieIndex: number, rng: Random): DieOutcome
-	local masses = table.create(#die.Faces)
+	local masses: { number } = table.create(#die.Faces)
 	for f = 1, #die.Faces do
 		masses[f] = die.Faces[f].Mass
 	end
@@ -468,7 +468,7 @@ function RollService.performRoll(player: Player): (boolean, string?)
 		d.Vault.AvgIncomePerSec = RollService.averageIncomePerSecond(player)
 	end)
 
-	local faces = table.create(#result.outcomes)
+	local faces: { number } = table.create(#result.outcomes)
 	for i, o in ipairs(result.outcomes) do
 		faces[i] = o.faceIndex
 	end

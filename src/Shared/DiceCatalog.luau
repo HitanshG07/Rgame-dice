@@ -88,7 +88,7 @@ function DiceCatalog.getMassFloor(shapeId: string): number
 end
 
 function DiceCatalog.getAllShapes(): { ShapeDef }
-	local list = {}
+	local list: { ShapeDef } = {}
 	for _, shape in pairs(SHAPES) do
 		table.insert(list, shape)
 	end

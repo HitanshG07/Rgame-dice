@@ -204,7 +204,7 @@ local function run(): (boolean, string?, number)
 	-- every shape validates at its own face count
 	for _, faces in ipairs({ 4, 6, 8, 12, 20 }) do
 		local budget = faces * 10
-		local dist = table.create(faces)
+		local dist: { number } = table.create(faces)
 		for i = 1, faces do dist[i] = 10 end
 		local o, r = ForgeMath.validate(dist, faces, budget, FLOOR)
 		e = e or check(o, string.format("D%d flat distribution rejected: %s", faces, tostring(r)))

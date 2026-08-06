@@ -30,7 +30,7 @@ local function approx(a: number, b: number, tol: number): boolean
 end
 
 local function makeDie(masses: { number }, element: string?): RollService.Die
-	local faces = table.create(#masses)
+	local faces: { RollService.Face } = table.create(#masses)
 	for i, m in ipairs(masses) do
 		faces[i] = { Mass = m, Element = element or "None" }
 	end
@@ -40,7 +40,7 @@ local function makeDie(masses: { number }, element: string?): RollService.Die
 end
 
 local function flatMasses(faces: number, budget: number): { number }
-	local t = table.create(faces)
+	local t: { number } = table.create(faces)
 	for i = 1, faces do t[i] = budget / faces end
 	return t
 end
@@ -79,7 +79,7 @@ local function run(): (boolean, string?, number)
 	----------------------------------------------------------------------------
 	local dist = { 30, 6, 6, 6, 6, 6 }
 	local expected = ForgeMath.landingProbabilities(dist)
-	local counts = table.create(6, 0)
+	local counts: { number } = table.create(6, 0)
 	local rng = Random.new(20260805)
 	local N = 100000
 	for _ = 1, N do
@@ -122,7 +122,7 @@ local function run(): (boolean, string?, number)
 	end
 	e = e or check(identical, "identical seeds produced different sequences")
 
-	local c = {}
+	local c: { number } = {}
 	local r3 = Random.new(778)
 	for i = 1, 1000 do c[i] = ForgeMath.sampleFace(dist, r3) end
 	local allSame = true

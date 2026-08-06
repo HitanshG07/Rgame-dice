@@ -44,7 +44,7 @@ local function outcome(dieIndex: number, mass: number, element: string): RollSer
 end
 
 local function makeDie(masses: { number }, elements: { string }?): RollService.Die
-	local faces = table.create(#masses)
+	local faces: { RollService.Face } = table.create(#masses)
 	for i, m in ipairs(masses) do
 		faces[i] = { Mass = m, Element = if elements then elements[i] else "None" }
 	end

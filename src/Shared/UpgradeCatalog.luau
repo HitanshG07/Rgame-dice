@@ -113,7 +113,7 @@ function UpgradeCatalog.getDiamondNodeCost(id: string, currentLevel: number): nu
 end
 
 function UpgradeCatalog.getAllCashUpgrades(): { CashUpgradeDef }
-	local list = {}
+	local list: { CashUpgradeDef } = {}
 	for _, u in pairs(CASH_UPGRADES) do
 		table.insert(list, u)
 	end
@@ -121,7 +121,7 @@ function UpgradeCatalog.getAllCashUpgrades(): { CashUpgradeDef }
 end
 
 function UpgradeCatalog.getAllDiamondNodes(): { DiamondNodeDef }
-	local list = {}
+	local list: { DiamondNodeDef } = {}
 	for _, n in pairs(DIAMOND_NODES) do
 		table.insert(list, n)
 	end

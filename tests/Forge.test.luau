@@ -39,7 +39,7 @@ local function check(cond: boolean, msg: string): string?
 end
 
 local function snapshotDie(data: any, index: number): { number }
-	local out = {}
+	local out: { number } = {}
 	for i, face in ipairs(data.Dice[index].Faces) do
 		out[i] = face.Mass
 	end

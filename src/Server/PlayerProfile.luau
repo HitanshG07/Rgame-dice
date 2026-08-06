@@ -120,7 +120,7 @@ local function deepCopy(value: any): any
 	if type(value) ~= "table" then
 		return value
 	end
-	local out = {}
+	local out: { [any]: any } = {}
 	for k, v in pairs(value) do
 		out[k] = deepCopy(v)
 	end
@@ -137,8 +137,13 @@ PlayerProfile._deepCopy = deepCopy
 -- (threat T-12) -- it is deliberately NOT a test-only helper, because a helper
 -- that only tests exercise proves nothing about production.
 function PlayerProfile._reconcile(raw: any): Profile
-	local data = if type(raw) == "table" then raw else {}
-	for k, v in pairs(TEMPLATE) do
+	-- Both sides are addressed as dynamic maps here BY NECESSITY: the whole job
+	-- of this function is a runtime key sweep, and `Profile` is a sealed type
+	-- that cannot be indexed by a computed key. The cast is confined to this
+	-- function; every caller sees a `Profile` going in and coming out.
+	local data: { [string]: any } = if type(raw) == "table" then raw else {}
+	local template = (TEMPLATE :: any) :: { [string]: any }
+	for k, v in pairs(template) do
 		if data[k] == nil then
 			data[k] = deepCopy(v)
 		end
@@ -159,7 +164,7 @@ function PlayerProfile._reconcile(raw: any): Profile
 	if type(data.Diamond.Shapes) ~= "table" then
 		data.Diamond.Shapes = deepCopy(TEMPLATE.Diamond.Shapes)
 	end
-	return data :: Profile
+	return (data :: any) :: Profile
 end
 
 --------------------------------------------------------------------------------

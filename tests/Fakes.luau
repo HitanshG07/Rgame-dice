@@ -15,7 +15,7 @@ type FakePlayerSignal = {
 }
 
 function Fakes.createFakeSignal(): FakePlayerSignal
-	local listeners = {}
+	local listeners: { (player: Player) -> () } = {}
 	return {
 		Connect = function(_, fn)
 			table.insert(listeners, fn)
@@ -71,7 +71,7 @@ function Fakes.createFakeRemoteFunction(): FakeRemoteFunction
 end
 
 function Fakes.createFakeRemoteEvent(): FakeRemoteEvent
-	local firedList = {}
+	local firedList: { { player: Player, data: any } } = {}
 	return {
 		fired = firedList,
 		FireClient = function(_, player, data)
@@ -100,7 +100,7 @@ export type FakeProfile = {
 }
 
 function Fakes.createFakeProfile(data: any): FakeProfile
-	local releaseListeners = {}
+	local releaseListeners: { () -> () } = {}
 	local prof: FakeProfile = {
 		Data = data,
 		MetaData = { ActiveSession = { "PlaceId", "JobId" }, ProfileId = "FakeId" },

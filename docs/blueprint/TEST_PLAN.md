@@ -70,6 +70,8 @@ grep -rnE "TODO|FIXME|TBD"        src/                  # Matrix B    — MUST b
 
 **PASS = each line matches its stated expectation.** These are silent-failure classes: nothing at runtime tells you a second `ProcessReceipt` assignment overwrote the first.
 
+**P-3 MUST ALSO SWEEP THE LIVE DATAMODEL, not only `src/`.** Amended 2026-08-06, triggering fact: `ServerScriptService.MonetizationManager` — a leftover from the retired tycoon project, present in the `.rbxl` place file but in no Rojo-managed directory — was found assigning `MarketplaceService.ProcessReceipt`, holding its receipt ledger in memory only, and returning `PurchaseGranted` before anything persisted (threats T-15, T-16, T-17). **Every grep in this procedure scans the repository, so not one of them could ever have seen it.** Rojo syncs disk *into* Studio; it does not remove what disk never put there. Enumerate every `LuaSourceContainer` in the place, flag any whose full name falls outside `ServerScriptService.Server`, `ServerScriptService.Tests`, or `ReplicatedStorage.Shared`, and re-run each prohibition check against those sources too. An unmanaged script in the place is untracked, unreviewed, and unversioned — treat its presence as a finding in its own right.
+
 ### P-4 — Runtime smoke
 Press **Play Solo** and work down this table, noting any row that misbehaves.
 
