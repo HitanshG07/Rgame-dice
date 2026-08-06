@@ -194,3 +194,34 @@ ForgeMath gained `snapDown` and ForgeService changed one line. The Run 5 count
 (0 errors / 8 vendor / 0 first-party) is the expectation; it is NOT recorded as
 observed until the operator reads the panel again. An assumed count is not a
 count.
+
+================================================================================
+RUN 6 — after the structural remedy (assertDieInvariant, ARITY) + Block 4A
+Operator-read 2026-08-07
+================================================================================
+  0 of 0 Errors
+  10 of 10 Warnings
+
+  FIRST-PARTY WARNINGS: 2   <-- GATE 2 FAIL
+  VENDOR WARNINGS:      8       (unchanged baseline)
+
+  StarterPlayer.StarterPlayerScripts.Client.ClientBootstrap
+    Type Error: (65, 17) Expected this to be 'Instance', but got 'nil'
+    Type Error: (65, 17) Value of type 'Player?' could be nil
+
+CAUSE: `Players.LocalPlayer` is typed `Player?` -- nil on the server and during
+early client startup -- and ClientBootstrap indexed it directly inside `fatal()`.
+
+MY PROCESS FAILURE, not a surprise: Block 4A was written and committed WITHOUT
+running P-1 on it. The suite passed, the wire test passed, and I reported it as
+done. That is the same shortcut that let the previous Block 3 ship a crash, made
+again by me one day after writing the TEST_PLAN amendment that forbids it. P-1
+is not optional for new code either, and the amendment says so.
+
+FIX: narrowed once at the top with an explicit nil check that errors, rather
+than a `:: Player` cast. The cast would have silenced the checker and still
+indexed nil if the file were ever parented somewhere it does not belong. If
+there is no LocalPlayer there is also no PlayerGui to report a failure into, so
+erroring is the only honest option.
+
+  RUN 7 expectation: 0 errors, 8 warnings, first-party 0. NOT YET READ.

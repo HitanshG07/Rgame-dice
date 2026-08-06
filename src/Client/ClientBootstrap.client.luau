@@ -21,7 +21,18 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
-local localPlayer = Players.LocalPlayer
+-- `Players.LocalPlayer` is typed `Player?` because it is nil on the server and
+-- during early client startup. Narrow it ONCE here, loudly, rather than casting
+-- at each use: a `:: Player` cast would silence the checker and still index nil
+-- if this file were ever parented somewhere it does not belong. If there is no
+-- LocalPlayer there is also no PlayerGui to report a failure into, so erroring
+-- is the only honest option left.
+local maybeLocalPlayer = Players.LocalPlayer
+if maybeLocalPlayer == nil then
+	error("[ClientBootstrap] no LocalPlayer -- this must run as a LocalScript "
+		.. "under StarterPlayerScripts", 0)
+end
+local localPlayer: Player = maybeLocalPlayer
 
 --------------------------------------------------------------------------------
 -- Fatal reporting
