@@ -56,6 +56,107 @@ function ForgeService._setResultEmitterForTesting(fn: ((Player, any) -> ())?): (
 end
 
 --------------------------------------------------------------------------------
+-- THE DIE INVARIANT — written down ONCE, executable, enforced from both sides.
+--
+-- This function exists because `performSetShape` was wrong three times running,
+-- in three different directions: it confiscated the purchased budget, then
+-- manufactured budget on a shape toggle (F-AD-1), then inflated the stored
+-- budget by a rounding residue (F-AD-4). Three fixes, three new defects.
+--
+-- The root cause was never the arithmetic. It was that the rules a die must
+-- satisfy lived as prose scattered across SRS FR-3.6, FR-6.1 and a comment, so
+-- every fix re-derived them from memory and silently broke a clause nobody had
+-- written down. The tests had the same gap: each asserted the symptom last
+-- reported, never the whole contract.
+--
+-- So the contract is stated here, in one place, as the single definition. The
+-- mutating handlers check a CANDIDATE die against it before persisting, and
+-- UT-12 checks the stored die against it after every mutation. "Did we break a
+-- clause this time?" stops being a question the next auditor has to re-derive
+-- and becomes one the suite answers on every run.
+--
+-- Adding a clause here is how a future rule gets enforced. Do not restate one
+-- inline in a handler.
+--------------------------------------------------------------------------------
+
+export type CandidateDie = {
+	Shape: string,
+	MassBudget: number,
+	PurchasedBudget: number,
+	Faces: { PlayerProfile.Face },
+}
+
+function ForgeService.assertDieInvariant(die: CandidateDie, shape: DiceCatalog.ShapeDef): (boolean, string?)
+	-- 1. The die is the shape it claims to be.
+	if die.Shape ~= shape.id then
+		return false, "shape_mismatch"
+	end
+	if #die.Faces ~= shape.faceCount then
+		return false, "face_count_mismatch"
+	end
+
+	-- 2. Purchased budget is a real, positive quantity. It is what the player
+	--    owns (FR-3.6) and every other clause is measured against it.
+	if not ForgeMath.isFinite(die.PurchasedBudget) or die.PurchasedBudget <= 0 then
+		return false, "purchased_budget_invalid"
+	end
+
+	-- 3. The usable budget sits inside the shape's legal range and NEVER above
+	--    what was purchased. The upper bound is the whole of F-AD-1: a shape
+	--    change may cap what is usable, never mint more.
+	if not ForgeMath.isFinite(die.MassBudget) then
+		return false, "mass_budget_invalid"
+	end
+	local minViable = shape.massFloor * shape.faceCount
+	local ceiling = math.min(die.PurchasedBudget, shape.cashBudgetCap)
+	if die.MassBudget < minViable - ForgeMath.EPSILON then
+		return false, "mass_budget_below_viable"
+	end
+	if die.MassBudget > ceiling + ForgeMath.EPSILON then
+		return false, "mass_budget_exceeds_purchased"
+	end
+
+	-- 4. Every face is finite, at or above the floor, and carries a known
+	--    element. Finiteness first: NaN fails every comparison silently (T-25).
+	for i = 1, #die.Faces do
+		local face = die.Faces[i]
+		if not ForgeMath.isFinite(face.Mass) then
+			return false, "face_mass_not_finite"
+		end
+		if face.Mass < shape.massFloor - ForgeMath.EPSILON then
+			return false, "face_below_floor"
+		end
+		if type(face.Element) ~= "string" or not ElementCatalog.exists(face.Element) then
+			return false, "face_element_unknown"
+		end
+	end
+
+	-- 5. Zero-sum: the faces account for the budget exactly. Checked LAST so a
+	--    non-finite face is reported as such rather than as a sum failure.
+	local sum = 0.0
+	for i = 1, #die.Faces do
+		sum += die.Faces[i].Mass
+	end
+	if math.abs(sum - die.MassBudget) > ForgeMath.EPSILON then
+		return false, "faces_do_not_sum_to_budget"
+	end
+
+	return true, nil
+end
+
+-- Convenience for callers holding a stored die whose shape must be looked up.
+function ForgeService.checkStoredDie(die: any): (boolean, string?)
+	if type(die) ~= "table" then
+		return false, "die_not_a_table"
+	end
+	local shape = DiceCatalog.getShape(die.Shape)
+	if not shape then
+		return false, "unknown_shape"
+	end
+	return ForgeService.assertDieInvariant(die :: CandidateDie, shape)
+end
+
+--------------------------------------------------------------------------------
 -- PURE: cost calculation
 --------------------------------------------------------------------------------
 
@@ -147,6 +248,31 @@ function ForgeService.performForge(player: Player, dieIndex: number, distributio
 	local oldDist: { number } = table.create(#die.Faces, 0)
 	for i = 1, #die.Faces do
 		oldDist[i] = die.Faces[i].Mass
+	end
+
+	-- THE INVARIANT GATE. Build the die this call would produce and check it
+	-- against the single definition BEFORE any money moves. Checking the
+	-- candidate rather than the stored result means a violation is a refusal,
+	-- not a refund of a write that already happened.
+	if shape then
+		local candidateFaces: { PlayerProfile.Face } = {}
+		for i = 1, #die.Faces do
+			candidateFaces[i] = {
+				Mass = ForgeMath.snap(distribution[i]),
+				Element = die.Faces[i].Element,
+			}
+		end
+		local invOk, invReason = ForgeService.assertDieInvariant({
+			Shape = die.Shape,
+			MassBudget = die.MassBudget,
+			PurchasedBudget = die.PurchasedBudget,
+			Faces = candidateFaces,
+		}, shape)
+		if not invOk then
+			warn(string.format("[ForgeService] forge refused by the die invariant for UserId=%d: %s",
+				player.UserId, tostring(invReason)))
+			return false, Remotes.Notice.InvalidRequest
+		end
 	end
 
 	local cost = ForgeService.computeForgeCost(oldDist, distribution, die.MassBudget)
@@ -265,15 +391,6 @@ function ForgeService.performSetShape(player: Player, dieIndex: number, shapeId:
 		return false, Remotes.Notice.InvalidRequest
 	end
 
-	if not EconomyService.canAfford(player, "Diamonds", SHAPE_CHANGE_DIAMOND_COST) then
-		return false, Remotes.Notice.InsufficientFunds
-	end
-
-	local spent, spendReason = EconomyService.spend(player, "Diamonds", SHAPE_CHANGE_DIAMOND_COST, "set_shape")
-	if not spent then
-		return false, spendReason
-	end
-
 	-- SRS FR-6.1: a shape change is "freely reversible". It therefore must NOT
 	-- confiscate purchased progression. The mass BUDGET the player bought with
 	-- Cash and Diamonds (FR-3.6) carries across, clamped into the new shape's
@@ -325,6 +442,36 @@ function ForgeService.performSetShape(player: Player, dieIndex: number, shapeId:
 		carriedElements[i] = if prior ~= nil and ElementCatalog.exists(prior.Element)
 			then prior.Element
 			else "None"
+	end
+
+	-- THE INVARIANT GATE. This is the function that has been wrong three times
+	-- in three different directions; it is now the one that cannot persist a die
+	-- the contract rejects. Checked on the CANDIDATE and BEFORE any Diamonds
+	-- move, so a violation is a clean refusal rather than a refund of a write
+	-- that already happened.
+	local candidateFaces: { PlayerProfile.Face } = {}
+	for i = 1, shape.faceCount do
+		candidateFaces[i] = { Mass = faceMass, Element = carriedElements[i] }
+	end
+	local invOk, invReason = ForgeService.assertDieInvariant({
+		Shape = shapeId,
+		MassBudget = exactBudget,
+		PurchasedBudget = purchased,
+		Faces = candidateFaces,
+	}, shape)
+	if not invOk then
+		warn(string.format("[ForgeService] shape change refused by the die invariant for UserId=%d: %s -> %s (%s)",
+			player.UserId, oldDie.Shape, shapeId, tostring(invReason)))
+		return false, Remotes.Notice.InvalidRequest
+	end
+
+	if not EconomyService.canAfford(player, "Diamonds", SHAPE_CHANGE_DIAMOND_COST) then
+		return false, Remotes.Notice.InsufficientFunds
+	end
+
+	local spent, spendReason = EconomyService.spend(player, "Diamonds", SHAPE_CHANGE_DIAMOND_COST, "set_shape")
+	if not spent then
+		return false, spendReason
 	end
 
 	local applied, applyReason = PlayerProfile.mutate(player, function(d)

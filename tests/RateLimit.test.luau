@@ -139,6 +139,47 @@ local function run(): (boolean, string?, number)
 	e = e or check(not infAttempt, "an infinite clock must not refill an exhausted bucket")
 
 	----------------------------------------------------------------------------
+	-- F-4A-1: declared arity must cover every remote in the contract
+	----------------------------------------------------------------------------
+
+	-- `Roll(999)` used to be accepted and processed. The contract says any
+	-- argument rejects the call. Arity is now declared centrally and enforced in
+	-- bind(); the enforcement itself needs a real RemoteFunction, so what is
+	-- testable here is that the DECLARATION is complete and correct -- a remote
+	-- missing from the table would be wired with no arity check at all.
+	local RemoteGateway = require(Server:WaitForChild("RemoteGateway"))
+	local Remotes = require(game:GetService("ReplicatedStorage").Shared.Remotes)
+
+	local undeclared: { string } = {}
+	for _, name in pairs(Remotes.Fn) do
+		if RemoteGateway.arityFor(name) == nil then
+			table.insert(undeclared, name)
+		end
+	end
+	e = e or check(#undeclared == 0, string.format(
+		"remotes with no declared arity: %s", table.concat(undeclared, ", ")))
+
+	-- Spot-check the values against API_DATA_CONTRACT §1.1 directly, so a typo in
+	-- the table is caught rather than merely being present.
+	e = e or check(RemoteGateway.arityFor("Roll") == 0, "Roll must be declared zero-arity")
+	e = e or check(RemoteGateway.arityFor("AddDieSlot") == 0, "AddDieSlot must be declared zero-arity")
+	e = e or check(RemoteGateway.arityFor("Ascend") == 0, "Ascend must be declared zero-arity")
+	e = e or check(RemoteGateway.arityFor("DailySpin") == 0, "DailySpin must be declared zero-arity")
+	e = e or check(RemoteGateway.arityFor("ClaimGroupReward") == 0, "ClaimGroupReward must be declared zero-arity")
+	e = e or check(RemoteGateway.arityFor("Forge") == 2, "Forge takes dieIndex and distribution")
+	e = e or check(RemoteGateway.arityFor("SetElement") == 3, "SetElement takes dieIndex, faceIndex, elementId")
+	e = e or check(RemoteGateway.arityFor("SetShape") == 2, "SetShape takes dieIndex and shapeId")
+	e = e or check(RemoteGateway.arityFor("BuyUpgrade") == 1, "BuyUpgrade takes an id only -- never a price")
+	e = e or check(RemoteGateway.arityFor("SetAutoRoll") == 1, "SetAutoRoll takes a boolean -- never an interval")
+	e = e or check(RemoteGateway.arityFor("RedeemCode") == 1, "RedeemCode takes a code")
+	e = e or check(RemoteGateway.arityFor("GetLeaderboard") == 1, "GetLeaderboard takes a boardId")
+
+	-- An undeclared name reports nil rather than defaulting to something
+	-- permissive; bind() turns that into a startup error.
+	e = e or check(RemoteGateway.arityFor("NotARealRemote") == nil,
+		"an undeclared remote must report nil arity, never a default")
+
+	----------------------------------------------------------------------------
 	-- Cleanup releases per-player state
 	----------------------------------------------------------------------------
 

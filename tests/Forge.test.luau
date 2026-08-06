@@ -519,6 +519,113 @@ local function run(): (boolean, string?, number)
 	e = e or check(not (pcall(ForgeMath.snapDown, 0 / 0)), "snapDown must reject NaN")
 	e = e or check(not (pcall(ForgeMath.snapDown, math.huge)), "snapDown must reject infinity")
 
+	----------------------------------------------------------------------------
+	-- THE DIE INVARIANT — asserted directly, then after every mutation
+	----------------------------------------------------------------------------
+
+	-- Written once in ForgeService.assertDieInvariant and checked from both
+	-- sides. These cases prove each clause REJECTS, because an invariant that
+	-- only ever returns true is decoration.
+	local d6def = DiceCatalog.getShape("D6")
+	if d6def then
+		local function goodDie(): any
+			local f: { any } = {}
+			for i = 1, 6 do
+				f[i] = { Mass = 10, Element = "None" }
+			end
+			return { Shape = "D6", MassBudget = 60, PurchasedBudget = 60, Faces = f }
+		end
+
+		local okBase = ForgeService.assertDieInvariant(goodDie(), d6def)
+		e = e or check(okBase, "a well-formed starting die must satisfy the invariant")
+
+		local function rejects(mutate: (any) -> (), expected: string, label: string)
+			local d = goodDie()
+			mutate(d)
+			local ok, reason = ForgeService.assertDieInvariant(d, d6def)
+			e = e or check(not ok, string.format("the invariant accepted %s", label))
+			e = e or check(reason == expected, string.format(
+				"%s should report '%s', got '%s'", label, expected, tostring(reason)))
+		end
+
+		rejects(function(d) d.Shape = "D20" end, "shape_mismatch", "a die claiming the wrong shape")
+		rejects(function(d) table.remove(d.Faces) end, "face_count_mismatch", "a die with too few faces")
+		rejects(function(d) d.PurchasedBudget = 0 end, "purchased_budget_invalid", "a zero purchased budget")
+		rejects(function(d) d.PurchasedBudget = 0 / 0 end, "purchased_budget_invalid", "a NaN purchased budget")
+		rejects(function(d) d.MassBudget = 0 / 0 end, "mass_budget_invalid", "a NaN mass budget")
+		rejects(function(d)
+			d.PurchasedBudget = 30
+			d.MassBudget = 60
+		end, "mass_budget_exceeds_purchased", "a budget above what was purchased")
+		rejects(function(d)
+			for i = 1, 6 do d.Faces[i].Mass = 0.5 end
+			d.MassBudget = 3
+		end, "mass_budget_below_viable", "a budget below the shape's viable minimum")
+		rejects(function(d) d.Faces[1].Mass = 0 / 0 end, "face_mass_not_finite", "a NaN face")
+		rejects(function(d)
+			d.Faces[1].Mass = 0
+			d.Faces[2].Mass = 20
+		end, "face_below_floor", "a face below the mass floor")
+		rejects(function(d) d.Faces[1].Element = "Plutonium" end, "face_element_unknown", "an unknown element")
+		rejects(function(d) d.Faces[1].Mass = 11 end, "faces_do_not_sum_to_budget", "faces that overshoot the budget")
+		rejects(function(d) d.Faces[1].Mass = 9 end, "faces_do_not_sum_to_budget", "faces that undershoot the budget")
+	end
+
+	-- And the live die must satisfy it after EVERY mutating operation, across
+	-- every shape and both divisible and non-divisible budgets. This is the
+	-- assertion whose absence let performSetShape be wrong three times.
+	PlayerProfile.mutate(player, function(d)
+		for _, id in ipairs({ "D4", "D6", "D8", "D12", "D20" }) do
+			d.Diamond.Shapes[id] = true
+		end
+	end)
+	EconomyService.credit(player, "Diamonds", 2000, "test_setup")
+	EconomyService.credit(player, "Cash", 1e12, "test_setup")
+
+	local sweepBudgets = { 40, 60, 70, 137, 250, 333, 900 }
+	local sweepShapes = { "D4", "D6", "D8", "D12", "D20" }
+	local sweepChecked = 0
+
+	for _, budget in ipairs(sweepBudgets) do
+		for _, shapeId in ipairs(sweepShapes) do
+			if data.Dice[1].Shape ~= shapeId then
+				PlayerProfile.mutate(player, function(d)
+					d.Dice[1].PurchasedBudget = budget
+				end)
+				local changed = ForgeService.performSetShape(player, 1, shapeId)
+				if changed then
+					sweepChecked += 1
+					local ok, reason = ForgeService.checkStoredDie(data.Dice[1])
+					e = e or check(ok, string.format(
+						"INVARIANT BROKEN after shape change to %s at purchased budget %d: %s",
+						shapeId, budget, tostring(reason)))
+				end
+			end
+		end
+	end
+	e = e or check(sweepChecked >= 20, string.format(
+		"the shape sweep should have exercised many changes, only did %d", sweepChecked))
+
+	-- A forge must leave the invariant intact too.
+	PlayerProfile.mutate(player, function(d)
+		local f: { any } = {}
+		for i = 1, 6 do
+			f[i] = { Mass = 10, Element = "None" }
+		end
+		d.Dice[1] = { Shape = "D6", MassBudget = 60, PurchasedBudget = 60, Faces = f }
+	end)
+	local forgeAfter = ForgeService.performForge(player, 1, { 30, 6, 6, 6, 6, 6 })
+	e = e or check(forgeAfter, "the post-sweep forge should succeed")
+	local okAfterForge, reasonAfterForge = ForgeService.checkStoredDie(data.Dice[1])
+	e = e or check(okAfterForge, string.format(
+		"INVARIANT BROKEN after a forge: %s", tostring(reasonAfterForge)))
+
+	-- checkStoredDie must fail closed on rubbish rather than erroring.
+	e = e or check(not (ForgeService.checkStoredDie(nil)), "checkStoredDie must refuse nil")
+	e = e or check(not (ForgeService.checkStoredDie("cheese" :: any)), "checkStoredDie must refuse a non-table")
+	e = e or check(not (ForgeService.checkStoredDie({ Shape = "D99" } :: any)),
+		"checkStoredDie must refuse an unknown shape")
+
 	ForgeService._setResultEmitterForTesting(nil)
 	PlayerProfile.release(player)
 

@@ -32,6 +32,49 @@ export type Handler = (player: Player, ...any) -> ...any
 local MAX_STRING_CODE = 32
 local MAX_STRING_ID = 64
 
+--------------------------------------------------------------------------------
+-- Declared arity, from API_DATA_CONTRACT.md §1.1. Enforced centrally in bind().
+--
+-- F-4A-1, found by the Block 4A wire test on 2026-08-07: `Roll(999)` was
+-- accepted and processed as a normal roll. The contract says "Zero arity
+-- enforced -- any argument rejects the call", and it was not. Nothing was
+-- exploitable, because RollService.performRoll ignores extras and the value
+-- reached no decision -- but an unexpected argument means either the caller is
+-- not our client or the API has drifted, and both are worth refusing rather
+-- than absorbing.
+--
+-- No unit test could have caught it: the suite calls handlers directly and never
+-- crosses a RemoteFunction. It took a real client invoking a real remote.
+--
+-- Declared here in ONE table for the same reason the die invariant is declared
+-- in one function: a rule restated per-handler is a rule that drifts per-handler.
+--------------------------------------------------------------------------------
+local ARITY: { [string]: number } = {
+	Roll = 0,
+	Forge = 2,
+	SetElement = 3,
+	SetShape = 2,
+	BuyUpgrade = 1,
+	AddDieSlot = 0,
+	Ascend = 0,
+	BuyDiamondNode = 1,
+	SetAutoRoll = 1,
+	ClaimVault = 1,
+	ClaimQuest = 1,
+	ClaimChest = 1,
+	DailySpin = 0,
+	RedeemCode = 1,
+	ClaimGroupReward = 0,
+	GetLeaderboard = 1,
+}
+
+-- Returns the declared arity, or nil if the remote is not declared. A remote
+-- with no declaration is a contract gap, not a licence to accept anything --
+-- bind() refuses to wire one.
+function RemoteGateway.arityFor(name: string): number?
+	return ARITY[name]
+end
+
 local handlers: { [string]: Handler } = {}
 
 --------------------------------------------------------------------------------
@@ -149,6 +192,16 @@ function RemoteGateway.bind(): ()
 	end
 
 	for name, handler in pairs(handlers) do
+		local expectedArity = ARITY[name]
+		if expectedArity == nil then
+			-- Fail closed at STARTUP rather than at the first call. A remote with
+			-- no declared arity is a gap in API_DATA_CONTRACT §1.1, and wiring it
+			-- anyway would mean accepting whatever arrives.
+			error(string.format(
+				"[Gateway] remote '%s' has no declared arity in ARITY -- add it to "
+				.. "API_DATA_CONTRACT §1.1 and to the table in RemoteGateway", name), 2)
+		end
+
 		local remote = Remotes.getFunction(name :: any)
 		remote.OnServerInvoke = function(player: Player, ...): ...any
 			if typeof(player) ~= "Instance" or not player:IsA("Player") then
@@ -157,6 +210,14 @@ function RemoteGateway.bind(): ()
 
 			if not RateLimiter.consume(player, name) then
 				return false, Remotes.Notice.RateLimited
+			end
+
+			-- ARITY, before type or bounds. A call with the wrong shape is not a
+			-- call with a bad value; it is a caller that is not speaking our
+			-- protocol, and it is refused without being interpreted (F-4A-1).
+			if select("#", ...) ~= expectedArity then
+				return reject(player, name, string.format(
+					"arity %d, expected %d", select("#", ...), expectedArity))
 			end
 
 			-- A handler error must never surface to the client as a Luau message.
