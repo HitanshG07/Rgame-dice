@@ -160,3 +160,65 @@ output.
 The Swarm Report, appended to this document at fan-in: per-block verdicts,
 rejection counts, integration evidence, smoke evidence, and any circuit-breaker
 escalations.
+
+---
+
+## 9. FAN-IN ACTION ITEMS RAISED BY WORKERS
+
+Workers are forbidden from writing outside their block. Each of these was
+**correctly reported rather than acted on** — that is the discipline the proof
+depends on, and it worked.
+
+### A-1 (S-2, HIGH) — the forge cost function now exists in two places
+
+`ForgePanel` needs the cost before the player commits (FR-3.3 makes it a
+pre-commit decision input), but **a client cannot require a server module**. The
+worker therefore reimplemented `ForgeService.computeForgeCost` locally as
+`estimateCost`, duplicating `BASE_COST_PER_MASS_UNIT = 5.0`,
+`REFERENCE_BUDGET = 60.0` and `SCALE_EXPONENT = 2.0`.
+
+**This is exactly the failure mode of L-025** — a rule living in two places gets
+re-derived, and the two copies drift silently. It is the same shape as the die
+contract that cost Block 3 five rejections. The worker labelled it `~` in the UI
+and never treats it as truth, which is the right mitigation, but mitigation is
+not resolution.
+
+**ORCHESTRATOR ACTION:** move the three constants and the cost function into
+`src/Shared/ForgeMath.luau` and have both `ForgeService` and `ForgePanel` call
+the one definition — precisely as `landingProbabilities` and `faceValue` are
+already shared. `ForgeMath` is a shared file and therefore Orchestrator-owned;
+no worker could have done this. Assert single-definition in UT-12.
+
+### A-2 (S-2, HIGH) — `StateSync` is specified but never emitted
+
+`grep` over `src/Server` finds no `StateSync` fire. Every 2D surface reads its
+authoritative state from it. The worker parsed the API contract defensively and
+falls back to template defaults, which **over-reports locking** — the forge will
+show every element locked until `StateSync` carries `Diamond.Elements` and
+`Diamond.Shapes`.
+
+Failing toward "locked" is the safe direction. But the panel cannot honestly show
+entitlements until a server emits the event, and the contract's §1.2 payload list
+does not currently name the Diamond sets.
+
+**ORCHESTRATOR ACTION:** amend `API_DATA_CONTRACT` §1.2 to include them, and
+implement the emitter. Server-side and outside every worker's block.
+
+### A-3 (S-2/S-3 boundary) — one forge entry point, not two
+
+FR-13.3 puts Forge in the left sidebar, which is S-3's `MenuPanel`; the panel
+itself is S-2's. S-2 exposed `ForgePanel.setVisible(boolean)` and additionally
+built a permanently visible left-edge FORGE tab so the panel is reachable in
+**one** tap (FR-13.8 permits two).
+
+**ORCHESTRATOR ACTION:** wire `MenuPanel`'s Forge entry to
+`ForgePanel.setVisible`, and decide whether the edge tab and the sidebar entry
+should both exist. Two controls for one surface is a UI defect, not a feature.
+
+### A-4 (S-2, MEDIUM) — element and shape costs are not displayed
+
+Shown as "server prices it" rather than as numbers, to avoid duplicating two more
+server constants — the same reasoning as A-1. FR-3.4 requires only the four
+preview numbers and FR-3.3's forge cost, both of which ARE shown, so this is
+compliant. It becomes displayable for free once A-1 moves the pricing into
+`ForgeMath`.
