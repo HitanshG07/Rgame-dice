@@ -422,6 +422,15 @@ local function doRoll(): ()
 		return
 	end
 
+	-- Asked before sending, not after being refused. The button is already
+	-- greyed by the heartbeat at this point; this is what makes the grey
+	-- MEAN something rather than being decoration over a call that still goes
+	-- out and comes back rejected. readyIn is read-only and consumes nothing.
+	if client.readyIn("Roll") > 0 then
+		setStatus("SLOW DOWN")
+		return
+	end
+
 	-- Feedback first, network second. The request is dispatched on its own
 	-- thread so the InvokeServer yield cannot delay the pulse past 100 ms
 	-- (NFR-7) -- the frame paints while the call is still in flight.
@@ -440,6 +449,11 @@ end
 local function doToggleAuto(): ()
 	local client = net
 	if client == nil then
+		return
+	end
+
+	if client.readyIn("SetAutoRoll") > 0 then
+		setStatus("SLOW DOWN")
 		return
 	end
 

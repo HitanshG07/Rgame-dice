@@ -177,12 +177,17 @@ end
 
 local openers: { [string]: SurfaceOpener } = {}
 
+-- Forward-declared. Wiring an opener has to re-render the sidebar, but the
+-- renderer needs the entry table declared further down, so the two are split:
+-- the name is reserved here and the body is assigned below the declarations.
+local refreshEntries: () -> ()
+
 -- Wiring point for the Orchestrator. Passing nil unwires, which returns the
 -- entry to its unavailable rendering rather than leaving a live-looking button
 -- with a dead callback.
 function MenuPanel.setSurfaceOpener(key: SurfaceKey, opener: SurfaceOpener?): ()
 	openers[key] = opener
-	MenuPanel.refresh()
+	refreshEntries()
 end
 
 --------------------------------------------------------------------------------
@@ -277,8 +282,6 @@ local statsBody: Frame? = nil
 
 local settingsBody: Frame? = nil
 local settingsButtons: { [string]: TextButton } = {}
-local settingsNote: TextLabel? = nil
-local codesRow: TextButton? = nil
 
 local connections: { RBXScriptConnection } = {}
 local latestState: any = nil
@@ -439,12 +442,13 @@ local function renderStatistics(): ()
 		slots = #(dice :: { any })
 	end
 
-	local values = {
+	local streak = readNumber(state, "streak")
+
+	local values: { string } = {
 		"CASH      " .. money(readNumber(state, "cash")),
 		"GEMS      " .. money(readNumber(state, "gems")),
 		"DIAMONDS  " .. money(readNumber(state, "diamonds")),
-		"STREAK    " .. (if readNumber(state, "streak") == nil
-			then EMPTY else string.format("%d", readNumber(state, "streak") :: number)),
+		"STREAK    " .. (if streak == nil then EMPTY else string.format("%d", streak)),
 		"DIE SLOTS " .. (if slots == nil then EMPTY else string.format("%d", slots)),
 	}
 
@@ -575,7 +579,7 @@ end
 
 -- Re-evaluates every entry's appearance against its current status. Cheap, and
 -- called only on wiring changes -- there is no per-frame work in this module.
-function MenuPanel.refresh(): ()
+function refreshEntries(): ()
 	for _, entry in ipairs(ENTRIES) do
 		local button = entryButtons[entry.id]
 		if button ~= nil then
@@ -708,9 +712,8 @@ local function buildSettingsBody(parent: Instance): Frame
 		notify("PROMO CODES -- " .. BLOCK5)
 		cue("UiRefused")
 	end)
-	codesRow = codes
 
-	settingsNote = addLabel(body, "These apply for this session; saving them needs a server update.",
+	addLabel(body, "These apply for this session; saving them needs a server update.",
 		UDim2.fromScale(1, rowHeight * 0.8), UDim2.fromScale(0, rowHeight * (#TOGGLES + 1)),
 		UITheme.Colors.TextDim)
 
@@ -721,7 +724,6 @@ local function buildOverlay(root: Instance): ()
 	local panel = UITheme.panel(UDim2.fromScale(0.70, 0.64), UDim2.fromScale(0.15, 0.18), true)
 	panel.Name = "OverlayPanel"
 	panel.Parent = root
-	overlayPanel = panel
 
 	overlayTitle = addLabel(panel, "", UDim2.fromScale(0.7, 0.09), UDim2.fromScale(0.04, 0.025),
 		UITheme.Colors.TextGold)
@@ -782,7 +784,7 @@ function MenuPanel.init(client: Net): ()
 
 	buildOverlay(overlay)
 
-	MenuPanel.refresh()
+	refreshEntries()
 	renderSettings()
 	renderStatistics()
 
@@ -816,14 +818,11 @@ function MenuPanel.shutdown(): ()
 	end
 	overlayGui = nil
 
-	overlayPanel = nil
 	overlayTitle = nil
 	noticeLabel = nil
 	statsBody = nil
 	settingsBody = nil
 	statNote = nil
-	settingsNote = nil
-	codesRow = nil
 	entryButtons = {}
 	settingsButtons = {}
 	statRows = {}
