@@ -103,6 +103,41 @@ local function run(): (boolean, string?, number)
 		"a NaN proposal must price as unaffordable, not free")
 
 	----------------------------------------------------------------------------
+	-- F-AD-2: the cost must scale with PROGRESSION, not only with mass moved
+	----------------------------------------------------------------------------
+
+	-- A flat per-unit cost satisfies FR-3.3's wording and defeats its purpose:
+	-- at a late-game balance a flat charge is indistinguishable from free, and
+	-- free re-forging collapses the cross-die puzzle (ledger L-016).
+	local move = { 30, 6, 6, 6, 6, 6 }
+	local atBase = ForgeService.computeForgeCost(flat, move, ForgeService.REFERENCE_BUDGET)
+	local atDouble = ForgeService.computeForgeCost(flat, move, ForgeService.REFERENCE_BUDGET * 2)
+	local atTen = ForgeService.computeForgeCost(flat, move, ForgeService.REFERENCE_BUDGET * 10)
+
+	e = e or check(atBase > 0, "a forge at the reference budget must still cost something")
+	e = e or check(atDouble > atBase, string.format(
+		"cost must rise with the die's budget: base=%.2f double=%.2f", atBase, atDouble))
+	e = e or check(atTen > atDouble, "cost must keep rising with budget")
+	e = e or check(atDouble > atBase * 2.0, string.format(
+		"cost must scale SUPERLINEARLY in budget, or it is outrun by income: "
+		.. "doubling the budget multiplied cost by only %.3fx", atDouble / atBase))
+
+	-- Never cheaper than the starting die, whatever is passed.
+	e = e or check(ForgeService.computeForgeCost(flat, move, 1) >= atBase,
+		"a tiny budget must not make forging cheaper than the reference")
+	e = e or check(ForgeService.computeForgeCost(flat, move, 0) == math.huge,
+		"a zero budget must price as unaffordable, not free")
+	e = e or check(ForgeService.computeForgeCost(flat, move, 0 / 0) == math.huge,
+		"a NaN budget must price as unaffordable, not free")
+	e = e or check(ForgeService.computeForgeCost(flat, move, math.huge) == math.huge,
+		"an infinite budget must price as unaffordable, not free")
+
+	-- Omitting the budget keeps the pure mass-only cost, for callers that only
+	-- want the FR-3.3 component.
+	e = e or check(ForgeService.computeForgeCost(flat, move) == atBase,
+		"omitting the budget must equal the cost at the reference budget")
+
+	----------------------------------------------------------------------------
 	-- A rejected proposal mutates NOTHING (SRS FR-3.2)
 	----------------------------------------------------------------------------
 
@@ -260,11 +295,18 @@ local function run(): (boolean, string?, number)
 	if d20 then
 		e = e or check(#data.Dice[1].Faces == d20.faceCount, string.format(
 			"a D20 must have %d faces, got %d", d20.faceCount, #data.Dice[1].Faces))
-		e = e or check(data.Dice[1].MassBudget >= d20.defaultBudget, string.format(
-			"the new budget (%s) must be at least the shape default (%d)",
-			tostring(data.Dice[1].MassBudget), d20.defaultBudget))
+		-- The floor is the smallest budget the shape can physically hold (every
+		-- face at its mass floor) -- deliberately NOT defaultBudget. Clamping up
+		-- to defaultBudget is what manufactured budget in finding F-AD-1.
+		local minViable = d20.massFloor * d20.faceCount
+		e = e or check(data.Dice[1].MassBudget >= minViable, string.format(
+			"the new budget (%s) must be at least the viable minimum (%d)",
+			tostring(data.Dice[1].MassBudget), minViable))
 		e = e or check(data.Dice[1].MassBudget <= d20.cashBudgetCap,
 			"the carried budget must be clamped to the shape's cap")
+		e = e or check(data.Dice[1].MassBudget <= data.Dice[1].PurchasedBudget, string.format(
+			"a shape change must never exceed what was purchased: budget %s vs purchased %s (F-AD-1)",
+			tostring(data.Dice[1].MassBudget), tostring(data.Dice[1].PurchasedBudget)))
 
 		local sum = 0
 		for _, face in ipairs(data.Dice[1].Faces) do
@@ -298,11 +340,99 @@ local function run(): (boolean, string?, number)
 	for i = 1, 20 do
 		newDist[i] = newBudget / 20
 	end
-	newDist[1] = newDist[1] + 5
-	newDist[2] = newDist[2] - 5
+	-- Move a fraction of one face rather than a fixed 5: the carried budget is
+	-- now 60 over 20 faces (3 each), so a fixed 5 would drive face 2 negative.
+	local shift = newDist[2] * 0.5
+	newDist[1] = newDist[1] + shift
+	newDist[2] = newDist[2] - shift
 	local reforgeOk, reforgeReason = ForgeService.performForge(player, 1, newDist)
 	e = e or check(reforgeOk, string.format(
 		"the die must be forgeable immediately after a shape change, got '%s'", tostring(reforgeReason)))
+
+	----------------------------------------------------------------------------
+	-- F-AD-1: a shape change must never MANUFACTURE budget
+	----------------------------------------------------------------------------
+
+	-- The exploit this closes: the budget used to be clamped UP to the target
+	-- shape's defaultBudget, so D6@60 -> D20 became 200, and switching back to D6
+	-- kept 200. Ten Diamonds bought a permanent budget rise that FR-3.6 says must
+	-- be purchased with Cash.
+	local d6 = DiceCatalog.getShape("D6")
+	local d20b = DiceCatalog.getShape("D20")
+	if d6 and d20b then
+		PlayerProfile.mutate(player, function(d)
+			local freshFaces: { any } = {}
+			for i = 1, 6 do
+				freshFaces[i] = { Mass = 10, Element = "None" }
+			end
+			d.Dice[1] = { Shape = "D6", MassBudget = 60, PurchasedBudget = 60, Faces = freshFaces }
+		end)
+		EconomyService.credit(player, "Diamonds", 50, "test_setup")
+
+		local startPurchased = data.Dice[1].PurchasedBudget
+		e = e or check(startPurchased == 60, string.format(
+			"starting PurchasedBudget should be 60, got %s", tostring(startPurchased)))
+
+		-- D6 -> D20. The budget must NOT rise to D20's defaultBudget of 200.
+		local upOk = ForgeService.performSetShape(player, 1, "D20")
+		e = e or check(upOk, "D6 -> D20 should succeed")
+		e = e or check(data.Dice[1].MassBudget <= startPurchased, string.format(
+			"SHAPE CHANGE MANUFACTURED BUDGET: %s -> %s (F-AD-1)",
+			tostring(startPurchased), tostring(data.Dice[1].MassBudget)))
+		e = e or check(data.Dice[1].PurchasedBudget == startPurchased,
+			"PurchasedBudget must be untouched by a shape change")
+
+		-- Every face must still clear the floor at the carried budget.
+		local floor20 = DiceCatalog.getMassFloor("D20")
+		local ok20 = true
+		for _, f in ipairs(data.Dice[1].Faces) do
+			if f.Mass < floor20 then
+				ok20 = false
+			end
+		end
+		e = e or check(ok20, "carrying a small budget to a wide shape must still clear the mass floor")
+
+		-- ...and back. The round trip must be a no-op on budget.
+		local backOk = ForgeService.performSetShape(player, 1, "D6")
+		e = e or check(backOk, "D20 -> D6 should succeed")
+		e = e or check(data.Dice[1].MassBudget == startPurchased, string.format(
+			"ROUND TRIP CHANGED THE BUDGET: started %s, ended %s (F-AD-1)",
+			tostring(startPurchased), tostring(data.Dice[1].MassBudget)))
+		e = e or check(data.Dice[1].PurchasedBudget == startPurchased,
+			"a round trip must leave PurchasedBudget exactly as it was")
+
+		-- A LARGE purchased budget must survive a trip through a small-capped
+		-- shape: capped while there, restored on return. Capping is legitimate;
+		-- confiscating is not (FR-6.1 calls the change reversible).
+		PlayerProfile.mutate(player, function(d)
+			d.Dice[1].PurchasedBudget = 800
+			d.Dice[1].MassBudget = 300
+			-- Unlock D4: a locked shape is refused, and a refused call would
+			-- leave the die untouched and make the assertions below meaningless.
+			d.Diamond.Shapes.D4 = true
+		end)
+		local downOk = ForgeService.performSetShape(player, 1, "D4")
+		e = e or check(downOk, "D6 -> D4 should succeed once D4 is unlocked")
+		local d4 = DiceCatalog.getShape("D4")
+		if d4 then
+			e = e or check(data.Dice[1].MassBudget <= d4.cashBudgetCap,
+				"the usable budget must be capped by the shape")
+			e = e or check(data.Dice[1].PurchasedBudget == 800,
+				"a small-capped shape must CAP the usable budget, not destroy what was purchased")
+		end
+		ForgeService.performSetShape(player, 1, "D20")
+		e = e or check(data.Dice[1].MassBudget == 800, string.format(
+			"returning to a wide shape must restore the full purchased budget, got %s",
+			tostring(data.Dice[1].MassBudget)))
+
+		-- And the faces still sum to the stored budget, so the die stays forgeable.
+		local sum2 = 0
+		for _, f in ipairs(data.Dice[1].Faces) do
+			sum2 += f.Mass
+		end
+		e = e or check(math.abs(sum2 - data.Dice[1].MassBudget) < ForgeMath.EPSILON,
+			"faces must sum to the stored budget after a shape round trip")
+	end
 
 	ForgeService._setResultEmitterForTesting(nil)
 	PlayerProfile.release(player)

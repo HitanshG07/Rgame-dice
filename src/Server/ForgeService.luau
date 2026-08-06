@@ -23,10 +23,16 @@ local RemoteGateway = require(script.Parent:WaitForChild("RemoteGateway"))
 local ForgeService = {}
 
 local BASE_COST_PER_MASS_UNIT = 5.0
+-- The starting D6 budget. A die at this budget pays exactly BASE per mass unit;
+-- everything above it pays more. Tuning surface for P-6B.
+local REFERENCE_BUDGET = 60.0
+local SCALE_EXPONENT = 2.0
 local ELEMENT_SET_COST = 50.0
 local SHAPE_CHANGE_DIAMOND_COST = 5
 
 ForgeService.BASE_COST_PER_MASS_UNIT = BASE_COST_PER_MASS_UNIT
+ForgeService.REFERENCE_BUDGET = REFERENCE_BUDGET
+ForgeService.SCALE_EXPONENT = SCALE_EXPONENT
 ForgeService.ELEMENT_SET_COST = ELEMENT_SET_COST
 ForgeService.SHAPE_CHANGE_DIAMOND_COST = SHAPE_CHANGE_DIAMOND_COST
 
@@ -53,7 +59,25 @@ end
 -- PURE: cost calculation
 --------------------------------------------------------------------------------
 
-function ForgeService.computeForgeCost(oldDist: { number }, newDist: { number }): number
+-- F-AD-2, Block 3 Gate 3 audit. The cost was a flat 5 Cash per mass unit moved.
+-- That satisfies FR-3.3's letter ("scales with the magnitude of mass moved") and
+-- fails its purpose: at a late-game balance, moving 100 mass costs 500 Cash
+-- against a per-roll payout in the millions, so re-forging becomes free in every
+-- sense that matters. Free re-forging collapses the cross-die puzzle to a solved
+-- symmetric state -- a CORRECTNESS failure, not a tuning miss (ledger L-016).
+--
+-- The cost therefore scales on two independent axes:
+--   * MASS MOVED, linearly -- the FR-3.3 requirement, unchanged.
+--   * PROGRESSION, superlinearly in the die's own budget -- a die with more mass
+--     invested in it is a bigger machine to re-tune. Budget is used rather than
+--     the player's Cash balance deliberately: pricing off a balance punishes
+--     saving and can be gamed by spending down before forging, while budget is
+--     server-held, monotonic, and the thing actually being re-tuned.
+--
+-- SCALE_EXPONENT and BASE are the tuning surface; the STRUCTURE is what closes
+-- the finding. Real numbers come from the P-6B balance sweep, which is the only
+-- place a claim about late-game triviality can actually be settled.
+function ForgeService.computeForgeCost(oldDist: { number }, newDist: { number }, budget: number?): number
 	if #oldDist ~= #newDist then
 		return math.huge
 	end
@@ -65,7 +89,23 @@ function ForgeService.computeForgeCost(oldDist: { number }, newDist: { number })
 		end
 		deltaSum += d
 	end
-	return ForgeMath.snap(deltaSum * BASE_COST_PER_MASS_UNIT)
+
+	local scale = 1.0
+	if budget ~= nil then
+		if not ForgeMath.isFinite(budget) or budget <= 0 then
+			return math.huge
+		end
+		scale = (budget / REFERENCE_BUDGET) ^ SCALE_EXPONENT
+		if not ForgeMath.isFinite(scale) or scale < 1.0 then
+			scale = 1.0  -- never cheaper than the starting die
+		end
+	end
+
+	local cost = ForgeMath.snap(deltaSum * BASE_COST_PER_MASS_UNIT * scale)
+	if not ForgeMath.isFinite(cost) then
+		return math.huge
+	end
+	return cost
 end
 
 --------------------------------------------------------------------------------
@@ -109,7 +149,7 @@ function ForgeService.performForge(player: Player, dieIndex: number, distributio
 		oldDist[i] = die.Faces[i].Mass
 	end
 
-	local cost = ForgeService.computeForgeCost(oldDist, distribution)
+	local cost = ForgeService.computeForgeCost(oldDist, distribution, die.MassBudget)
 	if not EconomyService.canAfford(player, "Cash", cost) then
 		return false, Remotes.Notice.InsufficientFunds
 	end
@@ -241,8 +281,25 @@ function ForgeService.performSetShape(player: Player, dieIndex: number, shapeId:
 	-- new shape has. Only the mass LAYOUT resets -- it cannot be preserved
 	-- across a change in face count, and the even split is the neutral result.
 	local oldDie = data.Dice[dieIndex]
-	local carried = if ForgeMath.isFinite(oldDie.MassBudget) then oldDie.MassBudget else shape.defaultBudget
-	local newBudget = math.clamp(carried, shape.defaultBudget, shape.cashBudgetCap)
+
+	-- F-AD-1, Block 3 Gate 3 audit. The previous line clamped the carried budget
+	-- up to `shape.defaultBudget`, which MANUFACTURED budget on a shape change:
+	-- D6@60 -> D20 clamped to 200, and switching back to D6 clamped to
+	-- max(200, 60) = 200. Ten Diamonds bought a permanent 60 -> 200 budget rise
+	-- that FR-3.6 says must be purchased with Cash. That was my own regression,
+	-- introduced in this block while fixing the opposite defect (confiscation).
+	--
+	-- The budget is now DERIVED, never carried: PurchasedBudget is the shape-
+	-- independent thing the player owns, and MassBudget is that value clamped
+	-- into this shape's legal range. The lower bound is the smallest budget the
+	-- shape can physically hold (every face at its floor) -- NOT defaultBudget,
+	-- which is a starting value and has no business acting as a floor.
+	local purchased = oldDie.PurchasedBudget
+	if not ForgeMath.isFinite(purchased) or purchased <= 0 then
+		purchased = if ForgeMath.isFinite(oldDie.MassBudget) then oldDie.MassBudget else shape.defaultBudget
+	end
+	local minViable = shape.massFloor * shape.faceCount
+	local newBudget = math.clamp(purchased, minViable, shape.cashBudgetCap)
 	local faceMass = ForgeMath.snap(newBudget / shape.faceCount)
 	-- Re-derive the budget from the snapped face mass so the stored budget and
 	-- the stored faces sum to the same number. Otherwise the very next forge
@@ -265,6 +322,9 @@ function ForgeService.performSetShape(player: Player, dieIndex: number, shapeId:
 		d.Dice[dieIndex] = {
 			Shape = shapeId,
 			MassBudget = exactBudget,
+			-- Carried UNCHANGED. This is the value the player bought; a shape
+			-- change may cap what is usable, never alter what is owned.
+			PurchasedBudget = purchased,
 			Faces = faces,
 		}
 	end)

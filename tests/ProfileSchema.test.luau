@@ -39,7 +39,7 @@ local function run(): (boolean, string?, number)
 	----------------------------------------------------------------------------
 
 	local reconciled = PlayerProfile._reconcile({})
-	e = e or check(reconciled.SchemaVersion == 1, "reconciled profile should be SchemaVersion 1")
+	e = e or check(reconciled.SchemaVersion == 2, "reconciled profile should be SchemaVersion 2")
 	e = e or check(reconciled.Cash == 0, "default Cash should be 0")
 	e = e or check(reconciled.Gems == 0, "default Gems should be 0")
 	e = e or check(reconciled.Diamonds == 0, "default Diamonds should be 0")
@@ -71,6 +71,8 @@ local function run(): (boolean, string?, number)
 	e = e or check(reconciled.Dice[1].Shape == "D6", "the starting die should be a D6")
 	e = e or check(#reconciled.Dice[1].Faces == 6, "the starting D6 should have 6 faces")
 	e = e or check(reconciled.Dice[1].MassBudget == 60, "the starting D6 budget should be 60")
+	e = e or check(reconciled.Dice[1].PurchasedBudget == 60,
+		"the starting die must declare PurchasedBudget, or a shape change reads nil")
 
 	local faceSum = 0
 	for _, face in ipairs(reconciled.Dice[1].Faces) do
@@ -119,13 +121,65 @@ local function run(): (boolean, string?, number)
 	e = e or check(kept.Diamonds == 0, "reconcile must still fill the fields that were absent")
 
 	----------------------------------------------------------------------------
+	-- F-AD-3: reconciliation must reach NESTED keys, and per-die fields
+	----------------------------------------------------------------------------
+
+	-- A shallow sweep fills `Upgrades` only when the whole table is missing. It
+	-- never notices a new key INSIDE an existing table, so the day a field is
+	-- added every returning player reads nil for it.
+	local partialNested: any = {
+		Upgrades = { AutoRollSpeed = 3 },
+		Vault = { LastSeen = 111 },
+		Settings = { Music = false },
+		LoginStreak = { Count = 4 },
+	}
+	local nested = PlayerProfile._reconcile(partialNested)
+	e = e or check(nested.Upgrades.AutoRollSpeed == 3, "an existing nested value must be preserved")
+	e = e or check(nested.Upgrades.BadRollShield == 0, "a MISSING nested key must be filled (F-AD-3)")
+	e = e or check(nested.Upgrades.VaultCapacity == 0, "every missing nested key must be filled")
+	e = e or check(nested.Vault.LastSeen == 111, "an existing Vault value must be preserved")
+	e = e or check(nested.Vault.AccrualId == 0, "a missing Vault key must be filled")
+	e = e or check(nested.Vault.AvgIncomePerSec == 0, "a missing Vault key must be filled")
+	e = e or check(nested.Settings.Music == false, "an existing Settings value must be preserved")
+	e = e or check(nested.Settings.Particles == true, "a missing Settings key must be filled")
+	e = e or check(nested.LoginStreak.Count == 4, "an existing LoginStreak value must be preserved")
+	e = e or check(nested.LoginStreak.ForgivenessLeft == 1, "a missing LoginStreak key must be filled")
+
+	-- Per-die fields live inside an ARRAY. ProfileStore's own Reconcile walks
+	-- string keys only and never descends into Dice, so nothing but this layer
+	-- can fill them.
+	local preV2: any = { Dice = { { Shape = "D6", MassBudget = 120, Faces = {
+		{ Mass = 20, Element = "None" }, { Mass = 20, Element = "None" },
+		{ Mass = 20, Element = "None" }, { Mass = 20, Element = "None" },
+		{ Mass = 20, Element = "None" }, { Mass = 20, Element = "None" },
+	} } } }
+	local dieFixed = PlayerProfile._reconcile(preV2)
+	e = e or check(dieFixed.Dice[1].PurchasedBudget == 120, string.format(
+		"a pre-v2 die must get PurchasedBudget seeded from MassBudget, got %s",
+		tostring(dieFixed.Dice[1].PurchasedBudget)))
+	e = e or check(dieFixed.Dice[1].MassBudget == 120, "reconcile must not alter an existing MassBudget")
+
+	----------------------------------------------------------------------------
+	-- Migration v1 -> v2: PurchasedBudget split out of MassBudget
+	----------------------------------------------------------------------------
+
+	local v1Die: any = { SchemaVersion = 1, Dice = { { Shape = "D6", MassBudget = 240, Faces = {} } } }
+	local v2Ok, v2Err = PlayerProfile._migrate(v1Die)
+	e = e or check(v2Ok, string.format("v1 -> v2 migration should succeed: %s", tostring(v2Err)))
+	e = e or check(v1Die.SchemaVersion == 2, "a migrated profile should report version 2")
+	e = e or check(v1Die.Dice[1].PurchasedBudget == 240, string.format(
+		"v1 -> v2 must seed PurchasedBudget from MassBudget losslessly, got %s",
+		tostring(v1Die.Dice[1].PurchasedBudget)))
+	e = e or check(v1Die.Dice[1].MassBudget == 240, "v1 -> v2 must not change MassBudget")
+
+	----------------------------------------------------------------------------
 	-- Migration chain v0 -> v1
 	----------------------------------------------------------------------------
 
 	local v0Profile: any = { SchemaVersion = 0, Cash = 1000 }
 	local migOk, migErr = PlayerProfile._migrate(v0Profile)
 	e = e or check(migOk, string.format("v0 -> v1 migration should succeed: %s", tostring(migErr)))
-	e = e or check(v0Profile.SchemaVersion == 1, "a migrated profile should report version 1")
+	e = e or check(v0Profile.SchemaVersion == 2, "a v0 profile must migrate all the way to the current version")
 	e = e or check(v0Profile.Cash == 1000, "Cash must be preserved across migration")
 	e = e or check(type(v0Profile.Dice) == "table" and #v0Profile.Dice == 1,
 		"a migrated profile should acquire the starting die")
@@ -139,10 +193,10 @@ local function run(): (boolean, string?, number)
 		tostring(afterMigrate.Dice[1].Faces[1].Mass)))
 
 	-- A current-version profile migrates as a no-op.
-	local v1Profile: any = { SchemaVersion = 1, Cash = 55 }
-	local v1Ok = PlayerProfile._migrate(v1Profile)
-	e = e or check(v1Ok, "a current-version profile should migrate successfully as a no-op")
-	e = e or check(v1Profile.Cash == 55, "a no-op migration must not alter data")
+	local currentProfile: any = { SchemaVersion = 2, Cash = 55 }
+	local currentOk = PlayerProfile._migrate(currentProfile)
+	e = e or check(currentOk, "a current-version profile should migrate successfully as a no-op")
+	e = e or check(currentProfile.Cash == 55, "a no-op migration must not alter data")
 
 	----------------------------------------------------------------------------
 	-- Quarantine: unmigratable profiles FAIL CLOSED, never overwritten

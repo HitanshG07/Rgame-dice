@@ -38,7 +38,17 @@ local RECEIPT_RETRY_WINDOW = 60 * 60 * 24 * 3
 local PAYLOAD_CEILING_BYTES = 3_500_000
 
 export type Face = { Mass: number, Element: string }
-export type Die = { Shape: string, MassBudget: number, Faces: { Face } }
+
+-- `MassBudget` is what this die may distribute RIGHT NOW, clamped into the
+-- current shape's legal range. `PurchasedBudget` is what the player actually
+-- bought (SRS FR-3.6) and is shape-independent.
+--
+-- They are separate because a shape change must be freely reversible (FR-6.1)
+-- WITHOUT being a way to gain budget. Deriving MassBudget from a per-shape
+-- clamp of PurchasedBudget gives both: switching to a smaller-capped shape
+-- caps the usable budget but does not destroy what was bought, and switching
+-- to a larger-capped shape restores it but never manufactures more.
+export type Die = { Shape: string, MassBudget: number, PurchasedBudget: number, Faces: { Face } }
 
 export type Profile = {
 	SchemaVersion: number,
@@ -66,13 +76,14 @@ export type Profile = {
 -- API_DATA_CONTRACT.md §3. Every field has a default, so no load path can
 -- dereference nil (threat T-12).
 local TEMPLATE: Profile = {
-	SchemaVersion = 1,
+	SchemaVersion = 2,
 	Cash = 0, Gems = 0, Diamonds = 0,
 	LifetimeCash = 0, HighestRoll = 0, Ascensions = 0, TotalRolls = 0,
 	Dice = {
 		{
 			Shape = "D6",
 			MassBudget = 60,
+			PurchasedBudget = 60,
 			Faces = {
 				{ Mass = 10, Element = "None" }, { Mass = 10, Element = "None" },
 				{ Mass = 10, Element = "None" }, { Mass = 10, Element = "None" },
@@ -143,13 +154,51 @@ function PlayerProfile._reconcile(raw: any): Profile
 	-- function; every caller sees a `Profile` going in and coming out.
 	local data: { [string]: any } = if type(raw) == "table" then raw else {}
 	local template = (TEMPLATE :: any) :: { [string]: any }
-	for k, v in pairs(template) do
-		if data[k] == nil then
-			data[k] = deepCopy(v)
+	-- RECURSIVE, not top-level only. A shallow sweep fills `Upgrades` when the
+	-- whole table is missing but never notices a NEW KEY INSIDE an existing
+	-- one -- so the day a field is added to Upgrades, Vault, Settings or
+	-- LoginStreak, every returning player reads nil for it. Found by the Block 3
+	-- Gate 4 audit (F-AD-3). ProfileStore's own Reconcile does recurse and runs
+	-- first, so this is defence in depth -- but a defensive layer that silently
+	-- depends on the thing it is defending against is not a layer.
+	--
+	-- STRING KEYS ONLY, and this guard is load-bearing. Without it the recursion
+	-- descends into ARRAYS -- `Dice` above all -- and merges the template's die
+	-- into the player's die, overwriting per-die fields with starting values. A
+	-- player with a 120-budget die would silently inherit the template's 60.
+	-- ProfileStore's own ReconcileTable carries the identical guard for the
+	-- identical reason. Array elements are the caller's data, never a shape to
+	-- be filled; the explicit per-die loop below handles them by hand.
+	local function fill(target: { [string]: any }, source: { [string]: any })
+		for k, v in pairs(source) do
+			if type(k) == "string" then
+				if target[k] == nil then
+					target[k] = deepCopy(v)
+				elseif type(target[k]) == "table" and type(v) == "table" then
+					fill(target[k], v)
+				end
+			end
 		end
 	end
+	fill(data, template)
 	if type(data.Dice) ~= "table" or #data.Dice == 0 then
 		data.Dice = deepCopy(TEMPLATE.Dice)
+	end
+	-- Per-die defaults. NEITHER reconcile layer reaches here on its own:
+	-- ProfileStore's ReconcileTable only walks STRING keys, so it never
+	-- descends into an ARRAY like Dice, and the loop above only fills a
+	-- top-level key that is entirely absent. A field added to the die record
+	-- would therefore be nil forever on every existing profile.
+	for _, die in ipairs(data.Dice) do
+		if type(die) == "table" then
+			if type(die.MassBudget) ~= "number" then
+				die.MassBudget = TEMPLATE.Dice[1].MassBudget
+			end
+			if type(die.PurchasedBudget) ~= "number" then
+				-- A pre-v2 die: what it holds IS what was purchased.
+				die.PurchasedBudget = die.MassBudget
+			end
+		end
 	end
 	if type(data.Upgrades) ~= "table" then
 		data.Upgrades = deepCopy(TEMPLATE.Upgrades)
@@ -387,6 +436,19 @@ function PlayerProfile._migrate(data: Profile): (boolean, string?)
 		if type(data.Dice) ~= "table" or #data.Dice == 0 then
 			data.Dice = deepCopy(TEMPLATE.Dice)
 		end
+	end
+	-- v1 -> v2: PurchasedBudget split out of MassBudget (FR-3.6/FR-6.1). A v1
+	-- die's MassBudget IS what the player paid for, so seeding one from the
+	-- other is lossless and cannot inflate anyone.
+	if data.SchemaVersion < 2 then
+		if type(data.Dice) == "table" then
+			for _, die in ipairs(data.Dice) do
+				if type(die) == "table" and type(die.PurchasedBudget) ~= "number" then
+					die.PurchasedBudget = die.MassBudget
+				end
+			end
+		end
+		data.SchemaVersion = 2
 	end
 	-- v1 is current; future steps append here, each bumping SchemaVersion.
 	return true, nil
