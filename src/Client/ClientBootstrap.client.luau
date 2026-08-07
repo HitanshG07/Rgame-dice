@@ -145,6 +145,12 @@ local MODULE_ORDER: { string } = {
 
 local loaded: { [string]: any } = {}
 
+-- A LocalScript returns nothing, so the teardown entry point is published on a
+-- named table rather than returned. The Orchestrator and any future test
+-- harness reach it through this.
+local ClientBootstrap = {}
+_G.DiceForgeClientBootstrap = ClientBootstrap
+
 for _, name in ipairs(MODULE_ORDER) do
 	local instance = clientRoot:FindFirstChild(name)
 	if instance == nil then
@@ -195,6 +201,30 @@ NetClient.onNotice(function(notice: any)
 		warn(string.format("[Notice] %s (%s)", notice.code, tostring(notice.severity)))
 	end
 end)
+
+-- TEARDOWN, in reverse dependency order.
+--
+-- Every view module acquires connections, a ScreenGui or an instance pool, and
+-- six of the seven grew a `shutdown` during rework -- but NOTHING CALLED ANY OF
+-- THEM. A release path that no caller reaches is not a release path; it is a
+-- function that makes the leak look handled. Reported by the ArenaView rework,
+-- which noticed its own new shutdown was unreachable.
+--
+-- Reverse order because construction order is dependency order: FeedbackFX
+-- anchors into ArenaView, so it must release before the arena it points at.
+function ClientBootstrap.shutdown(): ()
+	for i = #MODULE_ORDER, 1, -1 do
+		local m = loaded[MODULE_ORDER[i]]
+		if type(m) == "table" and type((m :: any).shutdown) == "function" then
+			-- One module failing to release must not strand the rest.
+			local ok, err = pcall((m :: any).shutdown)
+			if not ok then
+				warn(string.format("[ClientBootstrap] %s.shutdown() errored: %s",
+					MODULE_ORDER[i], tostring(err)))
+			end
+		end
+	end
+end
 
 print("[ClientBootstrap] ready -- NetClient online, "
 	.. tostring(#MODULE_ORDER) .. " view modules declared")

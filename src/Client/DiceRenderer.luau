@@ -25,16 +25,28 @@
 -- ============================================================================
 --
 -- HOW THE RESOLUTION WORKS (HLD §4.3, implemented literally):
---   1. Pick one of several PRE-AUTHORED tumble trajectories. Each is a fixed
---      list of orientation keyframes whose LAST keyframe is the identity, so
---      every trajectory ends with a known face up by construction.
---   2. Compute the single rotation `R` that carries the target face's normal to
---      world up.
---   3. Play `R * keyframe(t)`. At t = 1 the keyframe is identity, so the die
---      finishes at exactly `R` -- the server's face, up. The trajectory chooses
---      the CHARACTER of the tumble; it can never choose the ANSWER.
---   4. Duration scales with payout, so a large win physically takes longer to
---      land than a small one.
+--   1. Compute the single rotation `R` that carries the target face's normal to
+--      world up. `R` alone IS the answer; everything else is the journey to it.
+--   2. Pick a spin axis and a total spin angle `T` of several full turns plus a
+--      deliberate part-turn. The die is placed at `axisAngle(axis, T) * R`,
+--      which is `T` of rotation AWAY from the answer.
+--   3. Each frame, unwind the residual: `axisAngle(axis, T - spun(t)) * R`,
+--      where `spun` rises monotonically from 0 to `T`. The residual therefore
+--      falls monotonically to zero and the die converges onto `R` from one
+--      consistent direction -- it never reverses, and it never passes through
+--      the answer early, because a residual of zero happens exactly once.
+--   4. At t = 1 the terminal orientation is ASSIGNED as `R`, not approached.
+--      The spin chooses the CHARACTER of the tumble; it can never choose the
+--      ANSWER.
+--   5. Duration scales with payout, and so does the number of turns, so a large
+--      win is a longer AND fuller tumble rather than a longer wait.
+--
+-- WHY NOT KEYFRAMES AND `CFrame:Lerp`: a slerp between two absolute
+-- orientations always takes the SHORTEST arc, so it cannot represent a winding
+-- number. Any multi-turn keyframe collapses mod 2*pi, and a sequence of them
+-- rewinds, stalls, and passes through the final face mid-flight. Rotation here
+-- is therefore accumulated as a scalar ANGLE and only ever converted to a
+-- CFrame at the last moment.
 --
 -- ON POOLING (NFR-1): every Instance this module will ever need is created in
 -- `init` -- seven dice, each with a core and twenty face plates. Nothing is
@@ -65,7 +77,6 @@ local MAX_FACES = 20               -- the D20, the largest shape in DiceCatalog
 local DEFAULT_SHAPE = "D6"
 
 local DIE_SIZE = 2.0               -- studs, the full width of a die
-local DIE_RADIUS = DIE_SIZE * 0.5  -- half-extent, used for FR-1.4 containment
 local CORE_SCALE = 0.74            -- the core solid, as a fraction of DIE_SIZE
 local PLATE_THICK = 0.16
 
@@ -171,42 +182,76 @@ local PLATE_BASE: { [string]: number } = {
 local BLOCK_CORE: { [string]: boolean } = { D4 = true, D6 = true }
 
 --------------------------------------------------------------------------------
--- Pre-authored tumble trajectories (HLD §4.3).
+-- True half-extent per shape (FR-1.4 containment, and floor clearance).
 --
--- Each spec is an axis and a number of full turns. The keyframes count that
--- rotation DOWN to zero, so the final keyframe is the identity and the terminal
--- face of every trajectory is known before the server has said anything.
+-- Half of DIE_SIZE is NOT the die's half-extent. A maximum-mass face pushes its
+-- plate out to `core half + plate half-thickness + INSET_MAX`, and the plate's
+-- own CORNERS reach further still. Because the resting orientation is whatever
+-- the server's face demands, any facet can end up pointing down or at a wall,
+-- so the only sound bound is the radius of the sphere that encloses the fully
+-- built die -- computed here from the same constants the builder uses, so the
+-- two cannot drift apart.
+--
+-- The bound is deliberately the WORST case (max-mass plates, corner-on). It
+-- can leave a light die a fraction of a stud clear of the floor; that is the
+-- correct side to err on, because the other side is a plate through the floor.
 --------------------------------------------------------------------------------
 
-local KEYFRAMES = 7
+local MAX_STANDOFF = (DIE_SIZE * CORE_SCALE * 0.5) + (PLATE_THICK * 0.5) + INSET_MAX
 
-local TRAJECTORY_SPECS: { { axis: Vector3, turns: number } } = {
-	{ axis = Vector3.new(1, 0.35, 0.15), turns = 3 },
-	{ axis = Vector3.new(0.2, 1, 0.4), turns = 4 },
-	{ axis = Vector3.new(0.6, -0.3, 1), turns = 3 },
-	{ axis = Vector3.new(-0.8, 0.5, 0.6), turns = 5 },
-	{ axis = Vector3.new(0.1, -1, 0.25), turns = 4 },
-}
-
-local function buildTrajectories(): { { CFrame } }
-	local all: { { CFrame } } = {}
-	for t, spec in ipairs(TRAJECTORY_SPECS) do
-		local axis = spec.axis.Unit
-		local total = spec.turns * math.pi * 2
-		local frames: { CFrame } = {}
-		for k = 1, KEYFRAMES do
-			-- remaining rotation, easing out so the die slows as it settles
-			local progress = (k - 1) / (KEYFRAMES - 1)
-			local remaining = total * (1 - progress) * (1 - progress)
-			frames[k] = CFrame.fromAxisAngle(axis, remaining)
-		end
-		frames[KEYFRAMES] = CFrame.identity  -- exact, not merely near-zero
-		all[t] = frames
-	end
-	return all
+local function extentFor(shapeId: string): number
+	local base = PLATE_BASE[shapeId] or PLATE_BASE[DEFAULT_SHAPE] or 0.5
+	-- the plate's outer face, along the normal
+	local outer = MAX_STANDOFF + (PLATE_THICK * 0.5)
+	-- half of the plate's square face, in the two in-plane directions
+	local half = DIE_SIZE * base * PLATE_SCALE_MAX * 0.5
+	local plateReach = math.sqrt((outer * outer) + (2 * half * half))
+	-- a block core reaches its own corners; a ball core reaches only its radius
+	local coreHalf = DIE_SIZE * CORE_SCALE * 0.5
+	local coreReach = if BLOCK_CORE[shapeId] then coreHalf * math.sqrt(3) else coreHalf
+	return math.max(plateReach, coreReach)
 end
 
-local TRAJECTORIES: { { CFrame } } = buildTrajectories()
+local DIE_EXTENT: { [string]: number } = {
+	D4 = extentFor("D4"),
+	D6 = extentFor("D6"),
+	D8 = extentFor("D8"),
+	D12 = extentFor("D12"),
+	D20 = extentFor("D20"),
+}
+
+--------------------------------------------------------------------------------
+-- Tumble spin (HLD §4.3).
+--
+-- A tumble is one axis and one total angle, both chosen per die per roll. The
+-- axes are pre-authored so the motion has a designed character rather than a
+-- random wobble; the angle is randomised so two dice in the same throw do not
+-- move in lockstep.
+--
+-- THE FRACTIONAL TURN IS LOAD-BEARING and is not decoration: the total angle is
+-- always a whole number of turns PLUS a fraction in [0.25, 0.75]. An exact
+-- multiple of 2*pi would make the opening orientation the identity, which is to
+-- say the answer -- the die would spawn already showing the face it is
+-- supposedly about to roll. Bounding the fraction into [0.25, 0.75] makes the
+-- opening rotation 90 to 270 degrees about the spin axis, so the die's opening
+-- orientation is at least 90 degrees of arc from its answer -- on every axis,
+-- on every roll, with no reliance on the randomiser being kind.
+--------------------------------------------------------------------------------
+
+local SPIN_AXES: { Vector3 } = {
+	Vector3.new(1, 0.35, 0.15).Unit,
+	Vector3.new(0.2, 1, 0.4).Unit,
+	Vector3.new(0.6, -0.3, 1).Unit,
+	Vector3.new(-0.8, 0.5, 0.6).Unit,
+	Vector3.new(0.1, -1, 0.25).Unit,
+}
+
+local SPIN_TURNS_MIN = 3           -- whole turns, before the payout bonus
+local SPIN_TURNS_MAX = 5
+local SPIN_TURNS_PAYOUT_BONUS = 2  -- extra whole turns at the longest duration
+local SPIN_FRACTION_MIN = 0.25
+local SPIN_FRACTION_MAX = 0.75
+local TAU = math.pi * 2
 
 --------------------------------------------------------------------------------
 -- Types
@@ -224,6 +269,10 @@ type DieVisual = {
 	plates: { Plate },
 	shape: string,
 	faceCount: number,
+	-- false while the authoritative shape for this slot is still unknown. An
+	-- unnumbered die is honest; a numbered one would be asserting a face.
+	numbered: boolean,
+	extent: number,
 }
 
 type DieSlot = {
@@ -234,8 +283,16 @@ type DieSlot = {
 	duration: number,
 	startPos: Vector3,
 	endPos: Vector3,
-	trajectory: number,
+	spinAxis: Vector3,
+	spinTotal: number,
 	finalRot: CFrame,
+}
+
+-- Only the two subscriptions this module actually uses. Narrow on purpose: a
+-- renderer that cannot NAME `roll` cannot call it.
+type Net = {
+	onStateSync: ((any) -> ()) -> RBXScriptConnection,
+	onRollResult: ((any) -> ()) -> RBXScriptConnection,
 }
 
 --------------------------------------------------------------------------------
@@ -245,6 +302,10 @@ type DieSlot = {
 local slots: { DieSlot } = {}
 local started = false
 local rng = Random.new()
+
+-- Every connection this module owns, so `shutdown` can give them all back.
+local connections: { RBXScriptConnection } = {}
+local frameConnection: RBXScriptConnection? = nil
 
 -- Last authoritative dice configuration seen on StateSync. Display only: it
 -- decides how a die LOOKS, never what it rolls.
@@ -324,6 +385,8 @@ local function makeVisual(index: number): DieVisual
 		plates = plates,
 		shape = "",
 		faceCount = 0,
+		numbered = false,
+		extent = DIE_EXTENT[DEFAULT_SHAPE] or (DIE_SIZE * 0.5),
 	}
 end
 
@@ -336,7 +399,14 @@ end
 -- mid-air after its payout had already been paid.
 --------------------------------------------------------------------------------
 
-local function readShape(die: any): string
+-- Returns nil -- NOT a default -- when the slot's shape is unknown.
+--
+-- The distinction matters because face indices are only meaningful relative to
+-- a shape. A RollResult can arrive before the first StateSync, and defaulting
+-- to D6 there would take a credited face of, say, 17 and draw it as a "6": a
+-- visible lie about a payout that was actually correct. Callers that cannot
+-- name the shape must therefore decline to name the face.
+local function readShape(die: any): string?
 	if type(die) == "table" then
 		local s = die.Shape
 		if type(s) == "string" and NORMALS[s] ~= nil then
@@ -347,7 +417,7 @@ local function readShape(die: any): string
 			return s
 		end
 	end
-	return DEFAULT_SHAPE
+	return nil
 end
 
 local function readFaces(die: any): { any }
@@ -403,16 +473,24 @@ end
 -- would make every plate offset depend on where the die happened to be sitting.
 --------------------------------------------------------------------------------
 
-local function applyConfig(visual: DieVisual, shapeId: string, faces: { any }): ()
-	local normals = NORMALS[shapeId] or NORMALS[DEFAULT_SHAPE]
+-- `shapeId` is nil when the authoritative shape has not arrived yet. The die is
+-- still built -- an empty pit reads as a broken game -- but it is built
+-- UNNUMBERED, because a numeral is a claim about which face is which and this
+-- module has nothing to base that claim on yet.
+local function applyConfig(visual: DieVisual, shapeId: string?, faces: { any }): ()
+	local numbered = shapeId ~= nil
+	local resolved = shapeId or DEFAULT_SHAPE
+	local normals = NORMALS[resolved] or NORMALS[DEFAULT_SHAPE]
 	local faceCount = #normals
-	local base = PLATE_BASE[shapeId] or PLATE_BASE[DEFAULT_SHAPE] or 0.5
+	local base = PLATE_BASE[resolved] or PLATE_BASE[DEFAULT_SHAPE] or 0.5
 
 	visual.core.CFrame = CFrame.identity
 	visual.core.Size = Vector3.one * (DIE_SIZE * CORE_SCALE)
-	visual.core.Shape = if BLOCK_CORE[shapeId] then Enum.PartType.Block else Enum.PartType.Ball
-	visual.shape = shapeId
+	visual.core.Shape = if BLOCK_CORE[resolved] then Enum.PartType.Block else Enum.PartType.Ball
+	visual.shape = resolved
 	visual.faceCount = faceCount
+	visual.numbered = numbered
+	visual.extent = DIE_EXTENT[resolved] or DIE_EXTENT[DEFAULT_SHAPE] or (DIE_SIZE * 0.5)
 
 	-- Normalise mass across the die's own faces. Relative, not absolute: FR-1.3
 	-- asks a player to read THIS die's build, and a die with a 60 budget and one
@@ -469,7 +547,7 @@ local function applyConfig(visual: DieVisual, shapeId: string, faces: { any }): 
 		plate.part.Color = colour
 		plate.part.Material = if weight >= GLOW_THRESHOLD then Enum.Material.Neon else Enum.Material.SmoothPlastic
 		plate.part.Transparency = 0
-		plate.gui.Enabled = true
+		plate.gui.Enabled = numbered
 
 		plate.label.Text = tostring(f)
 		plate.label.TextColor3 = if weight >= GLOW_THRESHOLD
@@ -483,9 +561,9 @@ end
 -- animation's answer, and it is the only place the target face is consumed.
 --------------------------------------------------------------------------------
 
--- Returns the rotation R with R * normal == world up. Post-multiplying a
--- trajectory keyframe by R therefore guarantees the target face is up at the
--- instant the trajectory reaches identity.
+-- Returns the rotation R with R * normal == world up. Left-multiplying R by the
+-- residual spin therefore guarantees the target face is up at the instant that
+-- residual reaches zero -- and only then.
 local function rotationBringingUp(normal: Vector3): CFrame
 	local dot = math.clamp(normal:Dot(Vector3.yAxis), -1, 1)
 	if dot > 0.9999 then
@@ -517,6 +595,14 @@ end
 --
 -- No Lua table, closure or Instance is allocated here (NFR-1). The loop is a
 -- numeric `for` over a fixed-size array whose entries are mutated in place.
+--
+-- ACCEPTED, NOT OVERLOOKED: CFrame and Vector3 are Roblox userdata values, so
+-- composing the pivot does produce short-lived temporaries each frame per
+-- animating die. That is at most seven dice for at most 2.4 seconds, it is
+-- generational-GC cheap, and every alternative (caching CFrames, mutating in
+-- place) is impossible for immutable userdata or costs more than it saves. The
+-- NFR-1 prohibition this file honours is on Lua TABLES, CLOSURES and
+-- INSTANCES, none of which are created below.
 --------------------------------------------------------------------------------
 
 local function step(deltaTime: number): ()
@@ -533,25 +619,43 @@ local function step(deltaTime: number): ()
 			slot.animating = false
 		end
 
-		-- Position: ease-out toward the anchor, with a decaying hop so the die
-		-- reads as landing rather than as descending on a string.
-		local eased = 1 - (1 - a) * (1 - a) * (1 - a)
-		local hop = HOP_HEIGHT * math.abs(math.sin(a * math.pi * BOUNCES)) * (1 - a)
+		local inverse = 1 - a
+
+		-- Position: cubic ease-out toward the anchor, with a decaying hop so the
+		-- die reads as landing rather than as descending on a string.
+		local eased = 1 - inverse * inverse * inverse
+		local hop = HOP_HEIGHT * math.abs(math.sin(a * math.pi * BOUNCES)) * inverse
 		local position = slot.startPos:Lerp(slot.endPos, eased)
 
-		-- Orientation: R * keyframe(t). At a == 1 the keyframe is exactly the
-		-- identity, so the die finishes at exactly R -- the server's face, up.
-		local frames = TRAJECTORIES[slot.trajectory]
-		local segment = eased * (KEYFRAMES - 1)
-		local lower = math.floor(segment)
-		if lower > KEYFRAMES - 2 then
-			lower = KEYFRAMES - 2
+		-- Orientation: the residual spin still owed, unwound onto the answer.
+		--
+		-- `spun = total * (1 - (1 - a)^2)` is a QUADRATIC ease-out, which is
+		-- exactly constant angular deceleration -- a die losing speed to
+		-- friction. Its residual is the algebraically identical
+		-- `total * (1 - a)^2` written below, one multiply cheaper.
+		--
+		-- This is deliberately NOT the positional `eased` above. Sharing the
+		-- cubic would have three quarters of the spin done by a = 0.37 and
+		-- leave the back half of every tumble visually frozen; the quadratic
+		-- still owes a quarter of its turns at the halfway mark.
+		--
+		-- Monotonicity: `inverse^2` is strictly decreasing on [0, 1] and
+		-- `spinTotal` is positive, so the residual angle only ever shrinks. The
+		-- axis is fixed for the whole tumble, so the die turns one way and
+		-- never rewinds, and it reaches residual zero exactly once -- at the
+		-- end. No CFrame is interpolated, so no shortest-arc slerp can eat the
+		-- winding number.
+		local rotation: CFrame
+		if a >= 1 then
+			-- Exact terminal assignment. Not "close to R" -- R.
+			rotation = slot.finalRot
+		else
+			local residual = slot.spinTotal * inverse * inverse
+			rotation = CFrame.fromAxisAngle(slot.spinAxis, residual) * slot.finalRot
 		end
-		local blend = segment - lower
-		local rotation = frames[lower + 1]:Lerp(frames[lower + 2], blend)
 
 		slot.visual.model:PivotTo(
-			CFrame.new(position.X, position.Y + hop, position.Z) * slot.finalRot * rotation
+			CFrame.new(position.X, position.Y + hop, position.Z) * rotation
 		)
 	end
 end
@@ -568,6 +672,13 @@ local function beginRoll(faces: { any }, payout: number): ()
 
 	local duration = durationFor(payout)
 
+	-- A longer tumble buys MORE TURNS, not more waiting. Whole turns only, so
+	-- the fractional part of the total is still the guaranteed [0.25, 0.75]
+	-- that keeps the opening orientation off the answer.
+	local span = MAX_DURATION - MIN_DURATION
+	local reach = if span > 0 then math.clamp((duration - MIN_DURATION) / span, 0, 1) else 0
+	local bonusTurns = math.floor((SPIN_TURNS_PAYOUT_BONUS * reach) + 0.5)
+
 	for i = 1, MAX_DICE do
 		local slot = slots[i]
 		if i > count then
@@ -581,24 +692,43 @@ local function beginRoll(faces: { any }, payout: number): ()
 
 		local config = diceConfig[i]
 		local shapeId = readShape(config)
-		local normals = NORMALS[shapeId] or NORMALS[DEFAULT_SHAPE]
+		local normals = NORMALS[shapeId or DEFAULT_SHAPE] or NORMALS[DEFAULT_SHAPE]
 
 		applyConfig(slot.visual, shapeId, readFaces(config))
 
-		-- The server's chosen face. Out-of-range is clamped, never rejected:
-		-- the payout is already credited and refusing to animate would only
-		-- hide a result the player has been paid for.
+		-- The server's chosen face. A malformed index is substituted, never
+		-- rejected: the payout is already credited and refusing to animate
+		-- would only hide a result the player has been paid for.
 		local target = faces[i]
-		local faceIndex = if type(target) == "number" then math.floor(target) else 1
-		faceIndex = math.clamp(faceIndex, 1, #normals)
+		local faceIndex = 1
+		if type(target) == "number" and target == target and target >= 1 and target < math.huge then
+			faceIndex = math.floor(target)
+		end
+
+		if shapeId == nil then
+			-- Shape unknown, so this die is drawn unnumbered (see applyConfig)
+			-- and no numeral will contradict the credited face. The tumble
+			-- still has to end on SOME facet; wrap into the placeholder solid
+			-- rather than clamp, so a high index does not always pile onto the
+			-- same face. Nothing here is displayed as a face number.
+			faceIndex = ((faceIndex - 1) % #normals) + 1
+		else
+			faceIndex = math.clamp(faceIndex, 1, #normals)
+		end
 
 		slot.finalRot = rotationBringingUp(normals[faceIndex])
-		slot.trajectory = rng:NextInteger(1, #TRAJECTORIES)
+		slot.spinAxis = SPIN_AXES[rng:NextInteger(1, #SPIN_AXES)]
+		slot.spinTotal = (
+			rng:NextInteger(SPIN_TURNS_MIN, SPIN_TURNS_MAX)
+			+ bonusTurns
+			+ rng:NextNumber(SPIN_FRACTION_MIN, SPIN_FRACTION_MAX)
+		) * TAU
 
 		-- FR-1.4: the resting place comes from ArenaView, which is the only
 		-- thing that knows where "inside" is, and is clamped by the die's own
-		-- half-extent before it is ever used.
-		slot.endPos = ArenaView.getAnchor(i, count, DIE_RADIUS).Position
+		-- true half-extent -- plates and corners included -- before it is ever
+		-- used.
+		slot.endPos = ArenaView.getAnchor(i, count, slot.visual.extent).Position
 		slot.startPos = ArenaView.getSpawnPoint(i, count)
 
 		slot.elapsed = 0
@@ -612,7 +742,13 @@ local function beginRoll(faces: { any }, payout: number): ()
 
 		-- Place it at the start immediately, so a die that appears this frame
 		-- appears in the pit rather than at the world origin for one frame.
-		slot.visual.model:PivotTo(CFrame.new(slot.startPos) * slot.finalRot * TRAJECTORIES[slot.trajectory][1])
+		-- This is the a == 0 orientation, residual == spinTotal: a full
+		-- multi-turn rotation AWAY from the answer, never the answer itself.
+		slot.visual.model:PivotTo(
+			CFrame.new(slot.startPos)
+			* CFrame.fromAxisAngle(slot.spinAxis, slot.spinTotal)
+			* slot.finalRot
+		)
 	end
 end
 
@@ -620,7 +756,7 @@ end
 -- Public surface
 --------------------------------------------------------------------------------
 
-function DiceRenderer.init(net: any): ()
+function DiceRenderer.init(net: Net): ()
 	if started then
 		return
 	end
@@ -641,14 +777,15 @@ function DiceRenderer.init(net: any): ()
 			duration = MIN_DURATION,
 			startPos = Vector3.zero,
 			endPos = Vector3.zero,
-			trajectory = 1,
+			spinAxis = SPIN_AXES[1],
+			spinTotal = 0,
 			finalRot = CFrame.identity,
 		}
 	end
 
 	-- Show the player's dice at rest before they have rolled anything, so the
 	-- arena is never empty and FR-1.3 is readable the moment they arrive.
-	net.onStateSync(function(state: any)
+	table.insert(connections, net.onStateSync(function(state: any)
 		if type(state) ~= "table" then
 			return
 		end
@@ -678,18 +815,18 @@ function DiceRenderer.init(net: any): ()
 				continue
 			end
 			applyConfig(slot.visual, readShape(diceConfig[i]), readFaces(diceConfig[i]))
-			slot.endPos = ArenaView.getAnchor(i, count, DIE_RADIUS).Position
+			slot.endPos = ArenaView.getAnchor(i, count, slot.visual.extent).Position
 			slot.visual.model:PivotTo(CFrame.new(slot.endPos) * slot.finalRot)
 			if not slot.inUse then
 				slot.inUse = true
 				slot.visual.model.Parent = ArenaView.getContainer()
 			end
 		end
-	end)
+	end))
 
 	-- The server has already credited before this fires (FR-2.6). Everything
 	-- below is presentation.
-	net.onRollResult(function(result: any)
+	table.insert(connections, net.onRollResult(function(result: any)
 		if type(result) ~= "table" then
 			return
 		end
@@ -699,9 +836,47 @@ function DiceRenderer.init(net: any): ()
 		end
 		local payout = result.payout
 		beginRoll(faces :: { any }, if type(payout) == "number" then payout else 0)
-	end)
+	end))
 
-	RunService.RenderStepped:Connect(step)
+	frameConnection = RunService.RenderStepped:Connect(step)
+end
+
+-- Give back everything `init` took: both wire subscriptions, the render step,
+-- and the pooled Instances. Symmetric with `HUD.shutdown`.
+--
+-- Tearing down mid-tumble is safe by construction and always was: the payout
+-- was credited before this module heard about the roll (FR-2.6), so an
+-- animation that never finishes costs a visual and nothing else.
+function DiceRenderer.shutdown(): ()
+	if not started then
+		return
+	end
+
+	for _, connection in ipairs(connections) do
+		connection:Disconnect()
+	end
+	connections = {}
+
+	local frame = frameConnection
+	if frame ~= nil then
+		frame:Disconnect()
+	end
+	frameConnection = nil
+
+	-- Destroyed rather than merely unparented: `init` builds a fresh pool, so
+	-- keeping the old one would leak seven models on every restart.
+	-- Indexed defensively: `init` errors if ArenaView is not ready, which can
+	-- leave the pool half built with `started` already latched.
+	for i = 1, MAX_DICE do
+		local slot: DieSlot? = slots[i]
+		if slot ~= nil then
+			slot.visual.model:Destroy()
+		end
+	end
+	slots = {}
+	diceConfig = {}
+
+	started = false
 end
 
 return DiceRenderer

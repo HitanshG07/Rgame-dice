@@ -65,6 +65,121 @@ local function run(): (boolean, string?, number)
 	end
 
 	----------------------------------------------------------------------------
+	-- EVERY VIEW MODULE LOADS AND HONOURS THE BOOTSTRAP CONTRACT
+	----------------------------------------------------------------------------
+
+	-- THIS BLOCK EXISTS BECAUSE THE SAME GAP HAS NOW BITTEN THREE TIMES.
+	--   1. ForgeService shipped calling a function that has never existed. No
+	--      suite required the module, so no symbol in it was ever resolved.
+	--   2. UT-13 was written to close that -- and covered NetClient and
+	--      ClientBootstrap only.
+	--   3. Seven view modules then landed with no suite requiring any of them.
+	--      Six were rejected on audit; two of the defects (a nil-index on an
+	--      absent settings source, a call into a shared function whose signature
+	--      had changed) are exactly what a require would have surfaced.
+	--
+	-- The rule, stated so the fourth instance does not happen: A MODULE THAT NO
+	-- SUITE REQUIRES IS A MODULE WHOSE SYMBOLS ARE NEVER RESOLVED. Requiring it
+	-- is most of the value; asserting its shape is the rest.
+	--
+	-- These are CLIENT modules being required from a SERVER-side suite. That is
+	-- deliberate and it is a real check: anything a view module does at MODULE
+	-- SCOPE must be safe without a LocalPlayer, because module scope runs before
+	-- init. Work needing a player belongs in init(), which this suite never calls.
+	local VIEW_MODULES: { string } = {
+		"UITheme",
+		"ArenaView",
+		"DiceRenderer",
+		"FeedbackFX",
+		"HUD",
+		"ForgePanel",
+		"MenuPanel",
+		"AudioDirector",
+	}
+
+	local failedToLoad: { string } = {}
+	local missingInit: { string } = {}
+	local notATable: { string } = {}
+	local loadedModules: { [string]: any } = {}
+
+	for _, name in ipairs(VIEW_MODULES) do
+		local instance = clientRoot:FindFirstChild(name)
+		if instance == nil then
+			table.insert(failedToLoad, name .. " (absent from the client tree)")
+			continue
+		end
+		local ok, result = pcall(require, instance)
+		if not ok then
+			table.insert(failedToLoad, string.format("%s (%s)", name, tostring(result)))
+			continue
+		end
+		loadedModules[name] = result
+		if type(result) ~= "table" then
+			table.insert(notATable, name)
+			continue
+		end
+		-- UITheme is data plus builders, not a lifecycle module; every other view
+		-- module is constructed by ClientBootstrap and must expose init.
+		if name ~= "UITheme" and type(result.init) ~= "function" then
+			table.insert(missingInit, name)
+		end
+	end
+
+	e = e or check(#failedToLoad == 0, string.format(
+		"view modules that FAILED TO LOAD: %s", table.concat(failedToLoad, " | ")))
+	e = e or check(#notATable == 0, string.format(
+		"view modules not returning a table: %s", table.concat(notATable, ", ")))
+	e = e or check(#missingInit == 0, string.format(
+		"view modules with no init(): ClientBootstrap would skip them silently -- %s",
+		table.concat(missingInit, ", ")))
+
+	----------------------------------------------------------------------------
+	-- Teardown symmetry
+	----------------------------------------------------------------------------
+
+	-- A module that acquires a connection, a ScreenGui or a pool and offers no
+	-- release path cannot be unloaded or re-hosted. Three of the seven shipped
+	-- without one. Not every module needs shutdown -- but one that connects to a
+	-- signal does, and the audit found the asymmetry only by reading each file.
+	local noShutdown: { string } = {}
+	for _, name in ipairs({ "ArenaView", "DiceRenderer", "FeedbackFX", "HUD", "ForgePanel", "MenuPanel", "AudioDirector" }) do
+		local m = loadedModules[name]
+		if type(m) == "table" and type((m :: any).shutdown) ~= "function" then
+			table.insert(noShutdown, name)
+		end
+	end
+	e = e or check(#noShutdown == 0, string.format(
+		"view modules with no shutdown(): every acquisition needs a release path -- %s",
+		table.concat(noShutdown, ", ")))
+
+	----------------------------------------------------------------------------
+	-- The theme is the single source of visual truth
+	----------------------------------------------------------------------------
+
+	local theme = loadedModules["UITheme"]
+	if type(theme) == "table" then
+		local t = theme :: any
+		e = e or check(type(t.Colors) == "table", "UITheme must expose a Colors table")
+		e = e or check(type(t.panel) == "function", "UITheme must expose the panel builder")
+		e = e or check(type(t.label) == "function", "UITheme must expose the label builder")
+		e = e or check(type(t.button) == "function", "UITheme must expose the button builder")
+		e = e or check(t.BorderThickness == 1, "FR-13.1 specifies a 1-pixel border")
+
+		-- Every element in the catalog needs a tint, or a face renders untinted
+		-- with no error to notice. This is the check that keeps the palette and
+		-- the catalog from drifting apart.
+		local ElementCatalog = require(Shared:WaitForChild("ElementCatalog"))
+		local untinted: { string } = {}
+		for id in pairs(ElementCatalog.all()) do
+			if t.ElementColors[id] == nil then
+				table.insert(untinted, id)
+			end
+		end
+		e = e or check(#untinted == 0, string.format(
+			"elements with no UITheme tint: %s", table.concat(untinted, ", ")))
+	end
+
+	----------------------------------------------------------------------------
 	-- IT LOADS. The single most valuable assertion in this file.
 	----------------------------------------------------------------------------
 

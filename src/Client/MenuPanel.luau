@@ -25,12 +25,25 @@
 -- live when Block 5 lands is a one-line status change with the note removed,
 -- and the diff shows exactly which promise was just kept.
 --
--- WHY THE PENDING LIST IS AS LONG AS IT IS. Verified against the RemoteGateway
--- register call sites on 2026-08-07: the server registers exactly four
--- handlers -- Roll, Forge, SetElement and SetShape. AddDieSlot, BuyUpgrade,
--- Ascend, ClaimQuest, GetLeaderboard and RedeemCode have remote NAMES in the
--- registry and NetClient wrappers, but no handler behind them. A wrapper is not
--- a system. Every entry that would depend on one of those is Pending.
+-- WHY THE PENDING LIST IS AS LONG AS IT IS. Two censuses, not one, because a
+-- live entry needs a handler for what it SENDS and a producer for what it
+-- READS, and an audit that checks only the first will bless a surface that
+-- renders nothing.
+--
+--   HANDLER CENSUS (RemoteGateway.register call sites, 2026-08-07): the server
+--   registers exactly four handlers -- Roll, Forge, SetElement and SetShape.
+--   AddDieSlot, BuyUpgrade, Ascend, ClaimQuest, GetLeaderboard and RedeemCode
+--   have remote NAMES in the registry and NetClient wrappers, but no handler
+--   behind them. A wrapper is not a system. Every entry depending on one of
+--   those is Pending.
+--
+--   EMITTER CENSUS (FireClient call sites, re-run 2026-08-08): StateSync now
+--   has a producer. `Server/StateSyncService.luau` fires it on join and after
+--   every successful mutation, and `StateSyncService.buildSnapshot` is the
+--   authority on the field names this file reads. STATS is Live on the strength
+--   of that emitter, not on the strength of the event merely being declared --
+--   which is precisely the mistake the first cut of this file made, marking
+--   STATS live against an event nothing on the server had ever fired.
 --
 -- THIS MODULE SENDS NOTHING. It makes no NetClient call at all: it reads
 -- StateSync for the Statistics surface and otherwise operates entirely on local
@@ -46,6 +59,16 @@
 -- LAYOUT. Scale only (FR-13.7, NFR-3). The sidebars occupy x 0.005-0.145 and
 -- 0.855-0.995 across y 0.16-0.84, which is precisely the band HUD leaves clear
 -- between its streak strip and its bottom bar.
+--
+-- THE RESERVED BAND. ForgePanel keeps a permanent FORGE tab at x 0.006-0.146,
+-- y 0.400-0.470 on UITheme.Layer.Panel -- one layer ABOVE this module's
+-- sidebars. Anything this file draws in that rect is both covered and
+-- input-blocked, permanently, from init. A uniform five-slot pitch put the
+-- SHAPE button straight underneath it. The slot table below therefore skips the
+-- band outright (see RESERVED_BAND) rather than trusting a z-order this module
+-- does not control. This is a workaround, not a resolution: the tab and this
+-- sidebar are competing for the same screen edge, and the real fix is an
+-- Orchestrator-level decision about who owns x < 0.15. Reported, not assumed.
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -102,6 +125,11 @@ export type SurfaceKey = "Forge" | "Shape"
 -- ForgePanel needing a second entry point.
 export type SurfaceOpener = (dieIndex: number?) -> ()
 
+-- The inbound counterpart to an opener. `setSurfaceOpener` lets this module get
+-- OUT of another surface's way; this lets it ask the other surfaces to get out
+-- of ITS way. See `setSurfaceCloser`.
+export type SurfaceCloser = () -> ()
+
 -- FR-13.6 plus the two audio switches AudioDirector needs. One record so a
 -- consumer receives the whole picture rather than four separate notifications.
 export type Settings = {
@@ -116,11 +144,24 @@ export type Settings = {
 --------------------------------------------------------------------------------
 
 -- SESSION-SCOPED, AND THAT IS A KNOWN SHORTFALL, NOT AN OVERSIGHT. FR-13.6 asks
--- for these to persist per player. Persisting them needs a remote and a profile
--- field, and neither exists: the remote registry has no settings entry and
--- adding one is a server change outside this module's remit. The toggles are
--- therefore fully functional for the session and reset on rejoin. Nothing here
--- claims otherwise, and the settings surface says so on screen.
+-- for these to persist per player. Persisting them needs BOTH a profile field
+-- and a remote handler that writes it, and only the first half exists.
+--
+-- The 2026-08-08 census is specific about which half. `PlayerProfile` does have
+-- a `Settings` table, and `StateSyncService.buildSnapshot` does ship it down as
+-- `settings` -- so the READ path is complete. There is no matching handler: the
+-- server registers Roll, Forge, SetElement and SetShape, and none of them writes
+-- settings. A toggle therefore has nowhere to go, and the stored value can only
+-- ever be the profile template's default.
+--
+-- This module consequently does NOT adopt the incoming `settings` field, and
+-- that omission is deliberate rather than an unfinished read. Adopting it would
+-- look like persistence while being incapable of it: every snapshot arrives
+-- carrying the template defaults, so any snapshot pushed after any unrelated
+-- mutation -- a roll, a forge -- would silently revert whatever the player had
+-- just toggled. A switch that flips itself back is worse than one that is
+-- honestly session-scoped. The toggles are fully functional for the session and
+-- reset on rejoin; the settings surface says exactly that on screen.
 local settings: Settings = {
 	particles = true,
 	motionBlur = true,
@@ -147,7 +188,23 @@ local function broadcastSettings(): ()
 		Audio.applySettings({ sfx = settings.sfx, music = settings.music })
 	end
 	local payload = snapshotSettings()
+
+	-- SNAPSHOT THE LISTENERS BEFORE CALLING ANY OF THEM. A listener is arbitrary
+	-- foreign code and it is entitled to subscribe or unsubscribe while it runs
+	-- -- the arena bridge this API exists to serve does exactly that, registering
+	-- a child module's listener the first time it hears about a settings change.
+	-- Adding or removing a key during a `pairs` traversal is undefined in Luau:
+	-- the new listener may be visited in this same broadcast, may be skipped, or
+	-- an existing one may be visited twice. Copying first makes the set of
+	-- recipients exactly the set that existed when the broadcast began, which is
+	-- the only definition that is stable to reason about. A listener that
+	-- subscribes mid-broadcast hears the NEXT change, not this one.
+	local recipients: { (Settings) -> () } = {}
 	for _, listener in pairs(settingsListeners) do
+		table.insert(recipients, listener)
+	end
+
+	for _, listener in ipairs(recipients) do
 		-- One faulty listener must not stop the rest from being told.
 		local ok, err = pcall(listener, payload)
 		if not ok then
@@ -177,6 +234,7 @@ end
 --------------------------------------------------------------------------------
 
 local openers: { [string]: SurfaceOpener } = {}
+local surfaceCloser: SurfaceCloser? = nil
 
 -- Forward-declared. Wiring an opener has to re-render the sidebar, but the
 -- renderer needs the entry table declared further down, so the two are split:
@@ -189,6 +247,33 @@ local refreshEntries: () -> ()
 function MenuPanel.setSurfaceOpener(key: SurfaceKey, opener: SurfaceOpener?): ()
 	openers[key] = opener
 	refreshEntries()
+end
+
+-- THE OTHER HALF OF THE Z-ORDER CONTRACT, and the reason it has to exist.
+--
+-- This module's overlay ScreenGui and ForgePanel's root both sit at
+-- UITheme.Layer.Panel (30) with geometry that fully overlaps. Roblox does not
+-- define which of two equal DisplayOrders draws on top, so a tie is not "the
+-- later one wins" -- it is unspecified, and it may resolve differently between
+-- sessions. Neither surface may unilaterally raise its own layer, because
+-- UITheme.Layer exists precisely so that two panels cannot both decide they are
+-- on top.
+--
+-- The only sound resolution is that exactly one Panel-layer surface is ever
+-- enabled at a time, which means the tie is never evaluated. Outbound, this
+-- module already yields: `activateEntry` calls `closeOverlay` before invoking a
+-- foreign opener. Inbound was missing -- nothing told the other surface to
+-- yield when THIS module took the screen, so opening STATS on top of an open
+-- forge produced the undefined case.
+--
+-- `closer` is invoked from `showOverlay`, immediately before this module's
+-- overlay is enabled. The Orchestrator wires it to `ForgePanel.setVisible(false)`.
+-- It is deliberately NOT a direct call to ForgePanel: a view module that
+-- imports a sibling view module is no longer disjoint from it, and the whole
+-- point of the opener/closer pair is that the Orchestrator owns the sequencing
+-- and the views stay ignorant of each other. Passing nil unwires.
+function MenuPanel.setSurfaceCloser(closer: SurfaceCloser?): ()
+	surfaceCloser = closer
 end
 
 --------------------------------------------------------------------------------
@@ -260,16 +345,51 @@ local ENTRIES: { Entry } = {
 	},
 }
 
-local SLOTS_PER_SIDE = 5
+--------------------------------------------------------------------------------
+-- Sidebar slot geometry
+--------------------------------------------------------------------------------
+
+-- The band, in ABSOLUTE screen scale, that ForgePanel's permanent FORGE tab
+-- occupies: x 0.006-0.146, y 0.400-0.470, on Layer.Panel (30), which is above
+-- this module's Layer.Sidebar (20). The x range is effectively identical to the
+-- left sidebar's, so only y can separate them. Recorded as named constants so
+-- the collision is checkable rather than baked into five magic numbers, and so
+-- the day ForgePanel moves its tab the check has something to compare against.
+local RESERVED_BAND_TOP = 0.395     -- 0.400 tab top, minus a 0.005 margin
+local RESERVED_BAND_BOTTOM = 0.475  -- 0.470 tab bottom, plus a 0.005 margin
+
+local SIDEBAR_TOP = 0.16
+local SIDEBAR_HEIGHT = 0.68
+
+-- Slot origins as a FRACTION OF THE SIDEBAR PANEL, top edge, with the button
+-- height below. Two slots sit above the reserved band and three below it; the
+-- gap in the middle of each sidebar is that band, left deliberately empty.
+--
+-- In absolute screen scale these resolve to:
+--   slot 1  0.170 - 0.265      slot 4  0.605 - 0.700
+--   slot 2  0.295 - 0.390      slot 5  0.730 - 0.825
+--   slot 3  0.480 - 0.575
+-- Slot 2 ends 0.005 above the band and slot 3 begins 0.005 below it. Both
+-- sidebars use the same table: the right sidebar has no tab over it, but a
+-- deliberate symmetry reads as a design and a one-sided shuffle reads as a bug.
+local SLOT_Y: { number } = { 0.015, 0.199, 0.471, 0.655, 0.838 }
+local SLOT_HEIGHT = 0.140
+
+local SLOTS_PER_SIDE = #SLOT_Y
 
 --------------------------------------------------------------------------------
 -- Instances
 --------------------------------------------------------------------------------
 
 local MAX_DIE_ROWS = 7   -- 5 base slots plus the +2 gamepass (FR-12.1)
-local STAT_ROWS = 5      -- cash, gems, diamonds, streak, slots
+
+-- cash, gems, diamonds, streak, die slots, lifetime cash, highest roll, total
+-- rolls, ascensions. Every one of the nine is a named field of
+-- StateSyncService.buildSnapshot -- see STAT_FIELDS.
+local STAT_ROWS = 9
 
 local sidebarGui: ScreenGui? = nil
+local noticeGui: ScreenGui? = nil
 local overlayGui: ScreenGui? = nil
 local overlayTitle: TextLabel? = nil
 local noticeLabel: TextLabel? = nil
@@ -297,6 +417,26 @@ local NOTICE_SECONDS = 4
 
 -- One pooled label. Nothing is created or destroyed to show a notice, and the
 -- token guards against an earlier timer clearing a later message.
+--
+-- WHERE IT LIVES, AND WHY THAT IS NOT COSMETIC. The notice is the entire
+-- mechanism that makes a dead entry honest: a Pending or unwired button does
+-- nothing except explain itself through this label. If the explanation is
+-- covered, the button is indistinguishable from the silently-dead buttons this
+-- whole file exists to avoid -- the refusal machinery would itself be the thing
+-- that failed silently.
+--
+-- It used to sit on the sidebar ScreenGui at Layer.Sidebar (20), y 0.805-0.840,
+-- underneath an opaque overlay panel that spans y 0.18-0.820 at Layer.Panel
+-- (30). That covered the top 43% of it. Worse, the PROMO CODES refusal is
+-- reachable ONLY from inside the settings surface, so the one message that can
+-- only ever fire with the overlay open was the one guaranteed to be clipped.
+--
+-- The fix is a layer, not a nudge: the notice gets its own ScreenGui at
+-- Layer.Toast (40), above every panel in the game. Moving it down the screen
+-- instead would only have traded this collision for one with the HUD bottom
+-- bar, and would still lose to any future full-height surface. A transient
+-- message that must outrank whatever it is explaining is exactly what the Toast
+-- layer is for.
 local function notify(text: string): ()
 	local label = noticeLabel
 	if label == nil then
@@ -342,6 +482,19 @@ local function showOverlay(id: string, title: string, body: Frame): ()
 		return
 	end
 
+	-- Make the other Panel-layer surfaces yield BEFORE enabling ours, so the two
+	-- are never simultaneously enabled and the undefined equal-DisplayOrder tie
+	-- is never evaluated. Foreign code, so a throw here must not leave this
+	-- module half-open: the overlay comes up either way and the failure is
+	-- reported rather than swallowed.
+	local closer = surfaceCloser
+	if closer ~= nil then
+		local ok, err = pcall(closer)
+		if not ok then
+			warn("[MenuPanel] surface closer errored: " .. tostring(err))
+		end
+	end
+
 	local stats = statsBody
 	if stats ~= nil then
 		stats.Visible = (stats == body)
@@ -369,6 +522,28 @@ local function readNumber(source: any, key: string): number?
 	end
 	local value = (source :: { [string]: any })[key]
 	if type(value) ~= "number" or not ForgeMath.isFinite(value) then
+		return nil
+	end
+	return value
+end
+
+-- A COUNT, not a quantity. `readNumber` admits any finite number, because a
+-- mass or a probability legitimately is one; a streak, a slot count, a roll
+-- total and an ascension count are not, and formatting a non-integral value
+-- with "%d" does not round it -- it RAISES. That throw used to happen inside
+-- `renderStatistics`, which `activateEntry` calls BEFORE `showOverlay`, so a
+-- fractional streak arriving over the wire turned the STATS button into a
+-- button that consumed the tap, played its click, and opened nothing: the exact
+-- silently-dead button this file was written to prevent, produced by the
+-- rendering of the honesty surface itself.
+--
+-- So integrality is a read-time predicate, not a formatting concern. A value
+-- that is not a whole number is not a valid count, and a field that fails this
+-- renders as a dash -- the same treatment as a field the snapshot never sent,
+-- because in both cases no authority has told us what the number is.
+local function readInteger(source: any, key: string): number?
+	local value = readNumber(source, key)
+	if value == nil or value % 1 ~= 0 then
 		return nil
 	end
 	return value
@@ -421,6 +596,36 @@ local function dieVoidText(die: any): string
 	return string.format("%.1f%%", p * 100)
 end
 
+-- THE FIELD MAP, checked against StateSyncService.buildSnapshot on 2026-08-08.
+-- Every `field` below is a key that function literally writes: cash, gems,
+-- diamonds, streak, dieSlots, lifetimeCash, highestRoll, totalRolls,
+-- ascensions. Kept as one table so the correspondence is a list somebody can
+-- diff against the server, not nine string literals scattered through a
+-- renderer. `counted` marks the fields that must be whole numbers.
+type StatField = {
+	label: string,
+	field: string,
+	counted: boolean,
+}
+
+local STAT_FIELDS: { StatField } = {
+	{ label = "CASH",       field = "cash",         counted = false },
+	{ label = "GEMS",       field = "gems",         counted = false },
+	{ label = "DIAMONDS",   field = "diamonds",     counted = false },
+	{ label = "STREAK",     field = "streak",       counted = true  },
+	{ label = "DIE SLOTS",  field = "dieSlots",     counted = true  },
+	{ label = "LIFETIME",   field = "lifetimeCash", counted = false },
+	{ label = "BEST ROLL",  field = "highestRoll",  counted = false },
+	{ label = "ROLLS",      field = "totalRolls",   counted = true  },
+	{ label = "ASCENSIONS", field = "ascensions",   counted = true  },
+}
+
+-- Monospace type (UITheme.Font is Enum.Font.Code), so a fixed-width label
+-- column actually lines the values up into one.
+local function statLine(label: string, value: string): string
+	return string.format("%-11s%s", label, value)
+end
+
 -- Renders from the last StateSync and from nothing else. Every figure shown is
 -- a server fact; a field the snapshot does not carry renders as a dash rather
 -- than as a zero, because a zero here would be a claim about the player's
@@ -428,37 +633,46 @@ end
 local function renderStatistics(): ()
 	local state = latestState
 
+	-- THE PRE-FIRST-PACKET WINDOW IS STILL REAL AND STILL NEEDS SAYING. The
+	-- server pushes a snapshot on join, but "on join" is not "before this panel
+	-- can be opened" -- the sidebar is built at init and the player can press
+	-- STATS during the gap. With no snapshot every row is a dash, and nine
+	-- dashes with no caption look like a broken panel rather than a waiting one.
+	-- Once a snapshot has landed the caption goes away entirely: there is no
+	-- longer a shortfall to disclose, because every field this surface shows is
+	-- now carried by the payload.
 	local note = statNote
 	if note ~= nil then
-		if state == nil then
-			note.Text = "Waiting for the first server snapshot."
-		else
-			-- Said plainly rather than left as a suspicious gap: lifetime rolls,
-			-- highest single roll and ascension count are real profile fields,
-			-- but the StateSync contract does not carry them, so this surface
-			-- genuinely cannot show them yet.
-			note.Text = "Lifetime totals are not in the state snapshot yet."
-		end
+		note.Text = if state == nil then "Waiting for the first server snapshot." else ""
 	end
 
-	local slots = readNumber(state, "dieSlots")
 	local dice = readTable(state, "dice")
-	if slots == nil and type(dice) == "table" then
-		slots = #(dice :: { any })
-	end
 
-	local streak = readNumber(state, "streak")
-
-	local values: { string } = {
-		"CASH      " .. money(readNumber(state, "cash")),
-		"GEMS      " .. money(readNumber(state, "gems")),
-		"DIAMONDS  " .. money(readNumber(state, "diamonds")),
-		"STREAK    " .. (if streak == nil then EMPTY else string.format("%d", streak)),
-		"DIE SLOTS " .. (if slots == nil then EMPTY else string.format("%d", slots)),
-	}
-
-	for index, row in ipairs(statRows) do
-		row.Text = values[index] or ""
+	for index, spec in ipairs(STAT_FIELDS) do
+		local row = statRows[index]
+		if row == nil then
+			continue
+		end
+		local text: string
+		if spec.counted then
+			-- DIE SLOTS is here rather than derived, and that is the whole point
+			-- of the field. It is a CAPACITY, granted by the profile and the +2
+			-- gamepass (FR-12.1); the dice array is what the player has actually
+			-- forged INTO that capacity. They are different quantities, and the
+			-- earlier `#dice` fallback conflated them -- a player holding the
+			-- gamepass with one die forged was shown "DIE SLOTS 1", understating
+			-- their purchase. The fallback is deleted rather than repaired,
+			-- because `#` on a table that arrived over a remote is undefined
+			-- anyway: a sparse array has no defined length in Luau, and a
+			-- serialised array with one hole can report any of several answers.
+			-- If the server did not send the capacity, this surface does not
+			-- know the capacity, and it says so with a dash.
+			local value = readInteger(state, spec.field)
+			text = if value == nil then EMPTY else string.format("%d", value)
+		else
+			text = money(readNumber(state, spec.field))
+		end
+		row.Text = statLine(spec.label, text)
 	end
 
 	-- Die rows are pooled to MAX_DIE_ROWS and toggled, never created per render.
@@ -590,8 +804,27 @@ function refreshEntries(): ()
 		if button ~= nil then
 			local actionable = entryIsActionable(entry)
 			UITheme.setEnabled(button, actionable)
+
+			-- A MARKER FOR EVERY UNAVAILABLE ENTRY, NOT JUST THE PENDING ONES.
+			-- Pending entries carried "(SOON)" while an unwired NeedsSurface
+			-- entry was distinguished by nothing but TextDim instead of
+			-- TextGold. Colour alone is too weak to carry that meaning: the two
+			-- greys differ by a shade the player has no reference for, it is
+			-- invisible to a colour-blind player and to anyone on a washed-out
+			-- phone screen, and a dimmed button with no caption is exactly what
+			-- a dead button looks like. FORGE and SHAPE were both in this state,
+			-- and FR-13.8 calls the forge the core mechanic -- the single entry
+			-- least able to afford being mistaken for broken.
+			--
+			-- The two markers say different things on purpose. "(SOON)" is a
+			-- promise about the game: the system does not exist yet. "(UNWIRED)"
+			-- is a report about this build: the surface exists but the
+			-- Orchestrator has not connected it, which is a wiring defect and
+			-- should look like one to whoever sees it.
 			if entry.status == "Pending" then
 				button.Text = entry.label .. "\n(SOON)"
+			elseif not actionable then
+				button.Text = entry.label .. "\n(UNWIRED)"
 			else
 				button.Text = entry.label
 			end
@@ -614,8 +847,39 @@ local function addLabel(parent: Instance, text: string, size: UDim2, position: U
 	return label
 end
 
+-- Converts a slot origin expressed as a fraction of the sidebar panel into the
+-- absolute screen scale the reserved band is stated in, so the two can be
+-- compared at all.
+local function slotAbsoluteTop(slotFraction: number): number
+	return SIDEBAR_TOP + SIDEBAR_HEIGHT * slotFraction
+end
+
+-- Checked at build time rather than trusted. SLOT_Y was derived by hand against
+-- constants declared a hundred lines apart; if anyone edits either end of that
+-- derivation -- retunes the slot pitch, or updates RESERVED_BAND after
+-- ForgePanel moves its tab -- the numbers stop agreeing and nothing on screen
+-- announces it, because an occluded button looks precisely like a button. The
+-- symptom this guards against was permanent and silent from init, so the guard
+-- runs at init too.
+local function warnIfSlotIsOccluded(side: string, slot: number, entryId: string): ()
+	if side ~= "Left" then
+		-- The reserved band is ForgePanel's tab, and the tab is on the left edge
+		-- (x 0.006-0.146). The right sidebar shares the band's y range but not
+		-- its x range, so it cannot collide.
+		return
+	end
+	local top = slotAbsoluteTop(SLOT_Y[slot])
+	local bottom = slotAbsoluteTop(SLOT_Y[slot] + SLOT_HEIGHT)
+	if top < RESERVED_BAND_BOTTOM and bottom > RESERVED_BAND_TOP then
+		warn(string.format(
+			"[MenuPanel] '%s' (y %.3f-%.3f) intersects ForgePanel's tab band (y %.3f-%.3f);"
+				.. " it will be drawn under the tab and its taps swallowed",
+			entryId, top, bottom, RESERVED_BAND_TOP, RESERVED_BAND_BOTTOM))
+	end
+end
+
 local function buildSidebar(root: Instance, side: string, x: number): ()
-	local bar = UITheme.panel(UDim2.fromScale(0.14, 0.68), UDim2.fromScale(x, 0.16))
+	local bar = UITheme.panel(UDim2.fromScale(0.14, SIDEBAR_HEIGHT), UDim2.fromScale(x, SIDEBAR_TOP))
 	bar.Name = side .. "Sidebar"
 	bar.Parent = root
 
@@ -633,8 +897,10 @@ local function buildSidebar(root: Instance, side: string, x: number): ()
 			break
 		end
 
-		local y = 0.02 + (slot - 1) * 0.19
-		local button = UITheme.button(entry.label, UDim2.fromScale(0.90, 0.17), UDim2.fromScale(0.05, y))
+		warnIfSlotIsOccluded(side, slot, entry.id)
+
+		local button = UITheme.button(entry.label, UDim2.fromScale(0.90, SLOT_HEIGHT),
+			UDim2.fromScale(0.05, SLOT_Y[slot]))
 		button.Name = entry.id
 		button.TextWrapped = true
 		button.Parent = bar
@@ -768,7 +1034,18 @@ function MenuPanel.init(client: Net): ()
 	buildSidebar(bars, "Left", 0.005)
 	buildSidebar(bars, "Right", 0.855)
 
-	noticeLabel = addLabel(bars, "", UDim2.fromScale(0.60, 0.035), UDim2.fromScale(0.20, 0.805),
+	-- A THIRD ScreenGui, for the reason given at `notify`: the refusal notice has
+	-- to outrank every panel, including this module's own overlay, and a
+	-- DisplayOrder belongs to a ScreenGui rather than to a frame inside one.
+	local notices = Instance.new("ScreenGui")
+	notices.Name = "DiceForgeMenuNotice"
+	notices.ResetOnSpawn = false
+	notices.DisplayOrder = UITheme.Layer.Toast
+	notices.IgnoreGuiInset = false
+	notices.Parent = playerGui
+	noticeGui = notices
+
+	noticeLabel = addLabel(notices, "", UDim2.fromScale(0.60, 0.035), UDim2.fromScale(0.20, 0.805),
 		UITheme.Colors.TextDim, true)
 	local notice = noticeLabel
 	if notice ~= nil then
@@ -817,6 +1094,12 @@ function MenuPanel.shutdown(): ()
 	end
 	sidebarGui = nil
 
+	local notices = noticeGui
+	if notices ~= nil then
+		notices:Destroy()
+	end
+	noticeGui = nil
+
 	local overlay = overlayGui
 	if overlay ~= nil then
 		overlay:Destroy()
@@ -834,6 +1117,28 @@ function MenuPanel.shutdown(): ()
 	dieRows = {}
 	latestState = nil
 	openSurfaceId = nil
+
+	-- THE REGISTRY IS PART OF THE TEARDOWN, and leaving it out was a leak with
+	-- teeth. `settingsListeners` survived shutdown holding closures over
+	-- destroyed instances; the next `init` ends with `broadcastSettings`, which
+	-- would call every one of them. Each stale closure then either errors into
+	-- the pcall -- a warn per listener per broadcast, forever -- or, worse,
+	-- succeeds against an instance detached from the DataModel, keeping the
+	-- whole destroyed GUI tree alive and applying settings to a surface no one
+	-- can see. The id counter resets with it: nothing outside this module holds
+	-- an id, and the only reference to one is the unsubscribe closure returned
+	-- by `onSettingsChanged`, which is itself dead once shutdown has run. An
+	-- unsubscribe called after shutdown clears a key that no longer exists,
+	-- which is a no-op, not a collision.
+	settingsListeners = {}
+	nextListenerId = 1
+
+	-- `openers` and `surfaceCloser` are deliberately NOT cleared. They hold
+	-- functions belonging to other modules, which shutting this one down does
+	-- not destroy, and the Orchestrator wires them once at startup rather than
+	-- per init. Clearing them would silently un-wire FORGE and SHAPE across an
+	-- init/shutdown cycle. This asymmetry with `settingsListeners` is the point:
+	-- that registry holds closures over instances THIS module just destroyed.
 end
 
 return MenuPanel

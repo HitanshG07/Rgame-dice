@@ -23,10 +23,25 @@
 -- ENTRY POINTS WITH NO SYSTEM BEHIND THEM. FR-13.2 and FR-13.5 name Group
 -- Rewards, the Robux shop, the playtime chest and the daily spin. As of this
 -- writing the server registers exactly four handlers -- Roll, Forge, SetElement
--- and SetShape (verified against RemoteGateway.register call sites, 2026-08-07)
+-- and SetShape (verified against RemoteGateway.register call sites, 2026-08-08)
 -- -- and none of those four systems is among them. Each therefore renders in an
 -- explicit unavailable state that says so when pressed. It is not a button that
 -- looks live and does nothing.
+--
+-- AUTO-ROLL IS ONE OF THEM, and it is the one that looked otherwise. `SetAutoRoll`
+-- is declared in `Remotes` and carries a RemoteGateway rate-limit entry, which is
+-- the whole of its existence server-side: nothing calls `RemoteGateway.register`
+-- for it, so there is no `OnServerInvoke` behind the RemoteFunction. An earlier
+-- revision of this file shipped AUTO as a live, enabled button that invoked it,
+-- so the press failed inside NetClient's pcall and the player was shown "SERVER
+-- DID NOT ANSWER" -- the server blamed for declining a feature it was never asked
+-- to have, and, on the Roblox behaviour where an unhandled invocation yields
+-- rather than raising, one client thread parked per press. AUTO now takes the
+-- same pending treatment as CHEST, SPIN, GROUP and SHOP: nothing is sent, so
+-- nothing can be blamed and nothing can be parked. It becomes a live control in
+-- the same change that registers its handler and gives its state a field in the
+-- StateSync snapshot -- not before, because a toggle the server cannot confirm is
+-- a toggle this HUD may not claim to have set (FR-7.2).
 --
 -- LAYOUT. Scale only (FR-13.7, NFR-3). The horizontal bands are 0.00-0.085 for
 -- the top bar, 0.09-0.148 for the streak strip and 0.86-1.00 for the bottom bar,
@@ -76,14 +91,18 @@ local HUD = {}
 --------------------------------------------------------------------------------
 
 -- Structural rather than a require of NetClient's own type, so this file states
--- exactly which four calls it is allowed to make. Widening it is a visible diff.
+-- exactly which calls it is allowed to make. Widening it is a visible diff.
 -- NOTE THE ABSENCE of anything that takes a number: nothing this module sends
 -- can carry a price, balance, reward, level, duration or multiplier (NFR-5).
+--
+-- `setAutoRoll` is deliberately NOT listed. NetClient still offers it, and the
+-- type is structural, so re-adding the line is all it takes once a server
+-- handler exists -- and until then the omission is what makes "the HUD cannot
+-- send this" a fact about the code rather than a promise in a comment.
 type NetResult = { ok: boolean, reason: string? }
 
 export type Net = {
 	roll: () -> NetResult,
-	setAutoRoll: (boolean) -> NetResult,
 	readyIn: (string) -> number,
 	onStateSync: ((any) -> ()) -> RBXScriptConnection,
 	onRollResult: ((any) -> ()) -> RBXScriptConnection,
@@ -110,6 +129,27 @@ local function readNumber(source: any, key: string): number?
 		return nil
 	end
 	return value
+end
+
+-- A count that is not a whole number is malformed, not something to round.
+-- `readNumber` admits any finite number, and Luau's `%d` RAISES on 2.5 rather
+-- than truncating it -- a throw that NetClient's per-handler pcall swallows, so
+-- the streak strip would freeze silently while cash carried on updating.
+-- Rejecting integrality at the boundary makes the worst case a dash.
+local function readInteger(source: any, key: string): number?
+	local value = readNumber(source, key)
+	if value == nil or value % 1 ~= 0 then
+		return nil
+	end
+	return value
+end
+
+local function readString(source: any, key: string): string?
+	if type(source) ~= "table" then
+		return nil
+	end
+	local value = (source :: { [string]: any })[key]
+	return if type(value) == "string" then value else nil
 end
 
 local function readBoolean(source: any, key: string): boolean?
@@ -169,20 +209,36 @@ local function loadoutVoidProbability(dice: any): number?
 			return nil
 		end
 
-		-- ForgeMath raises on degenerate input (zero total mass, for instance).
-		-- A snapshot that trips it is a display problem, never a crash.
-		-- The floor is per-shape and REQUIRED: without it voidProbability cannot
-		-- apply the proximity gate and reports the lightest face's landing
-		-- probability as if it were the streak-break chance.
-		local shapeId = if type(die) == "table" and type(die.Shape) == "string" then die.Shape else nil
-		if shapeId == nil then
+		-- The floor is per-shape and REQUIRED. Without it `voidProbability`
+		-- cannot apply the proximity gate (a face counts as Void only when it is
+		-- the lightest AND sits at or under floor * VOID_FLOOR_FACTOR) and
+		-- reports the lightest face's landing probability as though it were the
+		-- streak-break chance: 16.7% on a starting D6 whose true Void chance is
+		-- zero. `massFloor` is now a required parameter precisely so no caller
+		-- can ask this question without answering that one first.
+		--
+		-- An unrecognised shape id renders a dash rather than borrowing
+		-- DiceCatalog's default floor. `getMassFloor` answers 1 for an id it does
+		-- not know, and a guessed floor produces a confident percentage measured
+		-- against a gate the server would never have applied.
+		local shapeId = readString(die, "Shape")
+		if shapeId == nil or DiceCatalog.getShape(shapeId) == nil then
 			return nil
 		end
+
+		-- ForgeMath raises on degenerate input (zero total mass, for instance).
+		-- A snapshot that trips it is a display problem, never a crash.
 		local ok, p = pcall(ForgeMath.voidProbability, mass, DiceCatalog.getMassFloor(shapeId))
 		if not ok or type(p) ~= "number" or not ForgeMath.isFinite(p) then
 			return nil
 		end
 
+		-- A flat, un-forged die fails the proximity gate and contributes exactly
+		-- 0, multiplying `survive` by 1 and leaving 1 - product(1 - p_i) exactly
+		-- as it was. That is the correct reading and not a special case: a die
+		-- that cannot land a Void cannot break the streak, so a loadout of only
+		-- such dice reports 0.0% and a mixed loadout reports the forged dice's
+		-- combined chance alone.
 		survive *= (1 - p)
 		counted += 1
 	end
@@ -204,13 +260,19 @@ local lastCash: number? = nil
 local lastGems: number? = nil
 local lastStreak: number? = nil
 local lastMultiplier: number? = nil
+-- The streak `lastMultiplier` was reported against. The multiplier arrives on
+-- RollResult and has NO field in the StateSync snapshot, so nothing in a later
+-- snapshot can correct it; binding it to its streak is what lets renderStreak
+-- refuse to draw a figure whose streak has since moved on.
+local lastMultiplierStreak: number? = nil
 local lastVoidProbability: number? = nil
 local likeProgress: number? = nil
 local likeTarget: number? = nil
 local eventActive = false
 
-local autoRollWanted = false
 local rollPendingUntil = 0
+-- Taken synchronously on the press, released when the reply lands. See doRoll.
+local rollInFlight = false
 
 --------------------------------------------------------------------------------
 -- Instances -- all built once, all pooled (NFR-1)
@@ -228,7 +290,6 @@ local multiplierLabel: TextLabel? = nil
 local voidLabel: TextLabel? = nil
 local statusLabel: TextLabel? = nil
 local rollButton: TextButton? = nil
-local autoButton: TextButton? = nil
 local rollPulse: Frame? = nil
 
 local connections: { RBXScriptConnection } = {}
@@ -240,7 +301,6 @@ local heartbeat: RBXScriptConnection? = nil
 -- no strings it does not need.
 local textCache: { [string]: string } = {}
 local rollEnabledCache: boolean? = nil
-local autoEnabledCache: boolean? = nil
 
 local function setText(label: TextLabel?, key: string, text: string): ()
 	if label == nil then
@@ -251,20 +311,6 @@ local function setText(label: TextLabel?, key: string, text: string): ()
 	end
 	textCache[key] = text
 	label.Text = text
-end
-
--- Same guard for a TextButton. A separate function rather than a union type or
--- a cast, because widening the parameter to `any` would silently accept an
--- instance with no Text property at all.
-local function setButtonText(button: TextButton?, key: string, text: string): ()
-	if button == nil then
-		return
-	end
-	if textCache[key] == text then
-		return
-	end
-	textCache[key] = text
-	button.Text = text
 end
 
 --------------------------------------------------------------------------------
@@ -281,16 +327,21 @@ local function renderCurrencies(): ()
 end
 
 local function renderStreak(): ()
+	-- Format, not `%d`. The integrality that `%d` demands is enforced at the
+	-- reader instead, so an unrepresentable streak is already nil by the time it
+	-- reaches here and this line cannot raise.
 	local streak = lastStreak
-	setText(streakLabel, "streak", "STREAK  " .. (if streak == nil then EMPTY else string.format("%d", streak)))
+	setText(streakLabel, "streak", "STREAK  " .. (if streak == nil then EMPTY else Format.formatNumber(streak)))
 
-	-- The multiplier is a SERVER number. The one case where it is safe to state
-	-- without the server having said it is streak zero, where (1+b)^0 = 1 by
-	-- definition for every value of b (FR-5.3) and no player-specific data is
-	-- being guessed at. Any other streak with no server multiplier in hand
-	-- renders a dash rather than an arithmetic guess about b.
+	-- The multiplier is a SERVER number, and it is drawn only for the streak the
+	-- server quoted it against -- a multiplier held over a streak that has since
+	-- changed describes a state the player is no longer in. The one case where it
+	-- is safe to state without the server having said it is streak zero, where
+	-- (1+b)^0 = 1 by definition for every value of b (FR-5.3) and no
+	-- player-specific data is being guessed at. Anything else renders a dash
+	-- rather than an arithmetic guess about b.
 	local multiplierText: string
-	if lastMultiplier ~= nil then
+	if lastMultiplier ~= nil and streak ~= nil and lastMultiplierStreak == streak then
 		multiplierText = string.format("x%.2f", lastMultiplier)
 	elseif streak == 0 then
 		multiplierText = "x1.00"
@@ -360,14 +411,26 @@ local function renderEvent(): ()
 	end
 end
 
-local function renderAuto(): ()
-	setButtonText(autoButton, "auto", if autoRollWanted then "AUTO  ON" else "AUTO")
-end
-
 -- The one place a refusal, a notice or an unavailable entry point becomes
 -- words. A single pooled label; no toast instances are created or destroyed.
+--
+-- Every message EXPIRES. A "SLOW DOWN" left on screen stops describing what just
+-- happened and starts describing the interface as permanently unhappy, and the
+-- player has no way to tell a message about this press from one about a press
+-- two minutes ago. The clear runs on the heartbeat that is already ticking, so
+-- no timer thread is spawned per message.
+local STATUS_SECONDS = 4
+local statusUntil = 0
+
 local function setStatus(text: string): ()
 	setText(statusLabel, "status", text)
+	statusUntil = if text == "" then 0 else os.clock() + STATUS_SECONDS
+end
+
+local function expireStatus(now: number): ()
+	if statusUntil > 0 and now >= statusUntil then
+		setStatus("")
+	end
 end
 
 --------------------------------------------------------------------------------
@@ -430,6 +493,17 @@ local function doRoll(): ()
 		return
 	end
 
+	-- The latch is taken and tested SYNCHRONOUSLY, before the thread hop. The
+	-- readyIn pre-check below and NetClient's own throttle stamp sit on opposite
+	-- sides of that hop, so two presses inside one frame could both pass the
+	-- check and both pulse while only one of them ever reached the wire -- a
+	-- pulse promising a roll that was silently dropped. Held until the reply
+	-- lands, it also guarantees at most one request in flight, so a press cannot
+	-- park a thread behind an earlier one.
+	if rollInFlight then
+		return
+	end
+
 	-- Asked before sending, not after being refused. The button is already
 	-- greyed by the heartbeat at this point; this is what makes the grey
 	-- MEAN something rather than being decoration over a call that still goes
@@ -442,43 +516,17 @@ local function doRoll(): ()
 	-- Feedback first, network second. The request is dispatched on its own
 	-- thread so the InvokeServer yield cannot delay the pulse past 100 ms
 	-- (NFR-7) -- the frame paints while the call is still in flight.
+	rollInFlight = true
 	pulseRoll()
 	cue("RollPress")
 
 	task.spawn(function()
+		-- NetClient wraps the invocation in a pcall and always answers with a
+		-- Result, so this cannot throw past the release below and strand the
+		-- latch set.
 		local result = client.roll()
+		rollInFlight = false
 		if not result.ok then
-			setStatus(reasonText(result))
-			cue("UiRefused")
-		end
-	end)
-end
-
-local function doToggleAuto(): ()
-	local client = net
-	if client == nil then
-		return
-	end
-
-	if client.readyIn("SetAutoRoll") > 0 then
-		setStatus("SLOW DOWN")
-		return
-	end
-
-	local wanted = not autoRollWanted
-	cue("UiClick")
-
-	task.spawn(function()
-		-- Only a boolean crosses the wire. The interval is server-owned
-		-- (FR-7.2); asking for one would be asking for an income rate.
-		local result = client.setAutoRoll(wanted)
-		if result.ok then
-			autoRollWanted = wanted
-			setStatus(if wanted then "AUTO ON" else "AUTO OFF")
-			renderAuto()
-		else
-			-- The local flag is only ever moved by a server confirmation, so a
-			-- refusal needs no rollback: the button never claimed the new state.
 			setStatus(reasonText(result))
 			cue("UiRefused")
 		end
@@ -586,11 +634,11 @@ local function buildBottomBar(root: Instance): ()
 	statusLabel = addLabel(bar, "", UDim2.fromScale(0.24, 0.4), UDim2.fromScale(0.37, 0.3),
 		UITheme.Colors.TextDim, true)
 
-	local auto = UITheme.button("AUTO", UDim2.fromScale(0.16, 0.5), UDim2.fromScale(0.63, 0.25))
+	-- FR-7.2's auto-roll. `SetAutoRoll` has a Remotes entry and a rate-limit
+	-- entry and no handler, so this is an entry point with no system behind it
+	-- exactly like CHEST and SPIN, and it is drawn as one. Nothing is invoked.
+	local auto = addPendingButton(bar, "AUTO", UDim2.fromScale(0.16, 0.5), UDim2.fromScale(0.63, 0.25))
 	auto.Name = "AutoButton"
-	auto.Parent = bar
-	auto.Activated:Connect(doToggleAuto)
-	autoButton = auto
 
 	local roll = UITheme.button("ROLL", UDim2.fromScale(0.16, 0.66), UDim2.fromScale(0.81, 0.17))
 	roll.Name = "RollButton"
@@ -618,47 +666,49 @@ end
 --------------------------------------------------------------------------------
 
 local function onStateSync(state: any): ()
-	-- Absent fields leave the previous value alone rather than blanking it: a
-	-- partial snapshot should not wipe a figure the server never retracted.
-	local cash = readNumber(state, "cash")
-	if cash ~= nil then
-		lastCash = cash
-	end
+	-- EVERY FIELD IS OVERWRITTEN, INCLUDING WITH NIL. StateSync is a FULL
+	-- snapshot (API_DATA_CONTRACT §1.2), never a patch, so a field this reader
+	-- cannot make sense of is not "unchanged" -- it is unknown, and there is no
+	-- contract under which the previous figure still describes it.
+	--
+	-- The earlier keep-previous form was the same mistake this file exists to
+	-- prevent, arrived at from the other direction: a snapshot with a malformed
+	-- `cash` taken straight after a spend would leave the PRE-SPEND balance on
+	-- screen, indefinitely, presented as a present fact with no dash to admit
+	-- otherwise. A stale confirmed-once number is a claim about the player's
+	-- money exactly as a zero is. `onEventState` has always taken this form.
+	lastCash = readNumber(state, "cash")
+	lastGems = readNumber(state, "gems")
+	lastStreak = readInteger(state, "streak")
+	lastVoidProbability = loadoutVoidProbability(readTable(state, "dice"))
 
-	local gems = readNumber(state, "gems")
-	if gems ~= nil then
-		lastGems = gems
-	end
-
-	local streak = readNumber(state, "streak")
-	if streak ~= nil then
-		lastStreak = streak
-		if streak == 0 then
-			-- A reset streak means the multiplier is definitionally 1; clearing
-			-- the cached one stops a stale value from outliving its streak.
-			lastMultiplier = nil
-		end
-	end
-
-	local dice = readTable(state, "dice")
-	if dice ~= nil then
-		lastVoidProbability = loadoutVoidProbability(dice)
-	end
+	-- No multiplier is read: the snapshot has no such field (verified against
+	-- StateSyncService.buildSnapshot, 2026-08-08). It is left where RollResult
+	-- put it, and renderStreak draws it only while its bound streak still
+	-- matches the one just read -- so a streak the snapshot moved retires the
+	-- multiplier with it, without this handler having to guess a replacement.
 
 	renderCurrencies()
 	renderStreak()
 end
 
 local function onRollResult(result: any): ()
-	local streak = readNumber(result, "streak")
+	local streak = readInteger(result, "streak")
 	local previousStreak = lastStreak
 	if streak ~= nil then
 		lastStreak = streak
 	end
 
+	-- Stored together or not at all. A multiplier with no streak to pin it to
+	-- cannot be checked for staleness later, and an unpinnable figure is one
+	-- this HUD declines to draw.
 	local multiplier = readNumber(result, "multiplier")
-	if multiplier ~= nil then
+	if multiplier ~= nil and streak ~= nil then
 		lastMultiplier = multiplier
+		lastMultiplierStreak = streak
+	else
+		lastMultiplier = nil
+		lastMultiplierStreak = nil
 	end
 
 	local voidHit = readBoolean(result, "voidHit")
@@ -681,8 +731,10 @@ local function onRollResult(result: any): ()
 end
 
 local function onEventState(state: any): ()
-	likeProgress = readNumber(state, "likeGoalProgress")
-	likeTarget = readNumber(state, "likeGoalTarget")
+	-- Whole numbers or nothing. A fractional like count is malformed, and
+	-- rendering "1.50 / 100" would dress a broken payload up as real activity.
+	likeProgress = readInteger(state, "likeGoalProgress")
+	likeTarget = readInteger(state, "likeGoalTarget")
 	eventActive = readBoolean(state, "eventActive") == true
 	renderLikeGoal()
 	renderEvent()
@@ -713,13 +765,16 @@ end
 local THROTTLE_POLL = 0.05
 local throttleAccumulator = 0
 
--- Greys ROLL and AUTO while NetClient's cooperative throttle would refuse them,
--- so the player sees an unavailable button instead of pressing one and being
--- told off (the button is still connected; UITheme.setEnabled only changes how
--- it looks, so the press still produces an honest explanation).
+-- Greys ROLL while NetClient's cooperative throttle would refuse it, so the
+-- player sees an unavailable button instead of pressing one and being told off
+-- (the button is still connected; UITheme.setEnabled only changes how it looks,
+-- so the press still produces an honest explanation). Also runs the two
+-- time-based clears -- the roll pulse and the status message -- on the tick that
+-- is already scheduled, rather than spawning a thread per press.
 local function onHeartbeat(deltaTime: number): ()
 	local now = os.clock()
 	fadeRollPulse(now)
+	expireStatus(now)
 
 	throttleAccumulator += deltaTime
 	if throttleAccumulator < THROTTLE_POLL then
@@ -741,14 +796,9 @@ local function onHeartbeat(deltaTime: number): ()
 		end
 	end
 
-	local canAuto = client.readyIn("SetAutoRoll") <= 0
-	if canAuto ~= autoEnabledCache then
-		autoEnabledCache = canAuto
-		local button = autoButton
-		if button ~= nil then
-			UITheme.setEnabled(button, canAuto)
-		end
-	end
+	-- AUTO is not polled. It is a pending button held permanently grey by
+	-- addPendingButton, and a throttle it never consumes has nothing to say
+	-- about it.
 end
 
 --------------------------------------------------------------------------------
@@ -786,7 +836,6 @@ function HUD.init(client: Net): ()
 	renderStreak()
 	renderLikeGoal()
 	renderEvent()
-	renderAuto()
 	setStatus("")
 
 	table.insert(connections, client.onStateSync(onStateSync))
@@ -814,10 +863,31 @@ function HUD.shutdown(): ()
 		gui:Destroy()
 	end
 	screenGui = nil
+
+	-- THE DISPLAY STATE GOES TOO, not just the caches. Clearing textCache alone
+	-- left every figure -- cash, gems, streak, multiplier, Void, the like goal,
+	-- the event flag -- alive in module scope, so a re-init repainted the
+	-- PREVIOUS session's numbers before a single packet of the new one arrived.
+	-- Those figures were true of a player who may not be this player, and are in
+	-- any case unconfirmed now. A HUD that has heard nothing yet shows dashes.
 	textCache = {}
 	rollEnabledCache = nil
-	autoEnabledCache = nil
-	autoRollWanted = false
+
+	lastCash = nil
+	lastGems = nil
+	lastStreak = nil
+	lastMultiplier = nil
+	lastMultiplierStreak = nil
+	lastVoidProbability = nil
+	likeProgress = nil
+	likeTarget = nil
+	eventActive = false
+
+	statusUntil = 0
+	throttleAccumulator = 0
+	rollPendingUntil = 0
+	rollInFlight = false
+
 	net = nil
 end
 

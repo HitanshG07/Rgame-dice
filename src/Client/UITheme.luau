@@ -58,6 +58,34 @@ UITheme.ElementColors = {
 UITheme.Font = Enum.Font.Code          -- monospace pixel type, FR-13.1
 UITheme.BorderThickness = 1            -- literally 1 pixel, FR-13.1
 
+-- A vertical band on the LEFT EDGE reserved for ForgePanel's always-visible
+-- FORGE tab (FR-13.8: the forge must be reachable in at most two taps).
+--
+-- Declared here because it is a boundary between two modules that must not know
+-- about each other. The MenuPanel rework found its SHAPE button 38% covered and
+-- input-blocked by that tab -- ForgePanel sits one layer higher, so the collision
+-- was permanent from init and silent. MenuPanel worked around it by hard-coding
+-- ForgePanel's geometry into itself, and said plainly that this was fragile: if
+-- the tab ever moves, the sidebar leaves a gap where nothing is and collides
+-- somewhere new.
+--
+-- So the band is a constant BOTH sides read. ForgePanel places its tab here;
+-- MenuPanel skips this range when laying out sidebar slots. Neither hard-codes
+-- the other's rectangle, and moving the tab is a one-line change in one file.
+UITheme.ForgeTabBand = {
+	x = 0.006,
+	width = 0.14,
+	y = 0.400,
+	height = 0.070,
+}
+
+-- True when a sidebar slot at [y, y+height] would collide with the reserved
+-- band. Callers use it to skip a slot rather than re-deriving the arithmetic.
+function UITheme.overlapsForgeTab(y: number, height: number): boolean
+	local band = UITheme.ForgeTabBand
+	return y < band.y + band.height and (y + height) > band.y
+end
+
 -- Z-ordering, declared centrally so two panels cannot both decide they are on top.
 UITheme.Layer = {
 	Arena   = 0,

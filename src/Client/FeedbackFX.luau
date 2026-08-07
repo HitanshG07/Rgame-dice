@@ -14,16 +14,50 @@
 -- WHY THE TEXT IS POOLED. Auto-roll can produce several payouts a second for a
 -- whole session. Creating and destroying a TextLabel per roll is the classic
 -- way a Roblox client's frame time quietly degrades over twenty minutes; the
--- pool is fixed at construction and the per-frame loop allocates nothing
--- (NFR-1). If every slot is busy, the oldest is recycled rather than a new one
+-- pool is fixed at construction and no Instance is created after init (NFR-1 --
+-- see ACCEPTED ALLOCATION below for the one thing that does still allocate per
+-- frame). If every slot is busy, the oldest is recycled rather than a new one
 -- being made -- dropping the least relevant number beats dropping frames.
 --
 -- ON THE SETTINGS TOGGLES (FR-13.6). Particles and motion blur are player
 -- choices about DECORATION, never about information. Turning both off removes
 -- the sparks and the trailing ghost; the payout number itself always appears,
 -- because a player who turned particles off to help their frame rate did not
--- ask to stop being told what they earned. Both default to ENABLED when the
--- state snapshot carries no Settings block.
+-- ask to stop being told what they earned. Both default to ENABLED when neither
+-- source states otherwise -- the absence of a preference is not a preference.
+--
+-- THE TOGGLES HAVE TWO SOURCES AND THIS MODULE NEEDS BOTH.
+--   1. `StateSync.settings` (API_DATA_CONTRACT §1.2, emitted by
+--      StateSyncService from the PlayerProfile `Settings` template, keys
+--      `Particles` / `MotionBlur`). This is the authoritative value at join and
+--      the only one that survives a rejoin.
+--   2. `MenuPanel`, which owns the live toggles for the session. A player who
+--      flips particles mid-session changes MenuPanel's record, NOT the profile:
+--      persisting a settings change needs a remote that does not exist, and
+--      MenuPanel's own header is explicit that its state is session-scoped.
+-- So this module exposes `applySettings` as a PUSH entry point, mirroring
+-- `AudioDirector.applySettings`, and the Orchestrator bridges
+-- `MenuPanel.onSettingsChanged` into it. This module deliberately does not
+-- subscribe to MenuPanel itself -- a view module reaching sideways into another
+-- view module is how a UI layer becomes a graph instead of a tree.
+-- Both sources funnel through the same setter, so last write wins, which is the
+-- correct rule: the snapshot lands at join, and a mid-session toggle is by
+-- definition newer than the profile it has not been able to write back to.
+--
+-- ACCEPTED ALLOCATION (NFR-1 says "no allocation inside per-frame loops").
+-- `step` constructs UDim2 values: one per active item for the frame position,
+-- one more if the ghost is on, and one per spark if sparks are on. With the
+-- pool fully busy and every decoration enabled that is a worst case of
+-- 10 * (1 + 1 + 4) = 60 UDim2 constructions per frame; the realistic case is
+-- one or two active items, so six to twelve. This is ACCEPTED, not overlooked.
+-- `UDim2` is a heap-allocated userdata and Roblox exposes no mutating setter
+-- for a GUI object's Position -- assigning a position REQUIRES constructing the
+-- value. The only ways to avoid it are to stop moving the text (which is the
+-- feature) or to cache and reuse UDim2 instances (impossible: they are
+-- immutable, and a distinct position per frame is a distinct value). Nothing
+-- else in the loop allocates: no tables, no strings, no closures, and the spark
+-- direction vectors are computed once at load. The remaining per-frame writes
+-- are numbers assigned to existing properties.
 --
 -- Every colour and the font come from UITheme; sizing is Scale-only (FR-13.7).
 
@@ -61,6 +95,14 @@ local RISE = 0.16            -- how far the text floats up, in screen fractions
 local SPARK_TRAVEL = 0.07
 local GHOST_LAG = 0.10       -- the trail's share of the main label's travel
 
+-- The resting values of every property `step` animates. `present` restores all
+-- of them, because a pooled item arrives carrying whatever the previous run
+-- left behind and would otherwise render one frame of the last payout's fade
+-- and scattered sparks before the loop overwrites them.
+local GHOST_TRANSPARENCY = 0.55
+local SPARK_BASE_X = 0.35
+local SPARK_BASE_Y = 0.2
+
 -- Where the text is anchored in the world: above the middle of the pit.
 local ANCHOR_LIFT = 3.5
 
@@ -79,11 +121,22 @@ type Item = {
 	baseX: number,
 	baseY: number,
 	sequence: number,
+	paid: boolean,
 	showGhost: boolean,
 	showSparks: boolean,
 }
 
+-- The push shape. Fields are optional so that a caller who knows about only one
+-- of the two toggles cannot accidentally assert `false` for the other; absent
+-- means "no preference stated", which means enabled.
+export type FXSettings = {
+	particles: boolean?,
+	motionBlur: boolean?,
+}
+
 local pool: { Item } = {}
+local connections: { RBXScriptConnection } = {}
+local screenGui: ScreenGui? = nil
 local started = false
 local sequence = 0
 
@@ -119,7 +172,7 @@ local function makeItem(gui: ScreenGui): Item
 	local ghost = UITheme.label("", UDim2.fromScale(1, 1), UDim2.fromScale(0, 0), UITheme.Colors.TextGold)
 	ghost.Name = "Ghost"
 	ghost.TextXAlignment = Enum.TextXAlignment.Center
-	ghost.TextTransparency = 0.7
+	ghost.TextTransparency = GHOST_TRANSPARENCY
 	ghost.Parent = frame
 
 	local main = UITheme.label("", UDim2.fromScale(1, 1), UDim2.fromScale(0, 0), UITheme.Colors.Cash)
@@ -134,7 +187,7 @@ local function makeItem(gui: ScreenGui): Item
 
 	local sparks: { TextLabel } = {}
 	for s = 1, SPARKS_PER_ITEM do
-		local spark = UITheme.label("+", UDim2.fromScale(0.3, 0.6), UDim2.fromScale(0.35, 0.2), UITheme.Colors.TextGold)
+		local spark = UITheme.label("+", UDim2.fromScale(0.3, 0.6), UDim2.fromScale(SPARK_BASE_X, SPARK_BASE_Y), UITheme.Colors.TextGold)
 		spark.Name = "Spark" .. tostring(s)
 		spark.TextXAlignment = Enum.TextXAlignment.Center
 		spark.Parent = frame
@@ -152,6 +205,7 @@ local function makeItem(gui: ScreenGui): Item
 		baseX = 0.5,
 		baseY = 0.5,
 		sequence = 0,
+		paid = false,
 		showGhost = true,
 		showSparks = true,
 	}
@@ -163,19 +217,27 @@ end
 
 -- One normalised "bigness" in [0, 1] drives width, duration and travel together,
 -- so a big win is bigger on every axis at once rather than in one of them.
+-- Magnitude is taken of the ABSOLUTE value: a large debit is as significant an
+-- event as a large credit and deserves the same amount of the player's screen.
 local function magnitude(payout: number): number
-	if payout ~= payout or payout <= 0 or payout >= math.huge then
+	if payout ~= payout then
 		return 0
 	end
-	return math.clamp(math.log10(payout + 1) / 6, 0, 1)
+	local size = math.abs(payout)
+	if size <= 0 or size >= math.huge then
+		return 0
+	end
+	return math.clamp(math.log10(size + 1) / 6, 0, 1)
 end
 
 --------------------------------------------------------------------------------
 -- Acquiring a slot
 --------------------------------------------------------------------------------
 
+-- Only ever called with a non-empty pool -- `present` guards that -- so the
+-- `pool[1]` fallback below always resolves.
 local function acquire(): Item
-	for i = 1, POOL_SIZE do
+	for i = 1, #pool do
 		local item = pool[i]
 		if not item.active then
 			return item
@@ -184,7 +246,7 @@ local function acquire(): Item
 	-- Everything is busy: recycle the one that started earliest. Its number has
 	-- already been on screen longest, so it is the least costly to cut short.
 	local oldest = pool[1]
-	for i = 2, POOL_SIZE do
+	for i = 2, #pool do
 		if pool[i].sequence < oldest.sequence then
 			oldest = pool[i]
 		end
@@ -219,18 +281,37 @@ end
 --------------------------------------------------------------------------------
 
 local function present(payout: number, voidHit: boolean): ()
+	if #pool == 0 then
+		return
+	end
+
 	local item = acquire()
 	local size = magnitude(payout)
 
-	local paid = payout > 0
+	-- The sign chooses the rendering, and a negative payout is a DEBIT that must
+	-- read as one. `Format.formatNumber` already carries the minus sign, so the
+	-- only thing needed is to stop routing it into the neutral zero branch --
+	-- telling a player "0" while their balance went down is a false receipt.
+	local credited = payout > 0
+	local debited = payout < 0
 	local text: string
 	local colour: Color3
-	if paid then
+	if credited then
 		text = "+" .. Format.formatNumber(payout)
 		colour = UITheme.Colors.Cash
+	elseif debited then
+		text = Format.formatNumber(payout)
+		colour = UITheme.Colors.Negative
 	elseif voidHit then
 		text = "VOID"
 		colour = UITheme.Colors.VoidFace
+	elseif payout ~= payout then
+		-- Not a number at all, which is a contract violation upstream. Whatever
+		-- it is, it is not zero, and `formatNumber` renders it as "NaN" -- the
+		-- truth. Inventing a "0" here would hide a server bug behind a plausible
+		-- looking receipt.
+		text = Format.formatNumber(payout)
+		colour = UITheme.Colors.Negative
 	else
 		text = "0"
 		colour = UITheme.Colors.TextDim
@@ -255,14 +336,28 @@ local function present(payout: number, voidHit: boolean): ()
 	item.duration = MIN_DURATION + (MAX_DURATION - MIN_DURATION) * size
 	item.elapsed = 0
 	item.active = true
+	item.paid = credited
 
 	-- FR-13.6: decoration obeys the toggles; the number never does. Sparks are
-	-- also suppressed for a zero payout, where celebrating would be a lie.
+	-- also suppressed for anything that is not a credit -- celebrating a zero or
+	-- a debit would be a lie.
 	item.showGhost = motionBlurEnabled
-	item.showSparks = particlesEnabled and paid
+	item.showSparks = particlesEnabled and credited
 	item.ghost.Visible = item.showGhost
 	for s = 1, SPARKS_PER_ITEM do
 		item.sparks[s].Visible = item.showSparks
+	end
+
+	-- Restore every property `step` animates to its t=0 value. This item may be
+	-- a recycled one still holding the previous payout's fade and spark spread,
+	-- and it becomes visible on this frame -- before `step` next runs.
+	item.main.TextTransparency = 0
+	item.ghost.TextTransparency = GHOST_TRANSPARENCY
+	item.ghost.Position = UDim2.fromScale(0, GHOST_LAG)
+	for s = 1, SPARKS_PER_ITEM do
+		local spark = item.sparks[s]
+		spark.Position = UDim2.fromScale(SPARK_BASE_X, SPARK_BASE_Y)
+		spark.TextTransparency = 0
 	end
 
 	item.frame.Position = UDim2.fromScale(item.baseX, item.baseY)
@@ -270,11 +365,15 @@ local function present(payout: number, voidHit: boolean): ()
 end
 
 --------------------------------------------------------------------------------
--- The frame loop. One connection; no allocation inside it (NFR-1).
+-- The frame loop. One connection. The only allocation inside it is the UDim2
+-- construction that a GUI reposition unavoidably requires -- accepted and
+-- quantified in the header under ACCEPTED ALLOCATION (NFR-1).
 --------------------------------------------------------------------------------
 
 local function step(deltaTime: number): ()
-	for i = 1, POOL_SIZE do
+	-- `#pool` and not POOL_SIZE: after `shutdown` the pool is empty, and this
+	-- must read as "nothing to animate" rather than indexing destroyed labels.
+	for i = 1, #pool do
 		local item = pool[i]
 		if not item.active then
 			continue
@@ -329,9 +428,43 @@ function FeedbackFX.motionBlurOn(): boolean
 	return motionBlurEnabled
 end
 
+-- Pushes a settings record in. This is the entry point the Orchestrator uses to
+-- bridge `MenuPanel.onSettingsChanged` to this module, mirroring
+-- `AudioDirector.applySettings` for the audio half of the same record. It is
+-- also what the StateSync handler funnels the join snapshot through, so there
+-- is exactly one place where these two booleans change.
+--
+-- `~= false` rather than `== true`: an omitted field is not a stated
+-- preference, and the default for an unstated preference is ON.
+--
+-- The change applies to payouts already in flight as well as future ones. A
+-- player who turns particles off is asking for them to stop, not to stop in two
+-- seconds' time. Sparks stay bound to `paid` -- re-enabling particles must not
+-- make a zero payout start celebrating.
+--
+-- The parameter is `nextSettings` and not `next` because `next` is a Luau
+-- global and shadowing it is a lint warning.
+function FeedbackFX.applySettings(nextSettings: FXSettings): ()
+	particlesEnabled = nextSettings.particles ~= false
+	motionBlurEnabled = nextSettings.motionBlur ~= false
+
+	for i = 1, #pool do
+		local item = pool[i]
+		item.showGhost = motionBlurEnabled
+		item.showSparks = particlesEnabled and item.paid
+		item.ghost.Visible = item.showGhost
+		for s = 1, SPARKS_PER_ITEM do
+			item.sparks[s].Visible = item.showSparks
+		end
+	end
+end
+
 -- Reads a boolean out of an untrusted-in-SHAPE settings table under either
--- casing. Absent or malformed means ENABLED, matching the server template's
--- defaults in PlayerProfile.
+-- casing. StateSyncService copies the PlayerProfile `Settings` template
+-- verbatim, so the live keys are `Particles` and `MotionBlur`; the lower-case
+-- fallback costs one comparison and survives a future rename in either
+-- direction. Absent or malformed means ENABLED, matching that template's
+-- defaults.
 local function readToggle(settings: any, upper: string, lower: string): boolean
 	if type(settings) ~= "table" then
 		return true
@@ -347,11 +480,37 @@ local function readToggle(settings: any, upper: string, lower: string): boolean
 	return true
 end
 
+-- The single release path, shared by `shutdown` and by `init`'s retry guard.
+local function release(): ()
+	for _, connection in ipairs(connections) do
+		connection:Disconnect()
+	end
+	connections = {}
+
+	local gui = screenGui
+	if gui ~= nil then
+		gui:Destroy()
+	end
+	screenGui = nil
+
+	-- The Items hold references to instances that no longer exist; clearing the
+	-- pool is what stops `step` -- were it somehow still bound -- from writing to
+	-- destroyed labels, and releases them for collection.
+	table.clear(pool)
+	sequence = 0
+	started = false
+end
+
 function FeedbackFX.init(net: any): ()
 	if started then
 		return
 	end
-	started = true
+
+	-- `started` is now latched at the END of init, so reaching here after a
+	-- failed attempt is a legitimate retry -- but that attempt may have got as
+	-- far as parenting a ScreenGui or opening a subscription. Drop whatever it
+	-- acquired first, or the retry leaks a second gui and a duplicate handler.
+	release()
 
 	local player = Players.LocalPlayer
 	if player == nil then
@@ -368,12 +527,16 @@ function FeedbackFX.init(net: any): ()
 	-- neither consumes input, so floating text can never swallow a tap aimed at
 	-- the ROLL button underneath it. Do not add a TextButton here.
 	gui.Parent = playerGui
+	screenGui = gui
 
 	for i = 1, POOL_SIZE do
 		pool[i] = makeItem(gui)
 	end
 
-	net.onStateSync(function(state: any)
+	-- The authoritative value, and the only one that survives a rejoin. It is
+	-- routed through `applySettings` rather than assigning the two locals here,
+	-- so the snapshot path and the MenuPanel path cannot drift apart.
+	table.insert(connections, net.onStateSync(function(state: any)
 		if type(state) ~= "table" then
 			return
 		end
@@ -381,13 +544,15 @@ function FeedbackFX.init(net: any): ()
 		if type(settings) ~= "table" then
 			settings = state.Settings
 		end
-		particlesEnabled = readToggle(settings, "Particles", "particles")
-		motionBlurEnabled = readToggle(settings, "MotionBlur", "motionBlur")
-	end)
+		FeedbackFX.applySettings({
+			particles = readToggle(settings, "Particles", "particles"),
+			motionBlur = readToggle(settings, "MotionBlur", "motionBlur"),
+		})
+	end))
 
 	-- Already credited by the time this arrives (FR-2.6). This is a receipt,
 	-- not a transaction.
-	net.onRollResult(function(result: any)
+	table.insert(connections, net.onRollResult(function(result: any)
 		if type(result) ~= "table" then
 			return
 		end
@@ -396,9 +561,28 @@ function FeedbackFX.init(net: any): ()
 			return
 		end
 		present(payout, result.voidHit == true)
-	end)
+	end))
 
-	RunService.RenderStepped:Connect(step)
+	table.insert(connections, RunService.RenderStepped:Connect(step))
+
+	-- Latched LAST, and only here. Latching it on entry would make a failed init
+	-- -- a missing LocalPlayer, a subscription that threw -- permanent and
+	-- silent, because the retry would return early having done nothing.
+	started = true
+end
+
+-- Releases everything `init` acquired: the three connections (StateSync,
+-- RollResult, RenderStepped), the ScreenGui, and with it the ten pooled frames
+-- and their sixty labels, which are parented to it. Matches `HUD.shutdown`.
+-- `started` is cleared so a subsequent `init` rebuilds rather than returning
+-- early into a torn-down module. Idempotent: calling it twice, or before
+-- `init`, does nothing the second time.
+--
+-- The settings state is deliberately NOT reset. It is the player's preference,
+-- not an acquired resource, and a teardown/rebuild cycle that silently turned
+-- their particles back on would be a bug.
+function FeedbackFX.shutdown(): ()
+	release()
 end
 
 return FeedbackFX

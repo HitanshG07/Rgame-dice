@@ -18,11 +18,28 @@
 -- later is a one-line-per-cue edit to ASSET_IDS and no other change anywhere:
 -- the pooling, gating and volume mixing are already in place waiting for them.
 --
--- POOLING (NFR-1). Exactly one Sound instance exists per cue for the whole
--- session, created once at init and reused. Re-triggering a cue that is already
--- playing restarts it rather than layering a second voice -- for a dice game
--- whose loudest cue is a button press that is the correct behaviour anyway, and
--- it means a 5-per-second auto-roll allocates nothing at all.
+-- POOLING (NFR-1). Every Sound this module will ever use is created once, at
+-- init, and reused for the whole session; `play` allocates nothing and only
+-- indexes tables it already holds. A cue owns a small fixed VOICE POOL rather
+-- than a single instance, cycled round-robin, because the two kinds of cue in
+-- this game want opposite retrigger behaviour:
+--   * UI cues (clicks, refusals, panels) get ONE voice. Re-pressing a button
+--     should cut the previous click off -- two overlapping clicks read as a
+--     double-press that did not happen. Restart is the correct behaviour and
+--     is what a one-voice pool does.
+--   * Roll cues get two or three. An auto-roll at the FR-2.4 ceiling of five
+--     per second retriggers RollLand every 200ms, and with one voice every
+--     land sound longer than 200ms would be cut mid-attack -- a stuttering
+--     200ms loop rather than a dice game. Three voices let a land tail of up
+--     to ~600ms finish while the next roll starts over the top of it.
+-- The pools are deliberately small. Overlapping copies of one sample sum, so
+-- the ceiling on simultaneous voices is also the ceiling on how loud a cue can
+-- get; three is enough to cover the tail and few enough that CUE_VOLUME below
+-- still holds the mix under the player's own music.
+--
+-- CONTAINER (lazy). The `DiceForgeAudio` folder is created on first real Sound,
+-- not at init. In today's all-placeholder state no Sound is built, so no folder
+-- is published either and a session leaves nothing behind in SoundService.
 --
 -- WHAT THIS MODULE DOES NOT DO. It subscribes to no remote and holds no game
 -- state. Cues are pushed to it by the surface that caused them, so the audio
@@ -86,13 +103,33 @@ local CUE_VOLUME: { [string]: number } = {
 
 local DEFAULT_VOLUME = 0.3
 
+-- Voices per cue. See the POOLING note in the header for why UI cues get one
+-- and roll cues get more. A cue absent from this table gets DEFAULT_VOICES.
+local CUE_VOICES: { [string]: number } = {
+	RollPress  = 2,
+	RollLand   = 3,
+	VoidHit    = 2,
+	StreakUp   = 2,
+	UiClick    = 1,
+	UiRefused  = 1,
+	PanelOpen  = 1,
+	PanelClose = 1,
+}
+
+local DEFAULT_VOICES = 1
+local MAX_VOICES = 4
+
 --------------------------------------------------------------------------------
 -- State
 --------------------------------------------------------------------------------
 
 local initialised = false
 local container: Folder? = nil
-local sounds: { [string]: Sound } = {}
+-- One entry per cue that resolved to at least one real Sound. A cue whose id is
+-- still a placeholder is simply absent -- that absence IS the fail-closed path.
+local voices: { [string]: { Sound } } = {}
+-- Round-robin cursor per cue, always a valid index into that cue's pool.
+local cursor: { [string]: number } = {}
 local musicSound: Sound? = nil
 
 -- Audio is ON until MenuPanel tells us otherwise. MenuPanel pushes the real
@@ -122,21 +159,57 @@ local function volumeFor(key: string): number
 	return if type(v) == "number" then v else DEFAULT_VOLUME
 end
 
+-- Bounded on both sides deliberately. A hand-edit to CUE_VOICES that reads 0,
+-- a fraction, or something absurd must not be able to produce an empty pool or
+-- a hundred Sound instances; it lands in a sane range instead. Written as plain
+-- comparisons rather than math.clamp, which ERRORS when min > max, and ordered
+-- so that a value no comparison accepts -- NaN included -- falls to the default
+-- rather than out of the bottom of the function.
+local function voicesFor(key: string): number
+	local v = CUE_VOICES[key]
+	if type(v) ~= "number" then
+		return DEFAULT_VOICES
+	end
+	local n = math.floor(v)
+	if n >= MAX_VOICES then
+		return MAX_VOICES
+	end
+	if n >= 1 then
+		return n
+	end
+	return DEFAULT_VOICES
+end
+
+-- Created on first real Sound rather than at init, so an all-placeholder
+-- session publishes nothing to SoundService at all.
+local function ensureContainer(): Folder
+	local existing = container
+	if existing ~= nil then
+		return existing
+	end
+	local folder = Instance.new("Folder")
+	folder.Name = "DiceForgeAudio"
+	folder.Parent = SoundService
+	container = folder
+	return folder
+end
+
 -- Returns nil for an unresolved id. A nil here is the fail-closed path, not an
--- error path: the caller checks and does nothing.
-local function buildSound(key: string, parent: Folder, looped: boolean): Sound?
+-- error path: the caller checks and does nothing. Note the id test happens
+-- BEFORE ensureContainer, so an unplayable id creates no folder either.
+local function buildSound(key: string, index: number, total: number, looped: boolean): Sound?
 	local id = ASSET_IDS[key]
 	if not isPlayable(id) then
 		return nil
 	end
 
 	local sound = Instance.new("Sound")
-	sound.Name = key
+	sound.Name = if total > 1 then string.format("%s_%d", key, index) else key
 	sound.SoundId = id
 	sound.Volume = volumeFor(key)
 	sound.Looped = looped
 	sound.RollOffMode = Enum.RollOffMode.Linear
-	sound.Parent = parent
+	sound.Parent = ensureContainer()
 	return sound
 end
 
@@ -146,15 +219,35 @@ end
 
 -- Plays a one-shot cue. Safe to call before `init`, after a settings change, or
 -- for a cue whose asset id has not been supplied yet -- all three do nothing.
+-- Also safe for a name that is not a Cue at all: the callers reach this through
+-- an erased `any` boundary, and an unknown key simply misses the pool table.
 function AudioDirector.play(cue: Cue): ()
 	if not initialised or not settings.sfx then
 		return
 	end
-	local sound = sounds[cue]
+	local pool = voices[cue]
+	if pool == nil then
+		return
+	end
+	local count = #pool
+	if count == 0 then
+		return
+	end
+
+	-- Advance the cursor whether or not the chosen voice turns out to be
+	-- usable, so one destroyed instance cannot pin every later play onto it.
+	local index = cursor[cue] or 1
+	if index < 1 or index > count then
+		index = 1
+	end
+	cursor[cue] = if index >= count then 1 else index + 1
+
+	local sound = pool[index]
 	if sound == nil or sound.Parent == nil then
 		return
 	end
-	-- Restart rather than layer. See the pooling note in the header.
+	-- Restart THIS voice; the other voices in the pool keep ringing. See the
+	-- pooling note in the header for why the pool sizes differ per cue.
 	sound.TimePosition = 0
 	sound:Play()
 end
@@ -162,10 +255,22 @@ end
 -- Applies the player's settings. Called by MenuPanel on init and on every
 -- toggle. Accepts anything shaped like AudioSettings, so MenuPanel can pass a
 -- narrowed view of its own larger record without a shared type module.
-function AudioDirector.applySettings(next: AudioSettings): ()
+--
+-- The parameter is GUARDED rather than trusted. The only caller reaches this
+-- across an erased-type boundary (`local Audio: any`) and does not pcall, so a
+-- future caller passing nil would raise here, abort MenuPanel's init, and be
+-- converted by ClientBootstrap into a fatal boot abort -- the audio layer
+-- taking down every visual surface, which is the exact outcome that loading
+-- this module LAST exists to prevent. Throw-freedom has to be a property of
+-- this module, not of its callers, so a non-table is ignored, never indexed.
+function AudioDirector.applySettings(incoming: AudioSettings?): ()
+	if type(incoming) ~= "table" then
+		return
+	end
+
 	settings = {
-		sfx = next.sfx == true,
-		music = next.music == true,
+		sfx = incoming.sfx == true,
+		music = incoming.music == true,
 	}
 
 	local music = musicSound
@@ -189,7 +294,8 @@ end
 -- because "silent because muted" and "silent because unresolved" are different
 -- facts and the difference should be answerable.
 function AudioDirector.isCueAvailable(cue: Cue): boolean
-	return sounds[cue] ~= nil
+	local pool = voices[cue]
+	return pool ~= nil and #pool > 0
 end
 
 -- `net` is unused on purpose -- see the header. The parameter exists to satisfy
@@ -199,21 +305,24 @@ function AudioDirector.init(_net: any): ()
 		return
 	end
 
-	local folder = Instance.new("Folder")
-	folder.Name = "DiceForgeAudio"
-	folder.Parent = SoundService
-	container = folder
-
 	for key in pairs(ASSET_IDS) do
 		if key ~= MUSIC_KEY then
-			local sound = buildSound(key, folder, false)
-			if sound ~= nil then
-				sounds[key] = sound
+			local total = voicesFor(key)
+			local pool: { Sound } = {}
+			for index = 1, total do
+				local sound = buildSound(key, index, total, false)
+				if sound ~= nil then
+					pool[#pool + 1] = sound
+				end
+			end
+			if #pool > 0 then
+				voices[key] = pool
+				cursor[key] = 1
 			end
 		end
 	end
 
-	musicSound = buildSound(MUSIC_KEY, folder, true)
+	musicSound = buildSound(MUSIC_KEY, 1, 1, true)
 
 	initialised = true
 
@@ -234,7 +343,8 @@ function AudioDirector.shutdown(): ()
 	end
 	container = nil
 	musicSound = nil
-	sounds = {}
+	voices = {}
+	cursor = {}
 	initialised = false
 end
 

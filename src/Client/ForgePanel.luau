@@ -17,12 +17,15 @@
 -- WHY THE PREVIEW USES THE SHARED ForgeMath, AND WHY THAT IS THE WHOLE POINT
 -- FR-3.4 says the maths is public by design: players optimise openly. That
 -- promise is only kept if the preview and the payout are the SAME maths. So this
--- file computes nothing itself -- it calls `ForgeMath.landingProbabilities`,
--- `ForgeMath.faceValue`, `ForgeMath.expectedValue` and `ForgeMath.voidProbability`
--- on the exact array it is about to send, and the server calls the same pure
--- functions on the array it receives. There is no second implementation to drift.
--- Re-deriving `mass^2` or `(M-m)/(M(n-1))` here would silently break that promise
--- the first time ALPHA is retuned, so it is not done anywhere in this file.
+-- file computes nothing itself -- it calls `ForgeMath.preview` (landing
+-- probabilities, per-face values, expected value and Void probability in one
+-- pass) and `ForgeMath.isVoidFace` on the exact array it is about to send, and
+-- the server calls the same pure functions on the array it receives. There is no
+-- second implementation to drift. Re-deriving `mass^2`, `(M-m)/(M(n-1))` or the
+-- Void predicate here would silently break that promise the first time ALPHA or
+-- VOID_FLOOR_FACTOR is retuned, so it is not done anywhere in this file. The
+-- per-face Void tint was the last local restatement of a shared rule and it is
+-- now a call like every other.
 --
 -- THE ONE NUMBER THIS FILE CANNOT SHARE: the forge COST. `ForgeService` is a
 -- server module and cannot be required from the client, so `estimateCost` below
@@ -109,6 +112,9 @@ type DieView = { shape: string, budget: number, faces: { FaceView } }
 
 type ServerView = {
 	dice: { DieView },
+	-- Slots the reader REFUSED, kept by index so the panel can show the die and
+	-- mark it broken instead of quietly shortening the player's dice list.
+	rejectedDice: { [number]: boolean },
 	cash: number?,
 	unlockedElements: { [string]: boolean },
 	unlockedShapes: { [string]: boolean },
@@ -157,6 +163,20 @@ local function readDie(raw: any): DieView?
 	if not ForgeMath.isFinite(budget) or (budget :: number) <= 0 then
 		return nil
 	end
+
+	-- A budget below `massFloor * faceCount` describes a die that cannot legally
+	-- hold its own budget: every face is pinned at the floor and the total still
+	-- exceeds what the player owns. EVEN would then leave the draft permanently
+	-- over budget with no way back, because `normalise`'s over-budget correction
+	-- only takes mass off a face STRICTLY above the floor and on such a die there
+	-- is none -- it breaks out with the draft still summing high, and FORGE
+	-- refuses `sum_mismatch` forever. Refuse the die here and say so, rather than
+	-- presenting a forge that can never be committed.
+	local shapeFloor = DiceCatalog.getMassFloor(shape)
+	if (budget :: number) < shapeFloor * shapeDef.faceCount then
+		return nil
+	end
+
 	local rawFaces = raw.Faces
 	if type(rawFaces) ~= "table" then
 		return nil
@@ -168,7 +188,13 @@ local function readDie(raw: any): DieView?
 		if type(rawFace) ~= "table" then
 			return nil
 		end
-		if not ForgeMath.isFinite(rawFace.Mass) then
+		-- Finiteness is NOT enough. FR-3.2 requires a non-negative face mass, and a
+		-- zero or negative one is worse than merely wrong: `landingProbabilities`,
+		-- `expectedValue` and `voidProbability` all `error()` when the masses sum
+		-- to <= 0, the throw is swallowed by `NetClient.subscribe`'s pcall, and the
+		-- panel freezes on stale content with nothing said. Rejected at the
+		-- boundary instead, where it becomes a visible refusal.
+		if not ForgeMath.isFinite(rawFace.Mass) or (rawFace.Mass :: number) <= 0 then
 			return nil
 		end
 		local element = rawFace.Element
@@ -193,6 +219,7 @@ end
 local function readState(payload: any): ServerView
 	local view: ServerView = {
 		dice = {},
+		rejectedDice = {},
 		cash = nil,
 		unlockedElements = defaultUnlockedElements(),
 		unlockedShapes = defaultUnlockedShapes(),
@@ -213,6 +240,10 @@ local function readState(payload: any): ServerView
 			local die = readDie((rawDice :: { any })[i])
 			if die ~= nil then
 				view.dice[i] = die
+			else
+				-- Recorded, not discarded. A die the reader cannot trust is still a
+				-- die the player owns; it gets a tab that says so (swarm rule 5).
+				view.rejectedDice[i] = true
 			end
 		end
 	end
@@ -476,6 +507,7 @@ local initialised = false
 
 local server: ServerView = {
 	dice = {},
+	rejectedDice = {},
 	cash = nil,
 	unlockedElements = defaultUnlockedElements(),
 	unlockedShapes = defaultUnlockedShapes(),
@@ -495,8 +527,24 @@ local draft: { number } = {}
 local baseline: { number } = {}
 local draftDieIndex = 0
 
+-- Held so `shutdown` can destroy the whole surface in one call. Assigned the
+-- INSTANT the ScreenGui is constructed, before it is populated or parented: a
+-- build that throws half way through must still leave something for the release
+-- path to collect, or the retry leaks an orphaned gui into PlayerGui.
+local screenGui: ScreenGui? = nil
 local root: Frame? = nil
 local tabButton: TextButton? = nil
+
+-- Every connection this module owns, in one place, so `shutdown` cannot miss
+-- one. The button connections would die with the destroyed ScreenGui anyway;
+-- the NetClient subscriptions would NOT -- they live on NetClient's own signals
+-- and would keep calling `render` against destroyed instances forever. Tracking
+-- both uniformly is cheaper than remembering which kind each one is.
+local connections: { RBXScriptConnection } = {}
+
+local function bind(button: TextButton, handler: () -> ()): ()
+	table.insert(connections, button.Activated:Connect(handler))
+end
 
 local dieTabs: { TextButton } = {}
 local faceRows: { FaceRow } = {}
@@ -627,6 +675,10 @@ local function buildInterface(target: PlayerGui): ()
 	screen.IgnoreGuiInset = true
 	screen.DisplayOrder = UITheme.Layer.Panel
 	screen.Enabled = true
+	-- Recorded BEFORE the surface is populated or parented. If anything below
+	-- throws, `init`'s latch never sets and the next `init` calls `shutdown`
+	-- first -- which can only destroy this gui if it was already held here.
+	screenGui = screen
 
 	-- FR-13.8: ONE tap from the arena. Always on screen, never behind a menu.
 	local tab = UITheme.button("FORGE", UDim2.fromScale(0.14, 0.07), UDim2.fromScale(0.006, 0.40))
@@ -688,7 +740,14 @@ local function buildInterface(target: PlayerGui): ()
 	local sidePanel = UITheme.panel(UDim2.fromScale(0.38, 0.70), UDim2.fromScale(0.60, 0.155), true)
 	sidePanel.Parent = panel
 
-	local evCaption = UITheme.label("EXPECTED VALUE / ROLL", UDim2.fromScale(0.94, 0.045),
+	-- "BASE", not "EXPECTED", and the word is load-bearing. `ForgeMath.expectedValue`
+	-- is the PRE-MODIFIER expectation; the server pays
+	-- `(baseTotal + additive) * factor * streakMult * coin`, so a player reading
+	-- "EXPECTED VALUE / ROLL" and then watching their payouts would conclude the
+	-- preview lies. It is exactly right as a COMPARATIVE between drafts, which is
+	-- the decision the forge asks for, so the label is corrected rather than the
+	-- maths -- folding modifiers in here would make two drafts incomparable.
+	local evCaption = UITheme.label("BASE EV / ROLL", UDim2.fromScale(0.94, 0.045),
 		UDim2.fromScale(0.03, 0.02), UITheme.Colors.TextDim)
 	evCaption.Parent = sidePanel
 	local ev = UITheme.label("--", UDim2.fromScale(0.94, 0.07), UDim2.fromScale(0.03, 0.07),
@@ -785,19 +844,32 @@ local function buildInterface(target: PlayerGui): ()
 	-- Input. Connected once, at build time.
 	--------------------------------------------------------------------------
 
-	tab.Activated:Connect(function()
+	bind(tab, function()
 		setPanelVisible(true)
 		render()
 	end)
 
-	close.Activated:Connect(function()
+	bind(close, function()
 		setPanelVisible(false)
 	end)
 
 	for i = 1, MAX_DIE_TABS do
 		local index = i
-		dieTabs[i].Activated:Connect(function()
-			if server.dice[index] == nil or index == selectedDie then
+		bind(dieTabs[i], function()
+			if server.dice[index] == nil then
+				-- A rejected die is visible, so pressing it must EXPLAIN rather than
+				-- do nothing. Silence here is what makes a marked-but-dead control
+				-- read as a bug in the button.
+				if server.rejectedDice[index] then
+					setStatus(
+						"DIE " .. tostring(index)
+							.. " CANNOT BE FORGED - THE SERVER'S SNAPSHOT FOR IT IS MALFORMED",
+						UITheme.Colors.Negative
+					)
+				end
+				return
+			end
+			if index == selectedDie then
 				return
 			end
 			selectedDie = index
@@ -812,7 +884,7 @@ local function buildInterface(target: PlayerGui): ()
 		local index = i
 		local row = faceRows[i]
 
-		row.root.Activated:Connect(function()
+		bind(row.root, function()
 			if draft[index] == nil then
 				return
 			end
@@ -820,7 +892,7 @@ local function buildInterface(target: PlayerGui): ()
 			render()
 		end)
 
-		row.minus.Activated:Connect(function()
+		bind(row.minus, function()
 			local die = currentDie()
 			if die == nil or draft[index] == nil then
 				return
@@ -836,7 +908,7 @@ local function buildInterface(target: PlayerGui): ()
 			render()
 		end)
 
-		row.plus.Activated:Connect(function()
+		bind(row.plus, function()
 			local die = currentDie()
 			if die == nil or draft[index] == nil then
 				return
@@ -855,7 +927,7 @@ local function buildInterface(target: PlayerGui): ()
 
 	for _, entry in ipairs(elementButtons) do
 		local id = entry.id
-		entry.button.Activated:Connect(function()
+		bind(entry.button, function()
 			local client = net
 			local die = currentDie()
 			if client == nil or die == nil or submitting then
@@ -885,7 +957,7 @@ local function buildInterface(target: PlayerGui): ()
 
 	for _, entry in ipairs(shapeButtons) do
 		local id = entry.id
-		entry.button.Activated:Connect(function()
+		bind(entry.button, function()
 			local client = net
 			local die = currentDie()
 			if client == nil or die == nil or submitting then
@@ -913,12 +985,12 @@ local function buildInterface(target: PlayerGui): ()
 		end)
 	end
 
-	step.Activated:Connect(function()
+	bind(step, function()
 		stepIndex = (stepIndex % #STEPS) + 1
 		render()
 	end)
 
-	even.Activated:Connect(function()
+	bind(even, function()
 		local die = currentDie()
 		if die == nil or #draft == 0 then
 			return
@@ -929,6 +1001,13 @@ local function buildInterface(target: PlayerGui): ()
 		-- residual is folded back by `normalise`.
 		local share = ForgeMath.snapDown(die.budget / #draft)
 		if share < floor then
+			-- Unreachable for any die `readDie` accepts -- it now refuses a budget
+			-- below `massFloor * faceCount`, which is precisely the condition that
+			-- makes an even share fall under the floor. Kept because raising the
+			-- share here is the only branch that could ever push the draft OVER
+			-- budget, and `normalise` cannot correct that case: its over-budget pass
+			-- searches for a face strictly above the floor and on such a die there
+			-- is none. Belt and braces on a hole that is now closed upstream.
 			share = floor
 		end
 		for i = 1, #draft do
@@ -939,13 +1018,13 @@ local function buildInterface(target: PlayerGui): ()
 		render()
 	end)
 
-	reset.Activated:Connect(function()
+	bind(reset, function()
 		seedDraft()
 		setStatus("REVERTED TO THE SERVER'S DIE", UITheme.Colors.TextDim)
 		render()
 	end)
 
-	commit.Activated:Connect(function()
+	bind(commit, function()
 		local client = net
 		local die = currentDie()
 		if client == nil or die == nil or submitting then
@@ -994,12 +1073,31 @@ end
 -- Render. Property writes only -- no instance is created past `buildInterface`.
 --------------------------------------------------------------------------------
 
+-- Die tabs, drawn on BOTH the populated and the empty path.
+--
+-- A die the reader refused keeps its tab, marked [BAD]: the same show-it,
+-- mark-it, refuse-it-out-loud rule the element and shape strips already follow.
+-- Hiding it told a player with one malformed die that they owned one fewer die
+-- than they bought, and left the gap silent unless EVERY die was unusable.
+local function renderDieTabs(): ()
+	for i = 1, MAX_DIE_TABS do
+		local button = dieTabs[i]
+		local die = server.dice[i]
+		local rejected = server.rejectedDice[i] == true
+		button.Visible = die ~= nil or rejected
+		if die ~= nil then
+			button.Text = "DIE " .. tostring(i)
+			UITheme.setEnabled(button, i == selectedDie)
+		elseif rejected then
+			button.Text = "DIE " .. tostring(i) .. " [BAD]"
+			UITheme.setEnabled(button, false)
+		end
+	end
+end
+
 local function renderEmpty(): ()
 	for i = 1, MAX_FACES do
 		faceRows[i].holder.Visible = false
-	end
-	for i = 1, MAX_DIE_TABS do
-		dieTabs[i].Visible = false
 	end
 	if titleLabel then
 		titleLabel.Text = "FORGE"
@@ -1042,11 +1140,19 @@ render = function(): ()
 		stepButton.Text = "STEP " .. tostring(STEPS[stepIndex])
 	end
 
+	renderDieTabs()
+
 	local die = currentDie()
 	if die == nil or #draft == 0 then
 		renderEmpty()
 		if not server.received then
 			setStatus("AWAITING SERVER STATE", UITheme.Colors.TextDim)
+		elseif next(server.rejectedDice) ~= nil then
+			-- Distinguish "the snapshot carried no dice" from "it carried dice this
+			-- panel refused" -- the second is a data fault worth naming, and the
+			-- [BAD] tabs above now show exactly which slots it was.
+			setStatus("EVERY DIE IN THE SERVER'S SNAPSHOT WAS REFUSED AS MALFORMED",
+				UITheme.Colors.Negative)
 		else
 			-- Received a snapshot and still have no editable die. Say so plainly
 			-- rather than showing an empty forge that looks merely slow.
@@ -1058,25 +1164,35 @@ render = function(): ()
 	local floor = DiceCatalog.getMassFloor(die.shape)
 	local faceCount = #draft
 
-	-- Die tabs
-	for i = 1, MAX_DIE_TABS do
-		local button = dieTabs[i]
-		local present = server.dice[i] ~= nil
-		button.Visible = present
-		if present then
-			UITheme.setEnabled(button, i == selectedDie)
-		end
-	end
-
 	if titleLabel then
 		titleLabel.Text = string.format("FORGE - DIE %d - %s", selectedDie, die.shape)
 	end
 
 	-- THE PREVIEW. Every number below comes from the shared ForgeMath, evaluated
-	-- on the exact array that would be sent. No local arithmetic on masses.
-	local probabilities = ForgeMath.landingProbabilities(draft)
-	local expected = ForgeMath.expectedValue(draft)
-	local voidChance = ForgeMath.voidProbability(draft, floor)
+	-- on `draft` -- the exact array that `commit` copies and sends. No local
+	-- arithmetic on masses anywhere in this file.
+	--
+	-- ONE CALL, not three: `expectedValue` and `voidProbability` each recompute
+	-- the landing probabilities internally, so the old three-call form derived the
+	-- same distribution three times per render. `preview` returns all four figures
+	-- from a single pass.
+	--
+	-- pcall'd because every one of those entry points `error()`s on degenerate
+	-- input -- a total mass of zero, or fewer than two faces. `NetClient.subscribe`
+	-- swallows a throw raised from here, so an unprotected call does not surface as
+	-- an error: the panel simply stops updating and keeps showing stale numbers.
+	-- `HUD.luau` and `MenuPanel.luau` already pcall the identical maths; this call
+	-- site was the inconsistent one.
+	local previewOk, previewData = pcall(ForgeMath.preview, draft, floor)
+	if not previewOk then
+		renderEmpty()
+		setStatus("THIS DIE'S MASS LAYOUT CANNOT BE PREVIEWED", UITheme.Colors.Negative)
+		return
+	end
+	local probabilities = previewData.probabilities
+	local values = previewData.values
+	local expected = previewData.expectedValue
+	local voidChance = previewData.voidProbability
 
 	for i = 1, MAX_FACES do
 		local row = faceRows[i]
@@ -1093,7 +1209,17 @@ render = function(): ()
 
 		local mass = draft[i]
 		local element = if die.faces[i] ~= nil then die.faces[i].element else "None"
-		local atFloor = mass <= floor + ForgeMath.EPSILON
+		-- THE definition of Void, asked of the module that owns it. A Void face is
+		-- the LIGHTEST face AND within `VOID_FLOOR_FACTOR` of the floor -- both
+		-- halves, exactly as `RollService` breaks streaks.
+		--
+		-- This line used to be a third, private definition (`mass <= floor +
+		-- EPSILON`). It disagreed with the server in both directions: a face at
+		-- mass 1.4 IS a Void to the server and painted ordinary here, while on
+		-- {55,1,1,1,1,1} it painted FIVE faces Void when only one is. There is now
+		-- exactly one definition of Void in the game and this is not it -- it is a
+		-- caller of it.
+		local isVoid = ForgeMath.isVoidFace(draft, i, floor)
 
 		UITheme.setEnabled(row.root, i == selectedFace)
 		row.index.Text = "F" .. tostring(i)
@@ -1103,9 +1229,9 @@ render = function(): ()
 		row.element.Text = elementAbbrev(element)
 		row.element.TextColor3 = UITheme.elementColor(element)
 		row.mass.Text = Format.formatNumber(mass)
-		-- FR-3.5: a face at the floor is a VOID face and is coloured as one.
-		row.mass.TextColor3 = if atFloor then UITheme.Colors.VoidFace else UITheme.Colors.TextPrimary
-		row.value.Text = Format.formatNumber(ForgeMath.faceValue(mass))
+		-- FR-3.5: a VOID face is coloured as one.
+		row.mass.TextColor3 = if isVoid then UITheme.Colors.VoidFace else UITheme.Colors.TextPrimary
+		row.value.Text = Format.formatNumber(values[i])
 		row.probability.Text = string.format("%.1f%%", probabilities[i] * 100)
 	end
 
@@ -1228,9 +1354,33 @@ local function onForgeResult(payload: any): ()
 	end
 
 	if payload.ok == true then
-		local distribution = payload.distribution
+		-- THE WRITE IS CONDITIONAL ON THE RESULT ADDRESSING THE DIE ON SCREEN.
+		--
+		-- The switch above is an ATTEMPT, not a guarantee: it declines to move when
+		-- `server.dice[index]` is nil. So if a StateSync invalidates die 2 while a
+		-- forge for die 2 is in flight, `selectedDie` rescans to 1 and an
+		-- unconditional write lands die 2's distribution on die 1's cached faces.
+		-- Nothing looks wrong at that moment -- and every later FORGE then dies
+		-- locally with SUM_MISMATCH against a budget that was never die 2's, which
+		-- is the mystifying-refusal class of bug: the symptom is arbitrarily far
+		-- from the cause. Ignore it, say so, and wait for the authoritative
+		-- StateSync instead of guessing.
 		local die = currentDie()
-		if die ~= nil and type(distribution) == "table" then
+		if type(index) ~= "number" or index ~= selectedDie or die == nil then
+			warn(string.format(
+				"[ForgePanel] ignored a ForgeResult addressing die %s while die %d is displayed",
+				tostring(index),
+				selectedDie
+			))
+			seedDraft()
+			setStatus("A FORGE COMPLETED ON A DIE THIS PANEL IS NOT SHOWING"
+				.. " - AWAITING THE SERVER'S SNAPSHOT", UITheme.Colors.TextDim)
+			render()
+			return
+		end
+
+		local distribution = payload.distribution
+		if type(distribution) == "table" then
 			local incoming = distribution :: { any }
 			if #incoming == #die.faces then
 				for i = 1, #incoming do
@@ -1258,6 +1408,81 @@ local function onForgeResult(payload: any): ()
 end
 
 --------------------------------------------------------------------------------
+-- Release path
+--
+-- A local, not a method, because `init` calls it BEFORE `ForgePanel.shutdown`
+-- exists as a field on the module table. `ForgePanel.shutdown` below is a thin
+-- wrapper so the public lifecycle surface matches every sibling view module.
+--------------------------------------------------------------------------------
+
+-- Releases the surface completely: no connection left live, no instance left in
+-- PlayerGui, no figure left in module scope. A later `init` must rebuild a panel
+-- that has heard nothing yet, not repaint the last session's die.
+local function releaseSurface(): ()
+	for _, connection in ipairs(connections) do
+		connection:Disconnect()
+	end
+	connections = {}
+
+	local gui = screenGui
+	if gui ~= nil then
+		gui:Destroy()
+	end
+	screenGui = nil
+
+	-- Widget handles. Every one of these points at an instance that is now
+	-- destroyed, and `render` tests them for nil rather than for validity -- a
+	-- stale handle would make it write properties onto a dead label instead of
+	-- returning early.
+	root = nil
+	tabButton = nil
+	dieTabs = {}
+	faceRows = {}
+	elementButtons = {}
+	shapeButtons = {}
+	titleLabel = nil
+	evValue = nil
+	voidValue = nil
+	budgetValue = nil
+	costValue = nil
+	elementHeading = nil
+	statusLabel = nil
+	stepButton = nil
+	evenButton = nil
+	resetButton = nil
+	commitButton = nil
+
+	-- THE DISPLAY STATE GOES TOO, not merely the widget handles. `server` holds a
+	-- player's dice, budgets, cash and entitlements; `draft` and `baseline` hold an
+	-- uncommitted proposal. Carrying any of it across a shutdown means the next
+	-- `init` renders figures that were true of a player who may not be this player,
+	-- and are unconfirmed in any case. A forge that has heard nothing shows
+	-- "AWAITING SERVER STATE".
+	server = {
+		dice = {},
+		rejectedDice = {},
+		cash = nil,
+		unlockedElements = defaultUnlockedElements(),
+		unlockedShapes = defaultUnlockedShapes(),
+		received = false,
+	}
+	draft = {}
+	baseline = {}
+	draftDieIndex = 0
+
+	selectedDie = 1
+	selectedFace = 1
+	stepIndex = 1
+	-- Cleared deliberately: `submitting` is a re-entrancy guard around a network
+	-- call, and a shutdown during an in-flight call would otherwise leave it true
+	-- forever, locking out FORGE, elements and shapes on the rebuilt panel.
+	submitting = false
+
+	net = nil
+	initialised = false
+end
+
+--------------------------------------------------------------------------------
 -- Public surface
 --------------------------------------------------------------------------------
 
@@ -1282,6 +1507,18 @@ function ForgePanel.init(client: Net): ()
 		return
 	end
 
+	-- THE RELEASE PATH RUNS FIRST, and the latch is set LAST.
+	--
+	-- Both halves of that matter and neither is decoration. Latching `initialised`
+	-- before the construction succeeds makes a FAILED init permanent: every later
+	-- attempt returns at the guard above and the panel is silently dead for the
+	-- session. Setting it last fixes that but introduces the second fault -- a
+	-- retry after a partial build would construct a SECOND ScreenGui and leak the
+	-- first, because `buildInterface` never checks for one. Calling `shutdown`
+	-- here collects whatever the failed attempt left behind, so a retry rebuilds
+	-- from a known-empty state instead of on top of wreckage.
+	releaseSurface()
+
 	local localPlayer = Players.LocalPlayer
 	if localPlayer == nil then
 		error("[ForgePanel] no LocalPlayer -- this is a client surface", 2)
@@ -1290,10 +1527,19 @@ function ForgePanel.init(client: Net): ()
 
 	net = client
 	buildInterface(playerGui)
-	initialised = true
 
-	client.onStateSync(onStateSync)
-	client.onForgeResult(onForgeResult)
+	-- Tracked, because these two OUTLIVE the ScreenGui. Destroying the gui
+	-- disconnects the button events with it; these live on NetClient's signals and
+	-- would go on firing `render` against destroyed labels for the rest of the
+	-- session.
+	table.insert(connections, client.onStateSync(onStateSync))
+	table.insert(connections, client.onForgeResult(onForgeResult))
+
+	initialised = true
+end
+
+function ForgePanel.shutdown(): ()
+	releaseSurface()
 end
 
 return ForgePanel
