@@ -48,6 +48,19 @@ export type Entry = {
 	key: string,
 	-- nil means UNRESOLVED: no asset exists yet. Fails closed everywhere.
 	assetId: number?,
+	-- TRUE when the server cannot yet deliver what this entry promises.
+	--
+	-- WHY THIS IS SEPARATE FROM `assetId`. An id says the item EXISTS on the
+	-- platform; it says nothing about whether this build can honour it. Three
+	-- products were created on the dashboard before the systems that grant them
+	-- were written, which is a genuinely dangerous state: Roblox will happily
+	-- sell them, the receipt handler will refuse them, and the platform will
+	-- retry forever while the player has paid and received nothing.
+	--
+	-- Marking them lets the shop REFUSE TO OFFER them, which is the only place
+	-- the problem can actually be prevented -- the receipt handler is already
+	-- too late, because by then the player has been charged.
+	unavailable: boolean?,
 	name: string,
 	blurb: string,
 	kind: GrantKind,
@@ -191,6 +204,7 @@ MonetisationCatalog.Products = {
 	-- ---------------------------------------------------------------------
 	LuckBoost = {
 		key = "LuckBoost",
+		unavailable = true,
 		assetId = 3655545836,
 		name = "2x Luck Boost",
 		blurb = "Heavy faces bite less, for a while.",
@@ -200,6 +214,7 @@ MonetisationCatalog.Products = {
 	},
 	OfflineX2 = {
 		key = "OfflineX2",
+		unavailable = true,
 		assetId = 3655618937,
 		name = "2x Offline Payout",
 		blurb = "Double your next offline collection.",
@@ -208,6 +223,7 @@ MonetisationCatalog.Products = {
 	},
 	TimeSkip24 = {
 		key = "TimeSkip24",
+		unavailable = true,
 		assetId = 3655695933,
 		name = "Time Skip (24h)",
 		blurb = "Collect a full day of offline earnings now.",
@@ -259,6 +275,22 @@ function MonetisationCatalog.passById(assetId: number): Entry?
 		return nil
 	end
 	return passesById[assetId]
+end
+
+-- Whether this entry may be OFFERED to a player.
+--
+-- Stricter than `isResolved` on purpose. `isResolved` asks "does the asset
+-- exist"; this asks "can we actually deliver it". An entry that exists but
+-- cannot be honoured must never reach a purchase prompt, because a refused
+-- receipt still means the player was charged and is waiting on a retry that
+-- will keep failing until the feature ships.
+--
+-- Any shop UI MUST gate on this, not on `isResolved`.
+function MonetisationCatalog.isSellable(entry: Entry?): boolean
+	if not MonetisationCatalog.isResolved(entry) then
+		return false
+	end
+	return (entry :: Entry).unavailable ~= true
 end
 
 -- Every resolved pass, for the join-time ownership sweep.

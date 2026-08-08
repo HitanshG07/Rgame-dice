@@ -69,6 +69,7 @@ local RemoteGateway = require(Server:WaitForChild("RemoteGateway"))
 local RollService = require(Server:WaitForChild("RollService"))
 local ForgeService = require(Server:WaitForChild("ForgeService"))
 local StateSyncService = require(Server:WaitForChild("StateSyncService"))
+local PurchaseService = require(Server:WaitForChild("PurchaseService"))
 
 -- Persistence comes up FIRST and explicitly. A lazy init hidden inside load()
 -- would make the failure surface at a player's join instead of at server start.
@@ -77,6 +78,17 @@ PlayerProfile.init()
 -- Materialise every declared remote before any handler binds, so a client that
 -- joins early resolves its WaitForChild immediately instead of racing first use.
 Remotes.createAll()
+
+-- MONETISATION. This installs the place's ONE `ProcessReceipt` assignment
+-- (threat T-17) and must happen before any player can be admitted: a receipt
+-- can arrive the instant a session begins, and an unassigned handler means
+-- Roblox has nowhere to deliver it.
+--
+-- The announcer is injected rather than imported so PurchaseService does not
+-- depend on StateSyncService directly; a grant pushes a fresh snapshot the
+-- same way every other mutation does.
+PurchaseService.setAnnouncer(StateSyncService.push)
+PurchaseService.init()
 
 -- THE DICE SOLIDS. Generated ONCE, on the server, into ReplicatedStorage.
 --
@@ -163,6 +175,20 @@ admitPlayer = function(player: Player)
 	-- before they were caught. Repairs are logged with a count, never silent.
 	local repaired = ForgeService.validateStoredDice(player)
 
+	-- Gamepass ownership. Resolved in its own thread because it makes network
+	-- calls: a slow or hanging Roblox lookup must not delay admission, and the
+	-- entitlements it caches are read only after the player is already seated.
+	-- Until it completes every pass reads as NOT owned, which is the
+	-- fail-closed direction.
+	task.spawn(function()
+		PurchaseService.onPlayerAdded(player)
+		-- Re-push once entitlements are known, or the client would show the
+		-- pre-ownership snapshot until the next state change.
+		if PlayerProfile.isActive(player) then
+			StateSyncService.push(player)
+		end
+	end)
+
 	RollService.beginSession(player)
 
 	-- The client displays NOTHING until this lands: no balances, no die shapes,
@@ -176,6 +202,9 @@ end
 
 local function onPlayerRemoving(player: Player)
 	RollService.endSession(player)
+	-- Released BEFORE the profile: the entitlement cache is keyed by Player and
+	-- would otherwise hold a reference to a departed one.
+	PurchaseService.onPlayerRemoving(player)
 	PlayerProfile.release(player)
 end
 
