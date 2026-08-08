@@ -177,6 +177,102 @@ for _, name in ipairs(MODULE_ORDER) do
 end
 
 --------------------------------------------------------------------------------
+-- THE SEAMS
+--
+-- Every module above was built in isolation and knows nothing about its
+-- siblings. That is what kept them independently reviewable -- and it means the
+-- connections between them exist NOWHERE until they are made here. This is the
+-- composition root; if a seam is missing, the surfaces are all individually
+-- correct and the game does not work.
+--
+-- Each seam is defensive: a module absent from disk (still true for nothing
+-- today, but true again the moment someone adds an eighth) must not take the
+-- client down. Everything below checks before it wires.
+--------------------------------------------------------------------------------
+
+local ForgePanel = loaded["ForgePanel"]
+local MenuPanel = loaded["MenuPanel"]
+local FeedbackFX = loaded["FeedbackFX"]
+local AudioDirector = loaded["AudioDirector"]
+
+-- SEAM 1 -- the sidebar opens the forge.
+--
+-- ForgePanel's own edge tab was removed: it was a second control for one
+-- surface, and it sat a layer above the sidebar where it covered a button. The
+-- sidebar entry is now the only way in, so this wiring is not a convenience --
+-- without it the core mechanic of the game is unreachable, and MenuPanel
+-- renders the entry as "(UNWIRED)" to say so out loud.
+if type(MenuPanel) == "table" and type(ForgePanel) == "table" then
+	MenuPanel.setSurfaceOpener("Forge", function(_dieIndex: number?)
+		ForgePanel.setVisible(true)
+	end)
+	-- Shape lives inside the forge panel rather than on its own surface.
+	MenuPanel.setSurfaceOpener("Shape", function(_dieIndex: number?)
+		ForgePanel.setVisible(true)
+	end)
+
+	-- SEAM 2 -- mutual exclusion.
+	--
+	-- MenuPanel's overlay and ForgePanel's panel both sit at UITheme.Layer.Panel
+	-- with overlapping rectangles, and Roblox does not define stacking on a tie.
+	-- MenuPanel already yields outbound (it closes its overlay before invoking an
+	-- opener); this is the inbound half, so opening a sidebar surface closes the
+	-- forge instead of two opaque panels racing.
+	MenuPanel.setSurfaceCloser(function()
+		ForgePanel.setVisible(false)
+	end)
+end
+
+-- SEAM 3 -- the settings bridge (FR-13.6).
+--
+-- MenuPanel owns the particle and motion-blur toggles; FeedbackFX and
+-- AudioDirector are the modules that must obey them, and neither can reach
+-- MenuPanel without violating the isolation that made them reviewable. Two
+-- separate rework agents independently reported this gap, which is why it is
+-- wired here rather than inside either of them.
+if type(MenuPanel) == "table" then
+	local function pushSettings(settings: any): ()
+		if type(FeedbackFX) == "table" and type(FeedbackFX.applySettings) == "function" then
+			FeedbackFX.applySettings({
+				particles = settings.particles,
+				motionBlur = settings.motionBlur,
+			})
+		end
+		if type(AudioDirector) == "table" and type(AudioDirector.applySettings) == "function" then
+			AudioDirector.applySettings({ sfx = settings.sfx, music = settings.music })
+		end
+	end
+
+	-- Prime immediately: a module built before the first toggle must not start
+	-- out disagreeing with a switch the player can already see.
+	pushSettings(MenuPanel.getSettings())
+	MenuPanel.onSettingsChanged(pushSettings)
+
+	-- THE HAZARD THIS CLOSES, reported independently by BOTH the FeedbackFX and
+	-- MenuPanel reworks.
+	--
+	-- StateSync carries a `settings` block read from the saved profile, and the
+	-- contract says it is re-sent "after any state change" -- which includes
+	-- every roll. There is no server handler that WRITES settings yet, so that
+	-- block always carries the profile defaults. A client that adopted it would
+	-- silently revert a toggle the player just flipped, on their very next roll.
+	--
+	-- MenuPanel refused to adopt the field for exactly that reason. But
+	-- FeedbackFX still reads StateSync as its authoritative source, so a snapshot
+	-- can still overwrite a live toggle. Re-asserting MenuPanel's values after
+	-- every snapshot makes the in-session choice win until the persistence
+	-- handler exists.
+	--
+	-- This is a WORKAROUND for a missing server feature, not a design. FR-13.6
+	-- requires the toggles to be "persisted per player"; that needs a remote and
+	-- a profile write that do not exist, and MenuPanel says on screen that the
+	-- toggles are session-scoped rather than implying otherwise.
+	NetClient.onStateSync(function(_state: any)
+		pushSettings(MenuPanel.getSettings())
+	end)
+end
+
+--------------------------------------------------------------------------------
 -- Baseline subscriptions
 --------------------------------------------------------------------------------
 

@@ -168,10 +168,18 @@ end
 -- and the corners -- and therefore the camera -- follow.
 --------------------------------------------------------------------------------
 
+-- The framing target is the pit's PLAYABLE INTERIOR, not its outer shell.
+--
+-- This used to bound the whole structure -- outer wall faces, rim top, and
+-- the underside of the floor slab -- which is a materially bigger box than
+-- the space dice actually occupy. Solving to fit it pushed the eye back far
+-- enough that a die read as a speck on screen. Nothing below the floor and
+-- nothing outside the walls ever needs to be visible; a rim edge clipping at
+-- the frame's corner is not a defect, a die leaving frame is.
 local function buildCorners(): { Vector3 }
-	local half = INNER_HALF + WALL_THICK
-	local top = WALL_HEIGHT + RIM_HEIGHT
-	local bottom = -FLOOR_THICK
+	local half = INNER_HALF
+	local top = WALL_HEIGHT
+	local bottom = 0
 	local corners: { Vector3 } = {}
 	local n = 0
 	for signX = -1, 1, 2 do

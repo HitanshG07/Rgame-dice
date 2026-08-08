@@ -2,9 +2,15 @@
 -- ForgePanel.luau
 -- THE FORGE. The primary surface of the game (SRS FR-13.8) -- not a submenu.
 --
--- It is reachable in ONE tap: a permanently visible FORGE tab sits on the left
--- edge of the arena and opens this panel directly. FR-13.8 allows two; one is
--- what the core mechanic deserves.
+-- It is reachable in ONE tap, from MenuPanel's FORGE sidebar entry, which
+-- ClientBootstrap wires to `setVisible`. FR-13.8 allows two; one is what the
+-- core mechanic deserves.
+--
+-- This module used to ALSO keep its own permanently visible edge tab. That was
+-- a second control for a single surface, and because it sat on
+-- UITheme.Layer.Panel -- above MenuPanel's sidebar -- inside the sidebar's own
+-- x range, it covered a sidebar button and swallowed its taps from init.
+-- Removed. One surface, one entry point.
 --
 -- WHAT THIS FILE IS RESPONSIBLE FOR
 --   * Letting the player redistribute a FIXED mass budget across a die's faces.
@@ -533,7 +539,6 @@ local draftDieIndex = 0
 -- path to collect, or the retry leaks an orphaned gui into PlayerGui.
 local screenGui: ScreenGui? = nil
 local root: Frame? = nil
-local tabButton: TextButton? = nil
 
 -- Every connection this module owns, in one place, so `shutdown` cannot miss
 -- one. The button connections would die with the destroyed ScreenGui anyway;
@@ -609,17 +614,17 @@ local function setStatus(text: string, colour: Color3): ()
 	end
 end
 
--- The FORGE tab sits at the left edge of the arena and the open panel covers
--- that edge, so the two are mutually exclusive rather than stacked: FR-13.7
--- forbids overlap, and a tab peeking out from under its own panel is exactly
--- the kind of thing that reads as fine at 1080p and clips at 320px.
+-- Visibility is driven entirely by the caller. ClientBootstrap wires this to
+-- MenuPanel's FORGE entry to open, and to MenuPanel's surface-closer so that
+-- opening a sidebar overlay closes this panel -- both sit on
+-- UITheme.Layer.Panel with overlapping rects, and Roblox does not define
+-- stacking on a DisplayOrder tie.
 local function setPanelVisible(visible: boolean): ()
 	if root then
 		root.Visible = visible
 	end
-	if tabButton then
-		tabButton.Visible = not visible
-	end
+	-- The edge tab is gone; visibility is driven entirely by the caller.
+	-- Nothing to restore when hiding.
 end
 
 --------------------------------------------------------------------------------
@@ -681,10 +686,16 @@ local function buildInterface(target: PlayerGui): ()
 	screenGui = screen
 
 	-- FR-13.8: ONE tap from the arena. Always on screen, never behind a menu.
-	local tab = UITheme.button("FORGE", UDim2.fromScale(0.14, 0.07), UDim2.fromScale(0.006, 0.40))
-	tab.Name = "ForgeTab"
-	tab.Parent = screen
-	tabButton = tab
+	-- NO EDGE TAB. It used to live here, and it was a second way into one
+	-- surface: MenuPanel's left sidebar already carries FORGE (FR-13.3), so
+	-- two controls opened the same panel. Worse, this tab sat on
+	-- UITheme.Layer.Panel -- one layer ABOVE the sidebar -- in the sidebar's
+	-- own x range, so it covered a sidebar button and swallowed its taps,
+	-- permanently and silently, from init.
+	--
+	-- The panel is now opened solely through `setVisible`, which
+	-- ClientBootstrap wires to MenuPanel's FORGE entry. One surface, one
+	-- entry point, no reserved band for two modules to keep in sync.
 
 	local panel = UITheme.panel(UDim2.fromScale(0.9, 0.86), UDim2.fromScale(0.05, 0.07))
 	panel.Name = "ForgeRoot"
@@ -1435,7 +1446,6 @@ local function releaseSurface(): ()
 	-- stale handle would make it write properties onto a dead label instead of
 	-- returning early.
 	root = nil
-	tabButton = nil
 	dieTabs = {}
 	faceRows = {}
 	elementButtons = {}

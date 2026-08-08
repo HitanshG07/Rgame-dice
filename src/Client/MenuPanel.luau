@@ -60,14 +60,14 @@
 -- 0.855-0.995 across y 0.16-0.84, which is precisely the band HUD leaves clear
 -- between its streak strip and its bottom bar.
 --
--- THE RESERVED BAND. ForgePanel keeps a permanent FORGE tab at x 0.006-0.146,
--- y 0.400-0.470 on UITheme.Layer.Panel -- one layer ABOVE this module's
--- sidebars. Anything this file draws in that rect is both covered and
--- input-blocked, permanently, from init. A uniform five-slot pitch put the
--- SHAPE button straight underneath it. The slot table below therefore skips the
--- band outright (see RESERVED_BAND) rather than trusting a z-order this module
--- does not control. This is a workaround, not a resolution: the tab and this
--- sidebar are competing for the same screen edge, and the real fix is an
+-- HISTORICAL NOTE, kept because it explains a decision. ForgePanel used to keep
+-- a permanent FORGE tab in this module's own left-sidebar rectangle, one layer
+-- above it, which covered a button and swallowed its taps. This file worked
+-- around it by skipping a reserved band, and reported that the workaround was
+-- fragile because it hard-coded another module's geometry. The resolution was
+-- to DELETE the tab -- it was a duplicate entry point to a surface this sidebar
+-- already opens -- so the band, the gap and the guard are all gone and the
+-- pitch is even again. Nothing draws above this module in the sidebar rect.
 -- Orchestrator-level decision about who owns x < 0.15. Reported, not assumed.
 
 local Players = game:GetService("Players")
@@ -349,21 +349,11 @@ local ENTRIES: { Entry } = {
 -- Sidebar slot geometry
 --------------------------------------------------------------------------------
 
--- The band, in ABSOLUTE screen scale, that ForgePanel's permanent FORGE tab
--- occupies: x 0.006-0.146, y 0.400-0.470, on Layer.Panel (30), which is above
--- this module's Layer.Sidebar (20). The x range is effectively identical to the
--- left sidebar's, so only y can separate them. Recorded as named constants so
--- the collision is checkable rather than baked into five magic numbers, and so
--- the day ForgePanel moves its tab the check has something to compare against.
-local RESERVED_BAND_TOP = 0.395     -- 0.400 tab top, minus a 0.005 margin
-local RESERVED_BAND_BOTTOM = 0.475  -- 0.470 tab bottom, plus a 0.005 margin
-
 local SIDEBAR_TOP = 0.16
 local SIDEBAR_HEIGHT = 0.68
 
 -- Slot origins as a FRACTION OF THE SIDEBAR PANEL, top edge, with the button
--- height below. Two slots sit above the reserved band and three below it; the
--- gap in the middle of each sidebar is that band, left deliberately empty.
+-- height below. Even pitch, five slots per side, no reserved gap.
 --
 -- In absolute screen scale these resolve to:
 --   slot 1  0.170 - 0.265      slot 4  0.605 - 0.700
@@ -372,7 +362,13 @@ local SIDEBAR_HEIGHT = 0.68
 -- Slot 2 ends 0.005 above the band and slot 3 begins 0.005 below it. Both
 -- sidebars use the same table: the right sidebar has no tab over it, but a
 -- deliberate symmetry reads as a design and a one-sided shuffle reads as a bug.
-local SLOT_Y: { number } = { 0.015, 0.199, 0.471, 0.655, 0.838 }
+-- Even pitch across the sidebar. This was previously a hand-derived table
+-- that skipped a band reserved for ForgePanel's edge tab; that tab has been
+-- REMOVED (it was a duplicate entry point to a surface this sidebar already
+-- opens), so the band, the gap and the build-time occlusion guard all went
+-- with it. Nothing above this module claims screen space in the sidebar's
+-- rectangle any more.
+local SLOT_Y: { number } = { 0.015, 0.185, 0.355, 0.525, 0.695 }
 local SLOT_HEIGHT = 0.140
 
 local SLOTS_PER_SIDE = #SLOT_Y
@@ -847,9 +843,9 @@ local function addLabel(parent: Instance, text: string, size: UDim2, position: U
 	return label
 end
 
--- Converts a slot origin expressed as a fraction of the sidebar panel into the
--- absolute screen scale the reserved band is stated in, so the two can be
--- compared at all.
+-- Converts a slot origin expressed as a fraction of the sidebar panel into
+-- absolute screen scale. Retained because the layout comments quote absolute
+-- figures and this is what derives them.
 local function slotAbsoluteTop(slotFraction: number): number
 	return SIDEBAR_TOP + SIDEBAR_HEIGHT * slotFraction
 end
@@ -861,21 +857,12 @@ end
 -- announces it, because an occluded button looks precisely like a button. The
 -- symptom this guards against was permanent and silent from init, so the guard
 -- runs at init too.
-local function warnIfSlotIsOccluded(side: string, slot: number, entryId: string): ()
-	if side ~= "Left" then
-		-- The reserved band is ForgePanel's tab, and the tab is on the left edge
-		-- (x 0.006-0.146). The right sidebar shares the band's y range but not
-		-- its x range, so it cannot collide.
-		return
-	end
-	local top = slotAbsoluteTop(SLOT_Y[slot])
-	local bottom = slotAbsoluteTop(SLOT_Y[slot] + SLOT_HEIGHT)
-	if top < RESERVED_BAND_BOTTOM and bottom > RESERVED_BAND_TOP then
-		warn(string.format(
-			"[MenuPanel] '%s' (y %.3f-%.3f) intersects ForgePanel's tab band (y %.3f-%.3f);"
-				.. " it will be drawn under the tab and its taps swallowed",
-			entryId, top, bottom, RESERVED_BAND_TOP, RESERVED_BAND_BOTTOM))
-	end
+-- The occlusion guard that lived here checked sidebar slots against
+-- ForgePanel's edge tab. The tab is gone, so there is nothing above this
+-- module in the sidebar's rectangle and the check has no subject. Deleted
+-- rather than left passing vacuously -- a guard that can never fire reads
+-- like protection and provides none.
+local function warnIfSlotIsOccluded(_entryId: string, _slot: number): ()
 end
 
 local function buildSidebar(root: Instance, side: string, x: number): ()
