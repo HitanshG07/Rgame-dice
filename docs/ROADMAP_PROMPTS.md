@@ -95,9 +95,104 @@ knowingly.
 
 ---
 
+## 1B. WHERE THE GAME ACTUALLY STANDS — and what "finished" requires
+
+*Written 2026-08-09 against head `19efd31`. Every claim here was checked by
+running the game or grepping the source, never by trusting an earlier report.*
+
+### What is real and working
+
+The **core loop is complete and proven**: roll → server samples from the mass
+distribution → payout credits → StateSync → the board animates a real 3D die
+onto the face the server chose. Forging, shape changes, elements, streaks, Void
+faces, persistence and rate limiting all work. 10 suites, 3,370 assertions.
+
+The **inverted-mass mechanic** — the whole reason this game exists — has been
+observed working end to end by the operator. That is the single most important
+fact in this file.
+
+### The shape of what is left
+
+Almost everything remaining is **breadth, not depth**. The hard, novel,
+easy-to-get-wrong parts are done. What remains is largely: *systems that were
+specified, have UI already saying `(SOON)`, and need building.*
+
+Four groups, in the order they should be built:
+
+**GROUP 1 — make what is already SOLD actually work.** (P-5A2, P-5A3)
+This is not new scope; it is closing a gap between what the platform will sell
+and what the game will deliver. Highest priority by a distance, because it is
+the only remaining work where the failure mode is *a real person loses money*.
+
+**GROUP 2 — the systems three products depend on.** (P-5B, P-5B2)
+Offline earnings and timed boosts. Until these exist, three developer products
+cannot be honoured. Building them converts three dead SKUs into live ones and
+unlocks the vault UI the HUD already gestures at.
+
+**GROUP 3 — the rest of the specified game.** (P-5C, P-5C2)
+Progression, Ascension, and the twelve declared-but-unhandled remotes. This is
+where most of the `(SOON)` labels get replaced by working buttons.
+
+**GROUP 4 — hardening and launch.** (P-6A … P-7B)
+Integration suites, balance, performance, the pre-launch sweep, a final
+cross-vendor security audit, then publish.
+
+### How the pieces connect
+
+```
+   P-5A2 ── passes take money and DO something
+     │
+   P-5A3 ── a shop exists, gated on isSellable
+     │
+   P-5B ─── offline earnings accrue        ┐
+     │                                     ├─ together, the 3 dead products
+   P-5B2 ── boosts tick and expire         ┘  become deliverable
+     │
+   P-5C ─── progression + ascension
+     │
+   P-5C2 ── every declared remote has a handler (or is deleted)
+     │
+   P-5D / P-5E ── Block 5 gates
+     │
+   P-6A…P-6E ── integration, balance, performance, sweep, security
+     │
+   P-7A ── publish
+```
+
+### The rules that carry forward
+
+These have each been paid for with a real defect. They are not style notes.
+
+- **Verify by running it, not by reading a report.** Blocks 3 and 4 both shipped
+  defects that every static check passed. The dice passed *every numeric check*
+  while rendering as six-pointed stars (L-031).
+- **A green suite at an unchanged assertion count is not a pass** (L-020).
+- **Match the evidence to the artifact.** Visual work needs a screenshot from an
+  angle where the expected failure would show (L-031).
+- **Audit the contract in the producer direction.** For every declared event or
+  endpoint, find the code that emits it. A row with no producer is a finding
+  (L-027) — this is exactly how the twelve unhandled remotes were found.
+- **Before deleting a module, list what it touches outside itself** (L-028).
+- **When a coordinate system or unit changes, re-state every constant** (L-029).
+- **Fail closed, and never let "the asset exists" mean "we can deliver it."**
+
+### What only the operator can do
+
+| Task | Why it cannot be automated |
+|---|---|
+| Disable the 3 undeliverable products on the dashboard | Roblox's own store page is outside anything the code controls |
+| Supply audio asset ids | Agents do not create monetised or uploaded assets |
+| P-1 Script Analysis readings | Not exposed through the MCP surface |
+| Balance judgement (P-6B) | The numbers are a design opinion, not a correctness property |
+| Publishing (P-7A) | The operator's account, the operator's decision |
+
+---
+
 # 2. BLOCK 3 — SERVICE LAYER COMPLETION
 
-## P-3A — Block 3 construction
+## P-3A — Block 3 construction  ✅ DONE
+
+> **COMPLETE — do not re-run.** Landed after 5 audit rounds and 12 findings. The die contract is now a single executable function (`ForgeService.assertDieInvariant`).
 
 **WHEN:** Now.
 **PRECONDITION:** Blocks 1–2 complete through Gate 4; `master` clean.
@@ -195,7 +290,9 @@ and committed.
 
 ---
 
-## P-3B — Block 3 Gate 2 verification
+## P-3B — Block 3 Gate 2 verification  ✅ DONE
+
+> **COMPLETE — do not re-run.** Suite green; assertion count now 3,370.
 
 **WHEN:** P-3A reports code written and committed.
 **YOU DO:** Confirm the Rojo plugin is Connected, then press Play.
@@ -228,7 +325,9 @@ loosened a real invariant to make a bad test pass.
 
 ---
 
-## P-3C — Block 3 Gate 3 + Gate 4 audit
+## P-3C — Block 3 Gate 3 + Gate 4 audit  ✅ DONE
+
+> **COMPLETE — do not re-run.** 5 rounds run across two vendors.
 
 **WHEN:** P-3B returns MECHANICALLY-CLEAN.
 **YOU DO:** Run the audit in your second vendor (Antigravity) and paste the result back.
@@ -263,7 +362,9 @@ URL or any credential in the brief.
 
 ---
 
-## P-3D — Audit remediation
+## P-3D — Audit remediation  ✅ DONE
+
+> **COMPLETE — do not re-run.** All 12 findings closed.
 
 **WHEN:** P-3C returns any finding count ≥ 1. Skip if both are 0.
 **EXIT ARTIFACT:** Fixes committed + re-verified live at a moved assertion count.
@@ -297,7 +398,9 @@ Report a table: finding ID | CONFIRMED/DISPUTED | fix | new threat entry | test 
 `src/Client/` is currently **empty**. This is the largest remaining block, split
 into three construction prompts so no single one is too big to verify.
 
-## P-4A — Client foundation
+## P-4A — Client foundation  ✅ DONE
+
+> **COMPLETE — do not re-run.** NetClient + ClientBootstrap; sole wire boundary holds.
 
 **WHEN:** Block 3 signed off through Gate 4.
 **EXIT ARTIFACT:** `ClientBootstrap` + `NetClient` on disk; game boots without error.
@@ -336,7 +439,9 @@ Do not build the arena or any UI in this prompt.
 
 ---
 
-## P-4B — Arena and dice renderer
+## P-4B — Arena and dice renderer  ✅ DONE
+
+> **COMPLETE — do not re-run.** SUPERSEDED IN FORM: the 3D pit was replaced by a 2D board (`BoardView`) with real 3D dice inside ViewportFrames, on operator instruction. Same requirements met, different presentation.
 
 **WHEN:** P-4A lands.
 **EXIT ARTIFACT:** A die visibly tumbles and resolves to the server's face.
@@ -380,7 +485,9 @@ Report files + line counts. State what I will see when I press Play.
 
 ---
 
-## P-4C — Forge panel, HUD, and menus
+## P-4C — Forge panel, HUD, and menus  ✅ DONE
+
+> **COMPLETE — do not re-run.** Built by a 7-worker swarm; 47 findings closed.
 
 **WHEN:** P-4B lands.
 **EXIT ARTIFACT:** The full interface; forge preview matches payout exactly.
@@ -435,7 +542,9 @@ Report files + line counts and a screen-by-screen description of what exists.
 
 ---
 
-## P-4D — Block 4 Gate 2 + first runtime smoke
+## P-4D — Block 4 Gate 2 + first runtime smoke  ✅ DONE
+
+> **COMPLETE — do not re-run.** Row 6 confirmed by the operator: max mass on face 6 never lands. FR-2 observed end to end.
 
 **WHEN:** P-4C lands.
 **YOU DO:** Press Play and walk the 11-row smoke table yourself. **This is the first time the game is playable.**
@@ -466,7 +575,9 @@ Verdict: MECHANICALLY-CLEAN or REJECTED-TO-GATE-1 with numbered defects.
 
 ---
 
-## P-4E — Block 4 Gate 3 + 4 audit
+## P-4E — Block 4 Gate 3 + 4 audit  ✅ DONE
+
+> **COMPLETE — do not re-run.** `docs/evidence/BLOCK4_CLOSEOUT.md`.
 
 **WHEN:** P-4D passes.
 **EXIT ARTIFACT:** Two verdicts with numeric counts; findings remediated.
@@ -494,7 +605,9 @@ Then remediate per P-3D's verify-first procedure.
 
 # 4. BLOCK 5 — MONETIZATION AND THE REMAINING SERVICES
 
-## P-5.0 — OPERATOR TASK: create the Robux assets
+## P-5.0 — OPERATOR TASK: create the Robux assets  ✅ DONE
+
+> **COMPLETE — do not re-run.** All 14 ids supplied 2026-08-09 and wired.
 
 **WHEN:** Before P-5A. **This is work for you in Studio, not a prompt for the AI.**
 **EXIT ARTIFACT:** A list of real numeric asset IDs.
@@ -525,7 +638,9 @@ Paste back as `Name = 123456789` pairs. Until then everything stays
 
 ---
 
-## P-5A — MonetizationService
+## P-5A — MonetizationService  ✅ DONE
+
+> **COMPLETE — do not re-run.** Delivered as `MonetisationCatalog` + `PurchaseService` at `14fe582`. NOTE: this prompt's scope did NOT include applying the pass effects, which is why P-5A2 exists.
 
 **WHEN:** Real asset IDs in hand.
 **EXIT ARTIFACT:** `MonetizationService` + UT-9 passing.
@@ -661,70 +776,6 @@ appear. Confirm the suite is green.
 
 ---
 
-## P-5B2 — Timed boosts
-
-**WHEN:** With or after P-5B. Together they unblock the three dead products.
-**EXIT ARTIFACT:** a boost that visibly expires, and the three products moving
-from `unavailable` to sellable.
-
-```
-Block 5 continues. Three developer products are live on the dashboard and
-CANNOT BE DELIVERED: 2x Luck Boost, 2x Offline Payout, Time Skip (24h). They are
-marked `unavailable = true` in MonetisationCatalog so no shop offers them, but
-they remain purchasable through Roblox's own store page -- a player who buys one
-is charged, gets nothing, and the platform retries forever.
-
-Build what they need:
-  * A timed boost system: a boost has a kind, a multiplier and an expiry stored
-    on the profile, survives a rejoin, and expires on server time (never client
-    time -- a client clock is an input, not a fact).
-  * Wire 2x Luck Boost and 2x Offline Payout to it, and Time Skip to the offline
-    accrual from P-5B.
-  * Then implement the Boost and TimeSkip branches in PurchaseService.applyGrant,
-    which currently refuse with `not_implemented_boosts`, and REMOVE the
-    `unavailable = true` marks.
-
-DO NOT remove an `unavailable` mark before its grant path actually works. The
-mark is the only thing standing between a player and being charged for nothing.
-
-VERIFY: buy-path simulated end to end -- grant applies, profile persists, boost
-expires on time, and a rejoin during the window still shows it active.
-```
-
----
-
-## P-5C2 — The twelve unhandled remotes
-
-**WHEN:** After P-5C.
-**EXIT ARTIFACT:** every declared remote either handled, or deleted from the
-declaration with a reason.
-
-```
-Block 5 continues. Remotes.luau declares 16 RemoteFunctions. FOUR have handlers:
-Roll, Forge, SetElement, SetShape. The other twelve are declared and bound to
-nothing:
-
-  BuyUpgrade, AddDieSlot, Ascend, BuyDiamondNode, SetAutoRoll, ClaimVault,
-  ClaimQuest, ClaimChest, DailySpin, RedeemCode, ClaimGroupReward, GetLeaderboard
-
-This is exactly the L-027 shape: a declared-but-unimplemented contract row reads
-identically to a working one, and it took three swarm workers to notice the last
-one. The client already tells the truth -- every unbacked control reads (SOON) --
-but the declaration does not.
-
-For each of the twelve: either implement the handler, or DELETE it from
-Remotes.luau with a one-line note saying why it is out of scope for V1. A
-declaration with no producer is a finding, not a placeholder.
-
-Note SetAutoRoll specifically: the operator owns an Auto-Roll gamepass, so this
-one is sold and must work.
-
-VERIFY: a producer-direction sweep -- for every name in FunctionName, show the
-line that registers a handler for it. No name may be unaccounted for.
-```
-
----
-
 ## P-5B — Offline vault and leaderboards
 
 **WHEN:** P-5A lands.
@@ -766,6 +817,38 @@ plus T-30 (which I added after an audit found the exploit described below).
 3. tests/Vault.test.luau (UT-11) and tests/Leaderboard.test.luau (UT-10).
 
 Report the assertion delta.
+```
+
+---
+
+## P-5B2 — Timed boosts
+
+**WHEN:** With or after P-5B. Together they unblock the three dead products.
+**EXIT ARTIFACT:** a boost that visibly expires, and the three products moving
+from `unavailable` to sellable.
+
+```
+Block 5 continues. Three developer products are live on the dashboard and
+CANNOT BE DELIVERED: 2x Luck Boost, 2x Offline Payout, Time Skip (24h). They are
+marked `unavailable = true` in MonetisationCatalog so no shop offers them, but
+they remain purchasable through Roblox's own store page -- a player who buys one
+is charged, gets nothing, and the platform retries forever.
+
+Build what they need:
+  * A timed boost system: a boost has a kind, a multiplier and an expiry stored
+    on the profile, survives a rejoin, and expires on server time (never client
+    time -- a client clock is an input, not a fact).
+  * Wire 2x Luck Boost and 2x Offline Payout to it, and Time Skip to the offline
+    accrual from P-5B.
+  * Then implement the Boost and TimeSkip branches in PurchaseService.applyGrant,
+    which currently refuse with `not_implemented_boosts`, and REMOVE the
+    `unavailable = true` marks.
+
+DO NOT remove an `unavailable` mark before its grant path actually works. The
+mark is the only thing standing between a player and being charged for nothing.
+
+VERIFY: buy-path simulated end to end -- grant applies, profile persists, boost
+expires on time, and a rejoin during the window still shows it active.
 ```
 
 ---
@@ -813,6 +896,38 @@ Execute BLOCK 5C. Read SRS FR-9 and FR-10.
    and why.
 
 Report the assertion delta.
+```
+
+---
+
+## P-5C2 — The twelve unhandled remotes
+
+**WHEN:** After P-5C.
+**EXIT ARTIFACT:** every declared remote either handled, or deleted from the
+declaration with a reason.
+
+```
+Block 5 continues. Remotes.luau declares 16 RemoteFunctions. FOUR have handlers:
+Roll, Forge, SetElement, SetShape. The other twelve are declared and bound to
+nothing:
+
+  BuyUpgrade, AddDieSlot, Ascend, BuyDiamondNode, SetAutoRoll, ClaimVault,
+  ClaimQuest, ClaimChest, DailySpin, RedeemCode, ClaimGroupReward, GetLeaderboard
+
+This is exactly the L-027 shape: a declared-but-unimplemented contract row reads
+identically to a working one, and it took three swarm workers to notice the last
+one. The client already tells the truth -- every unbacked control reads (SOON) --
+but the declaration does not.
+
+For each of the twelve: either implement the handler, or DELETE it from
+Remotes.luau with a one-line note saying why it is out of scope for V1. A
+declaration with no producer is a finding, not a placeholder.
+
+Note SetAutoRoll specifically: the operator owns an Auto-Roll gamepass, so this
+one is sold and must work.
+
+VERIFY: a producer-direction sweep -- for every name in FunctionName, show the
+line that registers a handler for it. No name may be unaccounted for.
 ```
 
 ---

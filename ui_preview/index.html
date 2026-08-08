@@ -3,115 +3,200 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Dice Forge - UI Preview</title>
+    <title>Dice Forge - Complete UI Preview</title>
     <link rel="stylesheet" href="style.css">
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 </head>
 <body>
-    <!-- Background Pit Simulation -->
+    <!-- Background Pit Simulation (DiceForgeBoard) -->
     <div class="bg-pit"></div>
 
     <!-- UI Overlay container -->
     <div class="ui-layer">
         
-        <!-- Top Left: Player Profile & Currency -->
-        <div class="panel top-left glass">
-            <div class="profile-header">
-                <div class="avatar"><i class="fa-solid fa-user-astronaut"></i></div>
-                <div class="player-info">
-                    <h2>Guest_1337</h2>
-                    <span class="rank">Rank: Grandmaster</span>
-                </div>
+        <!-- DiceForgeHUD: TopBar -->
+        <div class="hud-topbar glass">
+            <div class="currency cash"><i class="fa-solid fa-money-bill-wave"></i> <span>7.96K</span></div>
+            <div class="currency gems"><i class="fa-solid fa-gem"></i> <span>0</span></div>
+            <div class="like-goal tooltip" data-tooltip="3x CASH EVENT INACTIVE">
+                <i class="fa-solid fa-thumbs-up"></i> <span>LIKE GOAL: --</span>
+                <div class="goal-bar"><div class="goal-fill" style="width: 45%;"></div></div>
             </div>
-            <div class="currency cash">
-                <i class="fa-solid fa-money-bill-wave"></i>
-                <span class="amount">$ 14,500,000</span>
-            </div>
-            <div class="currency diamonds">
-                <i class="fa-solid fa-gem"></i>
-                <span class="amount">1,250</span>
-            </div>
+            <button class="top-btn"><i class="fa-solid fa-users"></i> GROUP</button>
+            <button class="top-btn"><i class="fa-solid fa-store"></i> SHOP</button>
         </div>
 
-        <!-- Top Right: Social & Global -->
-        <div class="top-right">
-            <button class="icon-btn glass tooltip" data-tooltip="Leaderboard">
-                <i class="fa-solid fa-trophy"></i>
-            </button>
-            <button class="icon-btn glass tooltip" data-tooltip="Quests">
-                <i class="fa-solid fa-scroll"></i>
-            </button>
-            <button class="icon-btn glass tooltip" data-tooltip="Promo Codes">
-                <i class="fa-solid fa-gift"></i>
-            </button>
+        <!-- DiceForgeHUD: StreakStrip -->
+        <div class="hud-streakstrip glass">
+            <div class="streak-stat"><span>STREAK</span><br><strong>0</strong></div>
+            <div class="streak-stat accent-orange"><span>MULT</span><br><strong>x1.00</strong></div>
+            <div class="streak-stat accent-red"><span>VOID</span><br><strong>19.7%</strong></div>
         </div>
 
-        <!-- Left Side: Streak Gauge -->
-        <div class="side-panel left glass">
-            <div class="streak-title">STREAK</div>
-            <div class="streak-multiplier">12x</div>
-            <div class="gauge-container">
-                <div class="gauge-fill"></div>
+        <!-- DiceForgeMenu: LeftSidebar -->
+        <div class="sidebar left">
+            <button class="side-btn glass accent-border active" onclick="toggleModal('forgeModal')"><i class="fa-solid fa-hammer"></i> FORGE</button>
+            <button class="side-btn glass"><i class="fa-solid fa-plus-square"></i> ADD SLOT</button>
+            <button class="side-btn glass"><i class="fa-solid fa-shapes"></i> SHAPE</button>
+            <button class="side-btn glass"><i class="fa-solid fa-gauge-high"></i> AUTO SPEED</button>
+            <button class="side-btn glass prestige-btn"><i class="fa-solid fa-arrow-up-right-dots"></i> ASCEND</button>
+        </div>
+
+        <!-- DiceForgeMenu: RightSidebar -->
+        <div class="sidebar right">
+            <button class="side-btn glass"><i class="fa-solid fa-trophy"></i> BOARDS</button>
+            <button class="side-btn glass" onclick="toggleModal('statsModal')"><i class="fa-solid fa-chart-simple"></i> STATS</button>
+            <button class="side-btn glass"><i class="fa-solid fa-scroll"></i> QUESTS</button>
+            <button class="side-btn glass" onclick="toggleModal('settingsModal')"><i class="fa-solid fa-gear"></i> SETTINGS</button>
+        </div>
+
+        <!-- DiceForgeHUD: BottomBar -->
+        <div class="hud-bottombar">
+            <div class="bottom-group left-group">
+                <button class="bottom-btn glass"><i class="fa-solid fa-box-open"></i> CHEST</button>
+                <button class="bottom-btn glass"><i class="fa-solid fa-dharmachakra"></i> SPIN</button>
             </div>
-            <div class="void-risk">Void Risk: 8%</div>
-        </div>
-
-        <!-- Right Side: Features -->
-        <div class="side-panel right">
-            <button class="feature-btn glass vault">
-                <i class="fa-solid fa-vault"></i>
-                <span>Offline Vault</span>
-                <div class="badge">Ready!</div>
-            </button>
-            <button class="feature-btn glass spin">
-                <i class="fa-solid fa-dharmachakra"></i>
-                <span>Daily Spin</span>
-            </button>
-            <button class="feature-btn glass prestige pulse-fx">
-                <i class="fa-solid fa-gem"></i>
-                <span>Ascension</span>
-            </button>
-        </div>
-
-        <!-- Bottom Center: Core Actions -->
-        <div class="bottom-center">
-            <div class="forge-container">
-                <button class="btn-action glass add-die">
-                    <i class="fa-solid fa-plus"></i><br>
-                    <span>$10k</span>
-                </button>
-                <button class="btn-forge">
-                    <span class="forge-text">FORGE</span>
-                    <i class="fa-solid fa-hammer"></i>
-                </button>
-                <div class="auto-roll glass">
-                    <span>Auto-Roll</span>
-                    <label class="switch">
-                        <input type="checkbox" checked>
-                        <span class="slider round"></span>
-                    </label>
-                </div>
+            
+            <div class="bottom-group right-group">
+                <button class="bottom-btn glass"><i class="fa-solid fa-robot"></i> AUTO</button>
+                <button class="roll-btn"><i class="fa-solid fa-dice"></i> ROLL</button>
             </div>
         </div>
 
-        <!-- Center: Floating Text & Dice Simulation -->
+        <!-- Center: Floating Text (DiceForgeFeedback) -->
         <div class="center-arena">
-            <div class="floating-text">
-                + $ 5,000,000
+            <div class="floating-payout">
+                + 1,450
+                <span class="spark s1">+</span>
+                <span class="spark s2">+</span>
             </div>
             <div class="dice-scene">
-                <!-- CSS 3D Cube to simulate a glowing die -->
-                <div class="cube">
-                    <div class="face front">6</div>
-                    <div class="face back">1</div>
-                    <div class="face right">4</div>
-                    <div class="face left">3</div>
-                    <div class="face top">5</div>
-                    <div class="face bottom">2</div>
+                <div class="cube"><div class="face front">6</div><div class="face back">1</div><div class="face right">4</div><div class="face left">3</div><div class="face top">5</div><div class="face bottom">2</div></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modals Layer (DiceForgeMenuOverlay & ForgePanel) -->
+    
+    <!-- FORGE PANEL -->
+    <div class="modal-overlay" id="forgeModal" style="display: none;">
+        <div class="modal glass forge-modal">
+            <div class="modal-header">
+                <h2><i class="fa-solid fa-hammer"></i> FORGE</h2>
+                <button class="close-btn" onclick="toggleModal('forgeModal')"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            
+            <div class="die-tabs">
+                <button class="tab active">DIE 1</button>
+                <button class="tab">DIE 2</button>
+                <button class="tab">DIE 3</button>
+            </div>
+
+            <div class="forge-content">
+                <div class="forge-main">
+                    <div class="face-table-header">
+                        <span>FACE</span><span>EL</span><span>MASS</span><span>VALUE</span><span>P(LAND)</span><span>ADJUST</span>
+                    </div>
+                    <div class="face-list">
+                        <!-- Example row -->
+                        <div class="face-row">
+                            <span class="f-num">F1</span>
+                            <span class="f-el">-</span>
+                            <span class="f-val">10</span>
+                            <span class="f-val">100</span>
+                            <span class="f-val">16.6%</span>
+                            <div class="f-actions">
+                                <button class="f-btn">-</button><button class="f-btn">+</button>
+                            </div>
+                        </div>
+                        <div class="face-row">
+                            <span class="f-num">F2</span><span class="f-el">-</span><span class="f-val">10</span><span class="f-val">100</span><span class="f-val">16.6%</span>
+                            <div class="f-actions"><button class="f-btn">-</button><button class="f-btn">+</button></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="forge-sidebar">
+                    <div class="stat-box"><span>BASE EV / ROLL</span><strong>--</strong></div>
+                    <div class="stat-box"><span>VOID PROBABILITY</span><strong>--</strong></div>
+                    <div class="stat-box"><span>MASS BUDGET</span><strong>--</strong></div>
+                    <div class="stat-box"><span>FORGE COST</span><strong>--</strong></div>
+                    
+                    <div class="element-picker">
+                        <h4>ELEMENT - FACE 1</h4>
+                        <div class="elem-grid">
+                            <button class="elem-btn active">None</button>
+                            <button class="elem-btn fire">Fire</button>
+                            <button class="elem-btn freeze">Freeze</button>
+                            <button class="elem-btn gold">Gold</button>
+                            <button class="elem-btn mult">Multiplier</button>
+                        </div>
+                    </div>
+                    
+                    <div class="shape-picker">
+                        <h4>SHAPE</h4>
+                        <div class="elem-grid">
+                            <button class="elem-btn">D4</button><button class="elem-btn active">D6</button>
+                            <button class="elem-btn">D8</button><button class="elem-btn">D12</button><button class="elem-btn">D20</button>
+                        </div>
+                    </div>
+
+                    <div class="action-grid">
+                        <button class="sys-btn">EVEN</button>
+                        <button class="sys-btn">STEP 1</button>
+                        <button class="sys-btn">REVERT</button>
+                        <button class="sys-btn commit-btn">FORGE</button>
+                    </div>
                 </div>
             </div>
         </div>
     </div>
+
+    <!-- STATS PANEL -->
+    <div class="modal-overlay" id="statsModal" style="display: none;">
+        <div class="modal glass small-modal">
+            <div class="modal-header">
+                <h2><i class="fa-solid fa-chart-simple"></i> STATISTICS</h2>
+                <button class="close-btn" onclick="toggleModal('statsModal')"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="stats-grid">
+                <div class="stat-item"><span>CASH</span><strong>--</strong></div>
+                <div class="stat-item"><span>GEMS</span><strong>--</strong></div>
+                <div class="stat-item"><span>DIAMONDS</span><strong>--</strong></div>
+                <div class="stat-item"><span>STREAK</span><strong>--</strong></div>
+                <div class="stat-item"><span>DIE SLOTS</span><strong>--</strong></div>
+                <div class="stat-item"><span>LIFETIME</span><strong>--</strong></div>
+                <div class="stat-item"><span>BEST ROLL</span><strong>--</strong></div>
+                <div class="stat-item"><span>ROLLS</span><strong>--</strong></div>
+                <div class="stat-item"><span>ASCENSIONS</span><strong>--</strong></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- SETTINGS PANEL -->
+    <div class="modal-overlay" id="settingsModal" style="display: none;">
+        <div class="modal glass small-modal">
+            <div class="modal-header">
+                <h2><i class="fa-solid fa-gear"></i> SETTINGS</h2>
+                <button class="close-btn" onclick="toggleModal('settingsModal')"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="settings-list">
+                <button class="setting-btn">PARTICLES <span>ON</span></button>
+                <button class="setting-btn">MOTION BLUR <span>ON</span></button>
+                <button class="setting-btn">SOUND FX <span>ON</span></button>
+                <button class="setting-btn">MUSIC <span>ON</span></button>
+                <button class="setting-btn accent-border">PROMO CODES</button>
+                <p class="settings-note">These apply for this session; saving them needs a server update.</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function toggleModal(id) {
+            const el = document.getElementById(id);
+            el.style.display = el.style.display === 'none' ? 'flex' : 'none';
+        }
+    </script>
 </body>
 </html>
