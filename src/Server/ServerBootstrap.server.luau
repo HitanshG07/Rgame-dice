@@ -78,6 +78,32 @@ PlayerProfile.init()
 -- joins early resolves its WaitForChild immediately instead of racing first use.
 Remotes.createAll()
 
+-- THE DICE SOLIDS. Generated ONCE, on the server, into ReplicatedStorage.
+--
+-- WHY THE SERVER AND NOT EACH CLIENT. Built here, the models replicate to every
+-- player automatically and the geometry is computed a single time for the whole
+-- server. Built per-client, each machine would spend the same work privately and
+-- two clients could in principle disagree about what a die looks like.
+--
+-- WHY AT BOOT AND NOT ON DEMAND. The renderer clones these into ViewportFrames
+-- the moment StateSync delivers a shape. Generating lazily would mean the first
+-- player to arrive sees empty tiles until the build finished -- and a die that
+-- is *absent* looks exactly like a die that is *broken*.
+--
+-- THE RENDERER TOLERATES THEIR ABSENCE ANYWAY. If this ever fails, tiles fall
+-- back to the flat numeral rather than rendering nothing, which is why this is
+-- wrapped: dice geometry is presentation, and no failure of it may stop a server
+-- that can still roll, credit and save.
+do
+	local ok, err = pcall(function()
+		local DiceMeshBuilder = require(ReplicatedStorage.Shared:WaitForChild("DiceMeshBuilder"))
+		DiceMeshBuilder.generateAllDice()
+	end)
+	if not ok then
+		warn("[Bootstrap] dice geometry generation failed; tiles will fall back to flat numerals: " .. tostring(err))
+	end
+end
+
 -- EVERY state change owes the client a snapshot, or the display silently drifts
 -- from the truth. Wrapping the handlers here rather than pushing from inside
 -- each service keeps that obligation in ONE place: a future handler added

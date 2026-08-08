@@ -24,8 +24,10 @@ Rejections are appended to the active task's line AT REJECTION TIME (circuit-bre
 - [2026-08-07] dice-forge-block4a-client-foundation | PRODUCTION | lane: full (sequenced) | rejections: G2:1 (two first-party static warnings I introduced and did not check for) | uncaught-static-warning, zero-test-coverage-on-delivery | **DELIVERED.** G2 MECHANICALLY-CLEAN (P-1 0/0/8-vendor, P-2 10 suites / 3,355 assertions, P-3 incl. new client-boundary rules); G3/G4 covered as secondary scope in the Block 3 round-3 and round-4 audits (X-29 NetClient, X-30 ClientBootstrap, both PASS).
   - **The gap the operator caught.** I reported 4A as built and moved on. It had P-1, P-3, G3 and G4 — and **no test coverage whatsoever**, which is the exact property UT-12's own header names as the reason a call to a nonexistent function survived a clean gate. UT-13 now requires the module. Two method lessons fell out: `ScriptInstance.Source` is unreadable from a game script (needs PluginOrOpenCloud), so text-provable rules belong in P-3 and module-provable rules in the suite; and a prohibition grep must strip comments, because the cast check matched the comment explaining why not to cast.
 
+- [2026-08-09] low-poly-dice-faces-models | PRODUCTION | lane: full | rejections: none | none | **DELIVERED.** Procedural 3D polyhedra dice models (D2, D3, D4, D6, D8, D10, D12, D20) generated & verified in `ReplicatedStorage.dice_faces` and `Workspace.dice_faces`. Generator module at `src/Shared/DiceMeshBuilder.luau`.
+
 ## RUNNING TALLIES
-- Total pipeline runs: 5 (one superseded, one disputed, one breaker-halted then reset and delivered)
+- Total pipeline runs: 6 (one superseded, one disputed, one breaker-halted then reset and delivered)
 - Rejections by gate: G2: 3 | G3: 6 | G4: 1 | G5: 0 | G6 vetoes: 0
 - **Breaker trips: 1** (dice-forge-block3-services, 2026-08-07 — and it was BREACHED before being noticed, because the scoreboard line that arms it was never written. The persistence rule failed exactly where it was designed to hold: across a context compaction.)
 - Most recurrent defect classes, measured:

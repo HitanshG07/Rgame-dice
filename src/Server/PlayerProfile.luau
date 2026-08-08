@@ -417,6 +417,40 @@ function PlayerProfile.hasPurchase(data: Profile, purchaseId: string): boolean
 	return data.PurchaseIds[purchaseId] ~= nil
 end
 
+-- Forces the player's profile to disk NOW and yields until the write completes.
+--
+-- WHY THIS EXISTS, AND WHY ONLY FOR RECEIPTS. Normal play does not need it:
+-- ProfileStore autosaves, and losing a few seconds of roll progress on a crash
+-- costs the player almost nothing. A PURCHASE is different. FR-12.4 requires
+-- `PurchaseGranted` to be returned only after the grant durably persists, because
+-- returning it is what tells Roblox to stop retrying and keep the money. Grant
+-- in memory, answer PurchaseGranted, crash before the autosave, and the player
+-- has paid for something they no longer own and the platform will never re-send.
+--
+-- So this is the ONLY sanctioned way to make a grant durable, and the receipt
+-- handler is the only caller that should need it. It YIELDS -- never call it
+-- from inside `mutate`, whose mutator is required to be synchronous.
+--
+-- Returns false when there is no active session to save, which the caller must
+-- treat as "not durable" and answer NotProcessedYet.
+function PlayerProfile.saveNow(player: Player): (boolean, string?)
+	local profile = active[player]
+	if not profile then
+		return false, "no_profile"
+	end
+	if not profile:IsActive() then
+		return false, "profile_released"
+	end
+
+	local ok, err = pcall(function()
+		profile:Save()
+	end)
+	if not ok then
+		return false, "save_failed: " .. tostring(err)
+	end
+	return true, nil
+end
+
 --------------------------------------------------------------------------------
 -- Migration and payload ceiling
 --------------------------------------------------------------------------------

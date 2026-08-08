@@ -45,7 +45,7 @@ local DICE_COLORS: { [string]: Color3 } = {
 	D20 = Color3.fromRGB(70, 130, 240),  -- Royal Blue
 }
 
--- Renders a single 3D triangle face using 2 Wedges
+-- Renders a single 3D triangle face using 2 Wedges with pB fixed as apex
 local function draw3DTriangle(
 	pA: Vector3,
 	pB: Vector3,
@@ -54,87 +54,154 @@ local function draw3DTriangle(
 	color: Color3,
 	thickness: number?
 ): { WedgePart }
-	local t = thickness or 0.04
-	local ab = (pB - pA).Magnitude
-	local ac = (pC - pA).Magnitude
-	local bc = (pC - pB).Magnitude
+	local t = 0.01 -- 0.01 prevents Z-fighting but keeps edges infinitely sharp
 
-	local vA, vB, vC = pA, pB, pC
-	if ab >= ac and ab >= bc then
-		vA, vB, vC = pC, pA, pB
-	elseif bc >= ab and bc >= ac then
-		vA, vB, vC = pA, pB, pC
-	else
-		vA, vB, vC = pB, pC, pA
+	local lenAB = (pB - pA).Magnitude
+	local lenBC = (pC - pB).Magnitude
+	local lenCA = (pA - pC).Magnitude
+
+	if lenAB >= lenBC and lenAB >= lenCA then
+		pA, pB, pC = pB, pC, pA
+	elseif lenBC >= lenAB and lenBC >= lenCA then
+		pA, pB, pC = pC, pA, pB
 	end
 
-	local edgeAC = (vC - vA)
+	local edgeAC = (pC - pA)
 	local lenAC = edgeAC.Magnitude
 	if lenAC < 0.0001 then
 		return {}
 	end
 	local dirAC = edgeAC.Unit
 
-	local vAB = vB - vA
+	local vAB = pB - pA
 	local projDist = vAB:Dot(dirAC)
-	local pD = vA + dirAC * projDist
+	local pD = pA + dirAC * projDist
 
-	local heightVec = vB - pD
+	local heightVec = pB - pD
 	local height = heightVec.Magnitude
 	if height < 0.0001 then
 		return {}
 	end
 	local dirHeight = heightVec.Unit
 
-	local lenAD = projDist
-	local lenDC = lenAC - projDist
+	local faceCenter = (pA + pB + pC) / 3
+	local rawNormal = (pB - pA):Cross(pC - pA).Unit
+	local normal = if rawNormal:Dot(faceCenter) < 0 then -rawNormal else rawNormal
+
 	local createdWedges: { WedgePart } = {}
 
-	-- Left wedge
-	if math.abs(lenAD) > 0.001 then
+	-- Wedge 1: right triangle pD -> pA
+	local lenAD = (pA - pD).Magnitude
+	if lenAD > 0.001 then
+		local dirA = (pA - pD).Unit
 		local w1 = Instance.new("WedgePart")
 		w1.Name = "FacetWedge"
 		w1.Anchored = true
 		w1.CanCollide = true
 		w1.Material = Enum.Material.SmoothPlastic
 		w1.Color = color
-		w1.Size = Vector3.new(t, height, math.abs(lenAD))
+		w1.Size = Vector3.new(t, height, lenAD)
 
-		local sign1 = if lenAD >= 0 then 1 else -1
-		local cf1 = CFrame.fromMatrix(
-			vA + dirAC * (lenAD / 2) + dirHeight * (height / 2),
-			dirHeight,
-			dirAC * sign1,
-			dirHeight:Cross(dirAC * sign1)
-		)
-		w1.CFrame = cf1
+		local up = dirHeight
+		local back = -dirA
+		local right = up:Cross(back).Unit
+		local pos1 = pD + dirA * (lenAD / 2) + dirHeight * (height / 2)
+		pos1 = pos1 - normal * (t / 2)
+
+		w1.CFrame = CFrame.fromMatrix(pos1, right, up, back)
 		w1.Parent = parent
 		table.insert(createdWedges, w1)
 	end
 
-	-- Right wedge
-	if math.abs(lenDC) > 0.001 then
+	-- Wedge 2: right triangle pD -> pC
+	local lenDC = (pC - pD).Magnitude
+	if lenDC > 0.001 then
+		local dirC = (pC - pD).Unit
 		local w2 = Instance.new("WedgePart")
 		w2.Name = "FacetWedge"
 		w2.Anchored = true
 		w2.CanCollide = true
 		w2.Material = Enum.Material.SmoothPlastic
 		w2.Color = color
-		w2.Size = Vector3.new(t, height, math.abs(lenDC))
+		w2.Size = Vector3.new(t, height, lenDC)
 
-		local sign2 = if lenDC >= 0 then 1 else -1
-		local cf2 = CFrame.fromMatrix(
-			vC - dirAC * (lenDC / 2) + dirHeight * (height / 2),
-			dirHeight,
-			-dirAC * sign2,
-			dirHeight:Cross(-dirAC * sign2)
-		)
-		w2.CFrame = cf2
+		local up = dirHeight
+		local back = -dirC
+		local right = up:Cross(back).Unit
+		local pos2 = pD + dirC * (lenDC / 2) + dirHeight * (height / 2)
+		pos2 = pos2 - normal * (t / 2)
+
+		w2.CFrame = CFrame.fromMatrix(pos2, right, up, back)
 		w2.Parent = parent
 		table.insert(createdWedges, w2)
 	end
 
 	return createdWedges
+end
+
+-- Renders a flat polygon face by triangulating symmetrically from centroid (pB = centroid)
+local function drawPolygonFace(
+	vertices: { Vector3 },
+	parent: Instance,
+	color: Color3,
+	thickness: number?
+): { WedgePart }
+	local k = #vertices
+	if k < 3 then
+		return {}
+	end
+
+	if k == 4 then
+		-- Use a single smooth Part for rectangles (D3 sides, D6 faces)
+		local v1 = vertices[2] - vertices[1]
+		local v2 = vertices[3] - vertices[2]
+		if math.abs(v1:Dot(v2)) < 0.001 then
+			local p = Instance.new("Part")
+			p.Name = "FacetPart"
+			p.Anchored = true
+			p.CanCollide = true
+			p.Material = Enum.Material.SmoothPlastic
+			p.Color = color
+			
+			local width = v1.Magnitude
+			local height = v2.Magnitude
+			local tPart = thickness or 0.01
+			p.Size = Vector3.new(width, height, tPart)
+			
+			local center = (vertices[1] + vertices[2] + vertices[3] + vertices[4]) / 4
+			local rawNormal = v1:Cross(v2).Unit
+			local normal = if rawNormal:Dot(center) < 0 then -rawNormal else rawNormal
+			
+			local right = v1.Unit
+			local up = -v2.Unit
+			local back = right:Cross(up).Unit
+			if back:Dot(normal) > 0 then
+				up = -up
+				back = right:Cross(up).Unit
+			end
+			
+			local pos = center - normal * (tPart / 2)
+			p.CFrame = CFrame.fromMatrix(pos, right, up, back)
+			p.Parent = parent
+			return { p }
+		end
+	end
+
+	local center = Vector3.zero
+	for _, v in ipairs(vertices) do
+		center += v
+	end
+	center /= k
+
+	local allWedges: { WedgePart } = {}
+	for i = 1, k do
+		local nxt = if i == k then 1 else i + 1
+		local wedges = draw3DTriangle(vertices[i], center, vertices[nxt], parent, color, thickness)
+		for _, w in ipairs(wedges) do
+			table.insert(allWedges, w)
+		end
+	end
+	return allWedges
 end
 
 -- Adds a clear face number GUI on the die face outward normal
@@ -151,7 +218,7 @@ local function addFaceNumberLabel(
 	labelPart.Transparency = 1
 	labelPart.CanCollide = false
 	labelPart.Anchored = true
-	labelPart.CFrame = CFrame.lookAt(faceCenter + faceNormal.Unit * 0.03, faceCenter + faceNormal.Unit * 2)
+	labelPart.CFrame = CFrame.lookAt(faceCenter, faceCenter + faceNormal.Unit * 2)
 	labelPart.Parent = parent
 
 	local gui = Instance.new("SurfaceGui")
@@ -185,8 +252,8 @@ local function buildD2(radius: number, color: Color3): Model
 	local sides = 16
 	local h = radius * 0.35
 
-	local topApex = Vector3.new(0, h, 0)
-	local bottomApex = Vector3.new(0, -h, 0)
+	local topApex = Vector3.new(0, h * 0.8, 0)
+	local bottomApex = Vector3.new(0, -h * 0.8, 0)
 	local ring: { Vector3 } = {}
 
 	for i = 1, sides do
@@ -199,14 +266,14 @@ local function buildD2(radius: number, color: Color3): Model
 		local nextIdx = if i == sides then 1 else i + 1
 		draw3DTriangle(topApex, ring[i], ring[nextIdx], model, color)
 	end
-	addFaceNumberLabel(Vector3.new(0, h * 0.8, 0), Vector3.new(0, 1, 0), "1", model, radius)
+	addFaceNumberLabel(Vector3.new(0, h * 0.8, 0), Vector3.new(0, 1, 0), "1", model, radius * 2.5)
 
 	-- Bottom face (Face 2)
 	for i = 1, sides do
 		local nextIdx = if i == sides then 1 else i + 1
 		draw3DTriangle(bottomApex, ring[nextIdx], ring[i], model, color)
 	end
-	addFaceNumberLabel(Vector3.new(0, -h * 0.8, 0), Vector3.new(0, -1, 0), "2", model, radius)
+	addFaceNumberLabel(Vector3.new(0, -h * 0.8, 0), Vector3.new(0, -1, 0), "2", model, radius * 2.5)
 
 	return model
 end
@@ -234,16 +301,15 @@ local function buildD3(radius: number, height: number, color: Color3): Model
 		local tA, tB = topRing[i], topRing[nxt]
 		local bA, bB = botRing[i], botRing[nxt]
 
-		draw3DTriangle(tA, bA, tB, model, color)
-		draw3DTriangle(tB, bA, bB, model, color)
+		drawPolygonFace({ tA, bA, bB, tB }, model, color)
 
 		-- Top & bot cap triangles
-		draw3DTriangle(topApex, tB, tA, model, color)
-		draw3DTriangle(botApex, bA, bB, model, color)
+		drawPolygonFace({ topApex, tB, tA }, model, color)
+		drawPolygonFace({ botApex, bA, bB }, model, color)
 
 		local sideCenter = (tA + tB + bA + bB) / 4
 		local sideNormal = Vector3.new(sideCenter.X, 0, sideCenter.Z).Unit
-		addFaceNumberLabel(sideCenter, sideNormal, tostring(i), model, radius)
+		addFaceNumberLabel(sideCenter, sideNormal, tostring(i), model, radius * 3.0)
 	end
 
 	return model
@@ -271,11 +337,14 @@ local function buildD4(scale: number, color: Color3): Model
 
 	for idx, f in ipairs(faces) do
 		local pA, pB, pC = vertices[f[1]], vertices[f[2]], vertices[f[3]]
-		draw3DTriangle(pA, pB, pC, model, color)
+		drawPolygonFace({ pA, pB, pC }, model, color, 0.08)
 
 		local center = (pA + pB + pC) / 3
 		local normal = (pB - pA):Cross(pC - pA).Unit
-		addFaceNumberLabel(center, normal, tostring(idx), model, scale * 1.5)
+		if normal:Dot(center) < 0 then
+			normal = -normal
+		end
+		addFaceNumberLabel(center, normal, tostring(idx), model, scale * 2.5)
 	end
 
 	return model
@@ -306,10 +375,8 @@ local function buildD6(scale: number, color: Color3): Model
 		local p3 = spec.center - u * s - v * s
 		local p4 = spec.center + u * s - v * s
 
-		draw3DTriangle(p1, p2, p3, model, color)
-		draw3DTriangle(p1, p3, p4, model, color)
-
-		addFaceNumberLabel(spec.center, spec.normal, spec.name, model, scale * 2)
+		drawPolygonFace({ p1, p2, p3, p4 }, model, color, 0.20)
+		addFaceNumberLabel(spec.center, spec.normal, spec.name, model, scale * 3.0)
 	end
 
 	return model
@@ -330,7 +397,6 @@ local function buildD8(scale: number, color: Color3): Model
 		Vector3.new(0, 0, -s),
 	}
 
-	-- 4 top faces, 4 bottom faces
 	local faces = {}
 	for i = 1, 4 do
 		local nxt = if i == 4 then 1 else i + 1
@@ -340,10 +406,13 @@ local function buildD8(scale: number, color: Color3): Model
 
 	for idx, tri in ipairs(faces) do
 		local pA, pB, pC = tri[1], tri[2], tri[3]
-		draw3DTriangle(pA, pB, pC, model, color)
+		drawPolygonFace({ pA, pB, pC }, model, color, 0.10)
 
 		local center = (pA + pB + pC) / 3
 		local normal = (pB - pA):Cross(pC - pA).Unit
+		if normal:Dot(center) < 0 then
+			normal = -normal
+		end
 		addFaceNumberLabel(center, normal, tostring(idx), model, scale * 1.5)
 	end
 
@@ -354,7 +423,6 @@ end
 local function buildD10(scale: number, color: Color3): Model
 	local model = Instance.new("Model")
 	model.Name = "D10"
-
 	local r = scale
 	local hApex = scale * 1.35
 	local hRing = scale * 0.45
@@ -373,34 +441,49 @@ local function buildD10(scale: number, color: Color3): Model
 	end
 
 	local faceCount = 0
-	-- 5 top kites
 	for i = 1, 5 do
 		faceCount += 1
 		local nxt = if i == 5 then 1 else i + 1
 		local t1, t2 = topRing[i], topRing[nxt]
 		local b1 = botRing[i]
 
-		draw3DTriangle(topApex, t1, b1, model, color)
-		draw3DTriangle(topApex, b1, t2, model, color)
+		-- Draw 2 triangles along the SHORT diagonal for a convex ridge
+		draw3DTriangle(topApex, t1, t2, model, color)
+		draw3DTriangle(b1, t2, t1, model, color)
 
-		local center = (topApex + t1 + t2 + b1) / 4
-		local normal = (t1 - topApex):Cross(b1 - topApex).Unit
-		addFaceNumberLabel(center, normal, tostring(faceCount), model, scale * 1.5)
+		local n1 = (t1 - topApex):Cross(t2 - topApex).Unit
+		local n2 = (t2 - b1):Cross(t1 - b1).Unit
+		local avgNormal = (n1 + n2).Unit
+		
+		-- Center is the highest point of the ridge
+		local center = (t1 + t2) / 2
+		if avgNormal:Dot(center) < 0 then avgNormal = -avgNormal end
+
+		-- Pass exact center of the ridge to avoid floating
+		addFaceNumberLabel(center, avgNormal, tostring(faceCount * 2 - 1), model, scale * 1.6)
 	end
 
-	-- 5 bottom kites
+	faceCount = 0
 	for i = 1, 5 do
 		faceCount += 1
-		local prv = if i == 1 then 5 else i - 1
-		local b1, b2 = botRing[prv], botRing[i]
-		local t1 = topRing[i]
+		local nxt = if i == 5 then 1 else i + 1
+		local b1, b2 = botRing[i], botRing[nxt]
+		local t1 = topRing[nxt]
 
-		draw3DTriangle(botApex, b2, t1, model, color)
-		draw3DTriangle(botApex, t1, b1, model, color)
+		-- Draw 2 triangles along the SHORT diagonal for a convex ridge
+		draw3DTriangle(botApex, b2, b1, model, color)
+		draw3DTriangle(t1, b1, b2, model, color)
 
-		local center = (botApex + b1 + b2 + t1) / 4
-		local normal = (b2 - botApex):Cross(t1 - botApex).Unit
-		addFaceNumberLabel(center, normal, tostring(faceCount), model, scale * 1.5)
+		local n1 = (b2 - botApex):Cross(b1 - botApex).Unit
+		local n2 = (b1 - t1):Cross(b2 - t1).Unit
+		local avgNormal = (n1 + n2).Unit
+		
+		-- Center is the highest point of the ridge
+		local center = (b1 + b2) / 2
+		if avgNormal:Dot(center) < 0 then avgNormal = -avgNormal end
+
+		-- Pass exact center of the ridge to avoid floating
+		addFaceNumberLabel(center, avgNormal, tostring(faceCount * 2), model, scale * 1.6)
 	end
 
 	return model
@@ -464,11 +547,7 @@ local function buildD12(scale: number, color: Color3): Model
 				return angA < angB
 			end)
 
-			for f = 1, 5 do
-				local nxt = if f == 5 then 1 else f + 1
-				draw3DTriangle(center, faceVerts[f], faceVerts[nxt], model, color)
-			end
-
+			drawPolygonFace(faceVerts, model, color)
 			addFaceNumberLabel(center, normal, tostring(idx), model, scale * 1.5)
 		end
 	end
@@ -504,10 +583,13 @@ local function buildD20(scale: number, color: Color3): Model
 
 	for idx, f in ipairs(tris) do
 		local pA, pB, pC = verts[f[1]], verts[f[2]], verts[f[3]]
-		draw3DTriangle(pA, pB, pC, model, color)
+		drawPolygonFace({ pA, pB, pC }, model, color)
 
 		local center = (pA + pB + pC) / 3
 		local normal = (pB - pA):Cross(pC - pA).Unit
+		if normal:Dot(center) < 0 then
+			normal = -normal
+		end
 		addFaceNumberLabel(center, normal, tostring(idx), model, scale * 1.5)
 	end
 
@@ -585,16 +667,40 @@ local function anchorPivot(model: Model): ()
 	model.PrimaryPart = pivot
 end
 
--- Scales every part about the model's centre so the bounding sphere matches
--- TARGET_EXTENT. Sizes and offsets both scale, so the solid keeps its shape.
+-- Scales every part about the model's centre so the solid's true corner-to-corner
+-- span matches TARGET_EXTENT. Sizes and offsets both scale, so shape is kept.
+--
+-- MEASURED BY HAND RATHER THAN VIA `GetBoundingBox`, and that is not a
+-- preference. `GetBoundingBox` returns an AXIS-ALIGNED box around every part
+-- INCLUDING the flat numeral plates, which sit slightly proud of the faces they
+-- label. On the D6 it reported 6.00 studs for a solid whose facets actually span
+-- 1.73 -- a 3.5x overstatement -- so normalising against it shrank every die to
+-- roughly a quarter of its intended size. The dice rendered as a thin cross of
+-- edge-on plates, and nothing was wrong with the renderer at all.
+--
+-- The honest measure is the furthest any part's own CORNER reaches from the
+-- centre, which is what a viewer actually sees.
+local function trueExtent(model: Model, centre: Vector3): number
+	local radius = 0
+	for _, d in ipairs(model:GetDescendants()) do
+		if d:IsA("BasePart") and d.Name ~= "Pivot" then
+			local r = (d.Position - centre).Magnitude + d.Size.Magnitude * 0.5
+			if r > radius then
+				radius = r
+			end
+		end
+	end
+	return radius * 2
+end
+
 local function normaliseScale(model: Model): ()
-	local cf, size = model:GetBoundingBox()
-	local extent = size.Magnitude
+	local cf = model:GetBoundingBox()
+	local centre = cf.Position
+	local extent = trueExtent(model, centre)
 	if extent < 1e-4 then
 		return
 	end
 	local k = TARGET_EXTENT / extent
-	local centre = cf.Position
 
 	for _, d in ipairs(model:GetDescendants()) do
 		if d:IsA("BasePart") then
