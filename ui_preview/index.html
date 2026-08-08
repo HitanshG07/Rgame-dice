@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dice Forge - UI Preview</title>
+    <link rel="stylesheet" href="style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+    <!-- Background Pit Simulation -->
+    <div class="bg-pit"></div>
+
+    <!-- UI Overlay container -->
+    <div class="ui-layer">
+        
+        <!-- Top Left: Player Profile & Currency -->
+        <div class="panel top-left glass">
+            <div class="profile-header">
+                <div class="avatar"><i class="fa-solid fa-user-astronaut"></i></div>
+                <div class="player-info">
+                    <h2>Guest_1337</h2>
+                    <span class="rank">Rank: Grandmaster</span>
+                </div>
+            </div>
+            <div class="currency cash">
+                <i class="fa-solid fa-money-bill-wave"></i>
+                <span class="amount">$ 14,500,000</span>
+            </div>
+            <div class="currency diamonds">
+                <i class="fa-solid fa-gem"></i>
+                <span class="amount">1,250</span>
+            </div>
+        </div>
+
+        <!-- Top Right: Social & Global -->
+        <div class="top-right">
+            <button class="icon-btn glass tooltip" data-tooltip="Leaderboard">
+                <i class="fa-solid fa-trophy"></i>
+            </button>
+            <button class="icon-btn glass tooltip" data-tooltip="Quests">
+                <i class="fa-solid fa-scroll"></i>
+            </button>
+            <button class="icon-btn glass tooltip" data-tooltip="Promo Codes">
+                <i class="fa-solid fa-gift"></i>
+            </button>
+        </div>
+
+        <!-- Left Side: Streak Gauge -->
+        <div class="side-panel left glass">
+            <div class="streak-title">STREAK</div>
+            <div class="streak-multiplier">12x</div>
+            <div class="gauge-container">
+                <div class="gauge-fill"></div>
+            </div>
+            <div class="void-risk">Void Risk: 8%</div>
+        </div>
+
+        <!-- Right Side: Features -->
+        <div class="side-panel right">
+            <button class="feature-btn glass vault">
+                <i class="fa-solid fa-vault"></i>
+                <span>Offline Vault</span>
+                <div class="badge">Ready!</div>
+            </button>
+            <button class="feature-btn glass spin">
+                <i class="fa-solid fa-dharmachakra"></i>
+                <span>Daily Spin</span>
+            </button>
+            <button class="feature-btn glass prestige pulse-fx">
+                <i class="fa-solid fa-gem"></i>
+                <span>Ascension</span>
+            </button>
+        </div>
+
+        <!-- Bottom Center: Core Actions -->
+        <div class="bottom-center">
+            <div class="forge-container">
+                <button class="btn-action glass add-die">
+                    <i class="fa-solid fa-plus"></i><br>
+                    <span>$10k</span>
+                </button>
+                <button class="btn-forge">
+                    <span class="forge-text">FORGE</span>
+                    <i class="fa-solid fa-hammer"></i>
+                </button>
+                <div class="auto-roll glass">
+                    <span>Auto-Roll</span>
+                    <label class="switch">
+                        <input type="checkbox" checked>
+                        <span class="slider round"></span>
+                    </label>
+                </div>
+            </div>
+        </div>
+
+        <!-- Center: Floating Text & Dice Simulation -->
+        <div class="center-arena">
+            <div class="floating-text">
+                + $ 5,000,000
+            </div>
+            <div class="dice-scene">
+                <!-- CSS 3D Cube to simulate a glowing die -->
+                <div class="cube">
+                    <div class="face front">6</div>
+                    <div class="face back">1</div>
+                    <div class="face right">4</div>
+                    <div class="face left">3</div>
+                    <div class="face top">5</div>
+                    <div class="face bottom">2</div>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

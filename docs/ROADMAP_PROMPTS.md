@@ -29,40 +29,69 @@ the prompt text.
   complete without the exit artifact, it has not completed the block.
 - **A green test suite at an unchanged assertion count is not a pass** (ledger
   L-020). Every construction prompt below demands the new count explicitly.
-- **Asset IDs stay `DUMMY_ID_*`** until §5.0 hands over real ones. Anything else
-  is a scope violation.
+- **Asset IDs are now REAL** (all 14 supplied 2026-08-09 and wired into
+  `MonetisationCatalog`). Audio cues remain `DUMMY_ID_*` and must stay that way
+  until the operator supplies sound ids. An item's id existing does **not** mean
+  the game can honour it — gate on `isSellable`, never `isResolved`.
 
 ---
 
 ## 1. MASTER SEQUENCE — WHICH PROMPT, WHEN
 
-| Order | Prompt | Run it when | Blocking on you? |
+**Last reconciled against the repository: 2026-08-09, head `14fe582`.** Every
+DONE row below was verified by running the game, not by reading a report.
+
+| Order | Prompt | Status | Blocking on you? |
 |---|---|---|---|
-| 1 | **P-3A** Block 3 construction | Now. Blocks 1–2 are complete through Gate 4. | No |
-| 2 | **P-3B** Block 3 Gate 2 verification | P-3A reports code written | Yes — you press Play |
-| 3 | **P-3C** Block 3 Gate 3+4 audit | P-3B returns a clean suite | Yes — you run the auditor |
-| 4 | **P-3D** Audit remediation | P-3C returns any finding ≥ 1 | No |
-| 5 | **P-4A** Client foundation | Block 3 signed off | No |
-| 6 | **P-4B** Arena + dice renderer | P-4A lands | No |
-| 7 | **P-4C** Forge panel + HUD + menus | P-4B lands | No |
-| 8 | **P-4D** Block 4 Gate 2 + P-4 smoke | P-4C lands | **Yes — first playable** |
-| 9 | **P-4E** Block 4 Gate 3+4 audit | P-4D smoke passes | Yes |
-| 10 | **P-5.0** Robux asset creation | Before P-5A. **This one is for YOU, not the AI.** | **Yes — Studio work** |
-| 11 | **P-5A** MonetizationService | Real asset IDs in hand | No |
-| 12 | **P-5B** Offline vault + Leaderboards | P-5A lands | No |
-| 13 | **P-5C** Progression + Ascension | P-5B lands | No |
-| 14 | **P-5D** Block 5 Gate 2 (UT-9/10/11) | P-5C lands | Yes |
-| 15 | **P-5E** Block 5 Gate 3+4 audit | P-5D clean | Yes |
-| 16 | **P-6A** Integration suites IT-1…IT-5 | Block 5 signed off | No |
-| 17 | **P-6B** Balance tuning pass | P-6A clean | No |
-| 18 | **P-6C** Performance pass (NFR-1/2) | P-6B lands | Yes — MicroProfiler |
-| 19 | **P-6D** Full P-1…P-4 pre-launch sweep | P-6C lands | Yes |
-| 20 | **P-6E** Final cross-vendor security audit | P-6D clean | Yes |
-| 21 | **P-7A** Launch readiness + publish | P-6E returns SECURE | **Yes — you publish** |
-| 22 | **P-7B** Post-launch monitoring setup | Published | No |
+| 1 | **P-3A** Block 3 construction | ✅ DONE | — |
+| 2 | **P-3B** Block 3 Gate 2 verification | ✅ DONE | — |
+| 3 | **P-3C** Block 3 Gate 3+4 audit | ✅ DONE — 5 rounds, 12 findings | — |
+| 4 | **P-3D** Audit remediation | ✅ DONE | — |
+| 5 | **P-4A** Client foundation | ✅ DONE | — |
+| 6 | **P-4B** Board + dice renderer | ✅ DONE — 2D board, 3D dice in ViewportFrames | — |
+| 7 | **P-4C** Forge panel + HUD + menus | ✅ DONE — 6,528 lines, 10 modules | — |
+| 8 | **P-4D** Block 4 Gate 2 + P-4 smoke | ✅ DONE — row 6 confirmed by operator | — |
+| 9 | **P-4E** Block 4 Gate 3+4 audit | ✅ DONE — `BLOCK4_CLOSEOUT.md` | — |
+| 10 | **P-5.0** Robux asset creation | ✅ DONE — all 14 ids supplied | — |
+| 11 | **P-5A** Monetisation backend | ✅ DONE — receipts, entitlements, catalog | — |
+| **12** | **P-5A2** Apply the pass effects | **⬅ NEXT. Passes are sellable and do nothing.** | No |
+| 13 | **P-5A3** Shop UI | After P-5A2 | No |
+| 14 | **P-5B** Offline vault + Leaderboards | After P-5A3. Unblocks 3 dead products. | No |
+| 15 | **P-5B2** Timed boosts | With or after P-5B | No |
+| 16 | **P-5C** Progression + Ascension | After P-5B | No |
+| 17 | **P-5C2** The 12 unhandled remotes | After P-5C | No |
+| 18 | **P-5D** Block 5 Gate 2 | After P-5C2 | Yes |
+| 19 | **P-5E** Block 5 Gate 3+4 audit | P-5D clean | Yes |
+| 20 | **P-6A** Integration suites IT-1…IT-5 | Block 5 signed off | No |
+| 21 | **P-6B** Balance tuning pass | P-6A clean | No |
+| 22 | **P-6C** Performance pass (NFR-1/2) | P-6B lands | Yes — MicroProfiler |
+| 23 | **P-6D** Full P-1…P-4 pre-launch sweep | P-6C lands | Yes |
+| 24 | **P-6E** Final cross-vendor security audit | P-6D clean | Yes |
+| 25 | **P-7A** Launch readiness + publish | P-6E returns SECURE | **Yes — you publish** |
+| 26 | **P-7B** Post-launch monitoring setup | Published | No |
 
 **Run any time, out of band:** §7 standing prompts (handoff refresh, commit,
 ledger harvest) and §8 contingencies (Rojo desync, MCP loss, red-flag recovery).
+
+---
+
+### ⚠ TWO LIVE HAZARDS — read before running anything
+
+**1. Four gamepasses are sellable right now and have no effect.**
+`PurchaseService` implements `cashMultiplier`, `bonusDieSlots`,
+`forgeCostMultiplier`, `hasStreakShield` and `hasAutoRoll` correctly — and
+**nothing calls any of them** (verified: zero callers outside their own module).
+A player who buys 2x Cash today gets 1x. **P-5A2 closes this and should be run
+before anyone can reach the store page.**
+
+**2. Three developer products cannot be delivered.**
+2x Luck Boost, 2x Offline Payout and Time Skip (24h) need timed boosts and
+offline accrual — neither system exists. `applyGrant` refuses them, so the
+receipt answers `NotProcessedYet` and Roblox retries forever while the player has
+paid. They are marked `unavailable` so no shop UI will offer them, **but they
+remain purchasable through Roblox's own experience store page.** Either disable
+those three on the dashboard until P-5B/P-5B2 land, or accept the exposure
+knowingly.
 
 ---
 
@@ -540,6 +569,158 @@ Then write tests/Receipt.test.luau (UT-9) per TEST_PLAN §4 — using Fakes.luau
 never a live MarketplaceService.
 
 Report the new assertion count delta and confirm the ProcessReceipt grep = 1.
+```
+
+---
+
+## P-5A2 — Apply the pass effects  ⬅ RUN THIS NEXT
+
+**WHEN:** Now. The monetisation backend landed at `14fe582`.
+**WHY IT IS URGENT:** four gamepasses are sellable and have no effect.
+**EXIT ARTIFACT:** a live test showing each pass changing behaviour, plus a grep
+proving every entitlement function has at least one caller.
+
+```
+Block 5 continues. The monetisation backend is complete and committed at
+14fe582: MonetisationCatalog holds all 14 real asset ids, PurchaseService owns
+the place's single ProcessReceipt assignment, entitlements resolve at join into
+a cache, and the suite is green at 3,370 assertions.
+
+THE PROBLEM: PurchaseService exposes cashMultiplier, bonusDieSlots,
+forgeCostMultiplier, hasStreakShield and hasAutoRoll -- all implemented, all
+returning correct values -- and NOTHING CALLS ANY OF THEM. Verified: zero
+callers outside PurchaseService itself. A player who buys 2x Cash gets 1x.
+
+Wire each entitlement into the system that owes it:
+
+  cashMultiplier      -> EconomyService, on every cash credit from a roll.
+                         Must NOT apply to forge refunds or other credits, or a
+                         player could launder the multiplier through the forge.
+  bonusDieSlots       -> wherever the board's die count is resolved, added on
+                         top of the profile's earned slots and CLAMPED to the
+                         FR-1.1 ceiling of 7.
+  forgeCostMultiplier -> ForgeService.computeForgeCost, applied to the final
+                         cost. Forging stays ZERO-SUM (FR-3): this changes what
+                         the re-forge COSTS, never how much mass moves.
+  hasStreakShield     -> RollService, where a Void face breaks the streak.
+  hasAutoRoll         -> gates the SetAutoRoll handler when it exists; for now,
+                         make the client's AUTO button reflect real ownership
+                         instead of reading (SOON).
+
+CONSTRAINTS:
+  * NFR-5 -- no multiplier, price or reward figure may cross the wire. The
+    server applies the effect and StateSync reports the resulting balance.
+  * FR-12.7 -- no purchase may confer an economic capability the game does not
+    also make reachable through play. If wiring one would break that, say so
+    and stop rather than shipping it.
+  * A pass whose owner cannot be determined must behave as NOT OWNED. The
+    ownership cache already fails closed; do not add a path that assumes
+    ownership on lookup failure.
+
+VERIFY, and do not report done without this:
+  1. `grep` each of the five function names and show at least one caller
+     outside PurchaseService.
+  2. In Studio, inject ownership for a test player and demonstrate each effect
+     changing a real number -- a roll paying double, a forge costing less, a
+     Void face not breaking the streak. Numbers before and after.
+  3. Suite green with its new assertion count stated.
+```
+
+---
+
+## P-5A3 — The shop UI
+
+**WHEN:** After P-5A2. Do not build a shop for passes that do nothing.
+**EXIT ARTIFACT:** a screenshot of the shop rendering all sellable items, with
+the three unavailable products absent.
+
+```
+Block 5 continues. All 14 items are wired server-side and completely
+unreachable: SHOP is still a (SOON) button. Build the shop surface.
+
+REQUIREMENTS:
+  * Gate every entry on MonetisationCatalog.isSellable, NOT isResolved.
+    isResolved says the asset exists; isSellable says this build can actually
+    honour it. Three products are deliberately unsellable because the systems
+    that grant them do not exist -- offering one would charge a player for
+    nothing.
+  * Do NOT display prices from the catalog. There are none, on purpose. Read
+    the price from the platform (MarketplaceService product info) or show no
+    price. A hardcoded price is a number the game asserts and the dashboard
+    contradicts.
+  * Owned passes must render as owned, from the entitlement cache.
+  * Follow UITheme. No new colours, no new panel builders.
+  * FR-13.7: no overlap, Scale-based sizing only, 320px through 4K.
+  * FR-12.5: the Starter Bundle timer is GENUINELY once-only. If you render a
+    countdown it must reflect real remaining time and, once expired, the offer
+    is permanently gone. No resets, no re-offers, no manufactured urgency.
+
+VERIFY: screenshot the shop open. Confirm the three unavailable products do not
+appear. Confirm the suite is green.
+```
+
+---
+
+## P-5B2 — Timed boosts
+
+**WHEN:** With or after P-5B. Together they unblock the three dead products.
+**EXIT ARTIFACT:** a boost that visibly expires, and the three products moving
+from `unavailable` to sellable.
+
+```
+Block 5 continues. Three developer products are live on the dashboard and
+CANNOT BE DELIVERED: 2x Luck Boost, 2x Offline Payout, Time Skip (24h). They are
+marked `unavailable = true` in MonetisationCatalog so no shop offers them, but
+they remain purchasable through Roblox's own store page -- a player who buys one
+is charged, gets nothing, and the platform retries forever.
+
+Build what they need:
+  * A timed boost system: a boost has a kind, a multiplier and an expiry stored
+    on the profile, survives a rejoin, and expires on server time (never client
+    time -- a client clock is an input, not a fact).
+  * Wire 2x Luck Boost and 2x Offline Payout to it, and Time Skip to the offline
+    accrual from P-5B.
+  * Then implement the Boost and TimeSkip branches in PurchaseService.applyGrant,
+    which currently refuse with `not_implemented_boosts`, and REMOVE the
+    `unavailable = true` marks.
+
+DO NOT remove an `unavailable` mark before its grant path actually works. The
+mark is the only thing standing between a player and being charged for nothing.
+
+VERIFY: buy-path simulated end to end -- grant applies, profile persists, boost
+expires on time, and a rejoin during the window still shows it active.
+```
+
+---
+
+## P-5C2 — The twelve unhandled remotes
+
+**WHEN:** After P-5C.
+**EXIT ARTIFACT:** every declared remote either handled, or deleted from the
+declaration with a reason.
+
+```
+Block 5 continues. Remotes.luau declares 16 RemoteFunctions. FOUR have handlers:
+Roll, Forge, SetElement, SetShape. The other twelve are declared and bound to
+nothing:
+
+  BuyUpgrade, AddDieSlot, Ascend, BuyDiamondNode, SetAutoRoll, ClaimVault,
+  ClaimQuest, ClaimChest, DailySpin, RedeemCode, ClaimGroupReward, GetLeaderboard
+
+This is exactly the L-027 shape: a declared-but-unimplemented contract row reads
+identically to a working one, and it took three swarm workers to notice the last
+one. The client already tells the truth -- every unbacked control reads (SOON) --
+but the declaration does not.
+
+For each of the twelve: either implement the handler, or DELETE it from
+Remotes.luau with a one-line note saying why it is out of scope for V1. A
+declaration with no producer is a finding, not a placeholder.
+
+Note SetAutoRoll specifically: the operator owns an Auto-Roll gamepass, so this
+one is sold and must work.
+
+VERIFY: a producer-direction sweep -- for every name in FunctionName, show the
+line that registers a handler for it. No name may be unaccounted for.
 ```
 
 ---
