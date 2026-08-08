@@ -67,7 +67,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Client = script.Parent
 local UITheme = require(Client:WaitForChild("UITheme"))
-local ArenaView = require(Client:WaitForChild("ArenaView"))
+local BoardView = require(Client:WaitForChild("BoardView"))
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Format = require(Shared:WaitForChild("Format"))
@@ -103,8 +103,15 @@ local GHOST_TRANSPARENCY = 0.55
 local SPARK_BASE_X = 0.35
 local SPARK_BASE_Y = 0.2
 
--- Where the text is anchored in the world: above the middle of the pit.
-local ANCHOR_LIFT = 3.5
+-- How far ABOVE the board's centre payout text starts its rise, so it reads as
+-- coming off the dice rather than out from behind them.
+--
+-- UNITS CHANGED WHEN THE BOARD WENT FLAT. This was 3.5 STUDS, lifted in world
+-- space before being projected through the camera. The board is now a ScreenGui
+-- and the anchor is composed in screen scale, where 3.5 means three and a half
+-- SCREEN HEIGHTS -- the text would be clamped to the top edge on every payout
+-- and never seen to move. A fifteenth of the screen is the flat equivalent.
+local ANCHOR_LIFT = 0.065
 
 --------------------------------------------------------------------------------
 -- Types and state
@@ -255,25 +262,28 @@ local function acquire(): Item
 end
 
 --------------------------------------------------------------------------------
--- The anchor point, projected from the world into screen scale.
+-- The anchor point: where payout text floats up from.
 --
--- Computed once per payout, not per frame: the camera is fixed while the text
--- is on screen, and projecting every frame would be per-frame work for an
--- answer that does not change.
+-- THIS USED TO BE A WORLD-TO-SCREEN PROJECTION. The 3D pit had a camera, so the
+-- anchor was the pit's centre lifted a few studs and projected through the
+-- camera's viewport, with fallbacks for a missing camera and for a zero-sized
+-- viewport during startup or a resize.
+--
+-- The board is now a ScreenGui and its centre is ALREADY screen scale, so the
+-- camera, the projection, the viewport division and both failure modes are gone
+-- rather than ported. There is nothing left that can fail here.
 --------------------------------------------------------------------------------
 
 local function anchorInScreenScale(): (number, number)
-	local camera = ArenaView.getCamera()
-	if camera == nil then
-		return 0.5, 0.45
-	end
-	local viewport = camera.ViewportSize
-	if viewport.X <= 0 or viewport.Y <= 0 then
-		return 0.5, 0.45
-	end
-	local world = ArenaView.getCenter() + Vector3.new(0, ANCHOR_LIFT, 0)
-	local screen = camera:WorldToViewportPoint(world)
-	return math.clamp(screen.X / viewport.X, 0.1, 0.9), math.clamp(screen.Y / viewport.Y, 0.1, 0.9)
+	-- BoardView reports the board's centre in its own interior scale; the tray
+	-- occupies a known rectangle of the screen, so the two compose into absolute
+	-- screen scale. Lifted slightly so text rises from ABOVE the dice rather
+	-- than out from behind them.
+	local bx, by, bw, bh = BoardView.getRect()
+	local centre = BoardView.getCenter()
+	local x = bx + centre.X.Scale * bw
+	local y = by + centre.Y.Scale * bh - ANCHOR_LIFT
+	return math.clamp(x, 0.1, 0.9), math.clamp(y, 0.1, 0.9)
 end
 
 --------------------------------------------------------------------------------

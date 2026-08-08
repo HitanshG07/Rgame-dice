@@ -88,7 +88,7 @@ local function run(): (boolean, string?, number)
 	-- init. Work needing a player belongs in init(), which this suite never calls.
 	local VIEW_MODULES: { string } = {
 		"UITheme",
-		"ArenaView",
+		"BoardView",
 		"DiceRenderer",
 		"FeedbackFX",
 		"HUD",
@@ -142,7 +142,7 @@ local function run(): (boolean, string?, number)
 	-- without one. Not every module needs shutdown -- but one that connects to a
 	-- signal does, and the audit found the asymmetry only by reading each file.
 	local noShutdown: { string } = {}
-	for _, name in ipairs({ "ArenaView", "DiceRenderer", "FeedbackFX", "HUD", "ForgePanel", "MenuPanel", "AudioDirector" }) do
+	for _, name in ipairs({ "BoardView", "DiceRenderer", "FeedbackFX", "HUD", "ForgePanel", "MenuPanel", "AudioDirector" }) do
 		local m = loadedModules[name]
 		if type(m) == "table" and type((m :: any).shutdown) ~= "function" then
 			table.insert(noShutdown, name)

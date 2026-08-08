@@ -121,7 +121,7 @@ end
 -- Module construction, in dependency order
 --------------------------------------------------------------------------------
 
--- Block 4A builds the spine only. ArenaView, DiceRenderer, ForgePanel, HUD,
+-- Block 4A builds the spine only. BoardView, DiceRenderer, ForgePanel, HUD,
 -- MenuPanel, FeedbackFX and AudioDirector arrive in 4B and 4C and are appended
 -- here in dependency order as they land.
 --
@@ -129,13 +129,14 @@ end
 -- construction: a module that is not on disk yet is skipped with a note, but a
 -- module that IS present and fails to load is FATAL. "Not built yet" and
 -- "broken" must never look the same.
--- Order is DEPENDENCY order, not importance order. ArenaView owns the camera and
--- the pit, so DiceRenderer needs it first; FeedbackFX anchors floating text into
--- the arena, so it needs both. The 2D surfaces depend on none of them.
+-- Order is DEPENDENCY order, not importance order. BoardView owns the tray and
+-- the slot geometry, so DiceRenderer needs it first; FeedbackFX anchors floating
+-- text over the board, so it needs it too. The other surfaces depend on none of
+-- them.
 local MODULE_ORDER: { string } = {
-	"ArenaView",       -- 4B  owns the pit, the camera, and the die anchor points
-	"DiceRenderer",    -- 4B  tumble-to-target; needs ArenaView's anchors
-	"FeedbackFX",      -- 4B  floating payout text; needs the arena to anchor into
+	"BoardView",       -- 4B  owns the 2D tray and the die slot geometry
+	"DiceRenderer",    -- 4B  tumble-to-target; needs BoardView's slots
+	"FeedbackFX",      -- 4B  floating payout text; needs the board to anchor over
 	"HUD",             -- 4C  top and bottom bars
 	"ForgePanel",      -- 4C  the primary surface (FR-13.8)
 	"MenuPanel",       -- 4C  left and right sidebars
@@ -303,11 +304,11 @@ end)
 -- Every view module acquires connections, a ScreenGui or an instance pool, and
 -- six of the seven grew a `shutdown` during rework -- but NOTHING CALLED ANY OF
 -- THEM. A release path that no caller reaches is not a release path; it is a
--- function that makes the leak look handled. Reported by the ArenaView rework,
--- which noticed its own new shutdown was unreachable.
+-- function that makes the leak look handled. Reported by the arena rework, which
+-- noticed its own new shutdown was unreachable.
 --
 -- Reverse order because construction order is dependency order: FeedbackFX
--- anchors into ArenaView, so it must release before the arena it points at.
+-- anchors over BoardView, so it must release before the board it points at.
 function ClientBootstrap.shutdown(): ()
 	for i = #MODULE_ORDER, 1, -1 do
 		local m = loaded[MODULE_ORDER[i]]
