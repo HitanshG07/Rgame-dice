@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dice Forge - Ultra Premium UI</title>
+    <link rel="stylesheet" href="style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Syncopate:wght@400;700&family=Inter:wght@300;500;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+    <!-- Background Arena -->
+    <div class="arena-bg">
+        <div class="grid-floor"></div>
+    </div>
+
+    <!-- Main HUD -->
+    <main class="hud">
+        
+        <!-- Top Navigation -->
+        <header class="top-nav">
+            <div class="currency-pod cash">
+                <i class="fa-solid fa-money-bill-wave"></i>
+                <div class="curr-details">
+                    <span class="label">CASH</span>
+                    <span class="amount">7.96K</span>
+                </div>
+            </div>
+            <div class="currency-pod gems">
+                <i class="fa-solid fa-gem"></i>
+                <div class="curr-details">
+                    <span class="label">GEMS</span>
+                    <span class="amount">0</span>
+                </div>
+            </div>
+            
+            <div class="spacer"></div>
+
+            <div class="event-banner">
+                <div class="event-glow"></div>
+                <div class="event-content">
+                    <i class="fa-solid fa-thumbs-up"></i>
+                    <div class="event-text">
+                        <span class="event-title">LIKE GOAL</span>
+                        <div class="progress-track"><div class="progress-fill"></div></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="action-icons">
+                <button class="icon-btn tooltip" data-tip="Group"><i class="fa-solid fa-users"></i></button>
+                <button class="icon-btn tooltip" data-tip="Shop"><i class="fa-solid fa-store"></i></button>
+                <button class="icon-btn tooltip" data-tip="Settings" onclick="toggleModal('settingsModal')"><i class="fa-solid fa-gear"></i></button>
+            </div>
+        </header>
+
+        <!-- Center Focus Area (The Dice & Floating UI) -->
+        <div class="center-focus">
+            
+            <!-- Floating Streak Arc -->
+            <div class="streak-arc">
+                <svg viewBox="0 0 200 100" class="arc-svg">
+                    <path d="M 10,100 A 90,90 0 0,1 190,100" fill="none" stroke="rgba(255,255,255,0.1)" stroke-width="4"/>
+                    <path d="M 10,100 A 90,90 0 0,1 190,100" fill="none" stroke="#00f3ff" stroke-width="4" stroke-dasharray="280" stroke-dashoffset="100"/>
+                </svg>
+                <div class="streak-data">
+                    <div class="s-mult">x1.00</div>
+                    <div class="s-count">STREAK: 0</div>
+                    <div class="s-void">VOID RISK 19.7%</div>
+                </div>
+            </div>
+
+            <!-- Simulated 3D Dice -->
+            <div class="dice-container">
+                <div class="dice-sparkle"></div>
+                <div class="dice-model">
+                    <div class="d-face d-front">6</div>
+                    <div class="d-face d-back">1</div>
+                    <div class="d-face d-right">4</div>
+                    <div class="d-face d-left">3</div>
+                    <div class="d-face d-top">5</div>
+                    <div class="d-face d-bottom">2</div>
+                </div>
+            </div>
+            
+            <!-- Payout feedback -->
+            <div class="payout-feedback">+ 1,450</div>
+        </div>
+
+        <!-- Floating Left Menu (Tools) -->
+        <div class="floating-menu left">
+            <button class="f-btn" onclick="toggleModal('forgeModal')">
+                <i class="fa-solid fa-hammer"></i><span>FORGE</span>
+            </button>
+            <button class="f-btn">
+                <i class="fa-solid fa-shapes"></i><span>SHAPE</span>
+            </button>
+            <button class="f-btn">
+                <i class="fa-solid fa-plus-square"></i><span>SLOT</span>
+            </button>
+        </div>
+
+        <!-- Floating Right Menu (Meta) -->
+        <div class="floating-menu right">
+            <button class="f-btn">
+                <i class="fa-solid fa-trophy"></i><span>BOARDS</span>
+            </button>
+            <button class="f-btn">
+                <i class="fa-solid fa-chart-simple"></i><span>STATS</span>
+            </button>
+            <button class="f-btn ascend">
+                <i class="fa-solid fa-arrow-up-right-dots"></i><span>ASCEND</span>
+            </button>
+        </div>
+
+        <!-- Bottom Action Bar -->
+        <footer class="bottom-action">
+            <button class="b-btn secondary"><i class="fa-solid fa-box-open"></i></button>
+            <button class="b-btn secondary"><i class="fa-solid fa-dharmachakra"></i></button>
+            
+            <button class="main-roll-btn">
+                <div class="roll-bg"></div>
+                <span class="roll-txt">ROLL</span>
+                <i class="fa-solid fa-dice"></i>
+            </button>
+            
+            <button class="b-btn secondary"><i class="fa-solid fa-robot"></i></button>
+            <button class="b-btn secondary"><i class="fa-solid fa-gauge-high"></i></button>
+        </footer>
+
+    </main>
+
+    <!-- FULL SCREEN FORGE OVERLAY -->
+    <div class="full-overlay" id="forgeModal" style="display: none;">
+        <div class="forge-hud">
+            
+            <header class="forge-header">
+                <h2><i class="fa-solid fa-hammer"></i> THE FORGE</h2>
+                <div class="forge-stats-top">
+                    <div class="f-stat-pill">BUDGET <span>120 / 150</span></div>
+                    <div class="f-stat-pill">BASE EV <span>45.2</span></div>
+                    <div class="f-stat-pill void">VOID P <span>12.4%</span></div>
+                </div>
+                <button class="btn-close" onclick="toggleModal('forgeModal')"><i class="fa-solid fa-xmark"></i></button>
+            </header>
+
+            <div class="forge-body">
+                <!-- Left: Die Selection -->
+                <aside class="die-selector">
+                    <div class="die-card active">
+                        <i class="fa-solid fa-dice-d6"></i>
+                        <span>DIE 1</span>
+                    </div>
+                    <div class="die-card">
+                        <i class="fa-solid fa-dice-d20"></i>
+                        <span>DIE 2</span>
+                    </div>
+                    <div class="die-card empty">
+                        <i class="fa-solid fa-plus"></i>
+                        <span>UNLOCK</span>
+                    </div>
+                </aside>
+
+                <!-- Center: Face Editor -->
+                <section class="face-editor">
+                    <div class="face-list-header">
+                        <div>FACE</div><div>ELEMENT</div><div>MASS</div><div>VALUE</div><div>CHANCE</div><div>EDIT</div>
+                    </div>
+                    <div class="face-list-scroll">
+                        <div class="f-row">
+                            <div class="f-col f-id">1</div>
+                            <div class="f-col f-el fire"><i class="fa-solid fa-fire"></i></div>
+                            <div class="f-col f-mass">15</div>
+                            <div class="f-col f-val">225</div>
+                            <div class="f-col f-pct">14.2%</div>
+                            <div class="f-col f-act">
+                                <button class="f-adj">-</button><button class="f-adj">+</button>
+                            </div>
+                        </div>
+                        <div class="f-row">
+                            <div class="f-col f-id">2</div>
+                            <div class="f-col f-el none">-</div>
+                            <div class="f-col f-mass">10</div>
+                            <div class="f-col f-val">100</div>
+                            <div class="f-col f-pct">18.6%</div>
+                            <div class="f-col f-act">
+                                <button class="f-adj">-</button><button class="f-adj">+</button>
+                            </div>
+                        </div>
+                        <div class="f-row">
+                            <div class="f-col f-id">3</div>
+                            <div class="f-col f-el gold"><i class="fa-solid fa-coins"></i></div>
+                            <div class="f-col f-mass">5</div>
+                            <div class="f-col f-val">25</div>
+                            <div class="f-col f-pct">24.1%</div>
+                            <div class="f-col f-act">
+                                <button class="f-adj">-</button><button class="f-adj">+</button>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Right: Element & Actions -->
+                <aside class="forge-actions">
+                    <div class="element-picker-modern">
+                        <h3>ASSIGN ELEMENT (F1)</h3>
+                        <div class="el-grid">
+                            <div class="el-item"><i class="fa-solid fa-ban"></i></div>
+                            <div class="el-item active fire"><i class="fa-solid fa-fire"></i></div>
+                            <div class="el-item freeze"><i class="fa-solid fa-snowflake"></i></div>
+                            <div class="el-item gold"><i class="fa-solid fa-coins"></i></div>
+                            <div class="el-item mult"><i class="fa-solid fa-star"></i></div>
+                        </div>
+                    </div>
+
+                    <div class="shape-picker-modern">
+                        <h3>CHANGE SHAPE</h3>
+                        <div class="sh-grid">
+                            <div class="sh-item">D4</div>
+                            <div class="sh-item active">D6</div>
+                            <div class="sh-item">D8</div>
+                            <div class="sh-item">D12</div>
+                            <div class="sh-item">D20</div>
+                        </div>
+                    </div>
+
+                    <div class="commit-zone">
+                        <div class="forge-cost">COST: <span>$1,200</span></div>
+                        <div class="commit-buttons">
+                            <button class="c-btn outline">REVERT</button>
+                            <button class="c-btn outline">EVEN</button>
+                        </div>
+                        <button class="c-btn solid">COMMIT FORGE</button>
+                    </div>
+                </aside>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function toggleModal(id) {
+            const el = document.getElementById(id);
+            el.style.display = el.style.display === 'none' ? 'flex' : 'none';
+        }
+    </script>
+</body>
+</html>
