@@ -855,10 +855,11 @@ local function buildInterface(target: PlayerGui): ()
 	-- Input. Connected once, at build time.
 	--------------------------------------------------------------------------
 
-	bind(tab, function()
-		setPanelVisible(true)
-		render()
-	end)
+	-- No tab handler: the edge tab was removed as a duplicate entry point, and
+	-- ClientBootstrap now wires MenuPanel's FORGE entry to `setVisible` instead.
+	-- This bind survived the removal because it sits 170 lines below the creation
+	-- it referred to, and `bind` takes an unannotated upvalue -- so the file still
+	-- type-checked and still built, and only failed when init actually ran.
 
 	bind(close, function()
 		setPanelVisible(false)
