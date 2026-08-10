@@ -93,6 +93,15 @@ function V7ForgePanel.new(): V7ForgeController
 	local dieTabs: { any } = {}
 	local emptySlots = 0
 
+	-- TRUE only when the PLAYER has moved mass and not yet committed.
+	--
+	-- This used to be inferred by comparing draft to committed, which cannot tell
+	-- a player's unsaved edit from a change the SERVER made -- so buying a mass
+	-- upgrade, or switching shape, left the panel convinced the player was
+	-- mid-edit and refusing to refresh. The die grew from 60 to 70 and the forge
+	-- kept showing 60, with a phantom cost for the difference.
+	local dirty = false
+
 	-- The element order is fixed so the cycle is predictable: pressing the same
 	-- face repeatedly walks the same list every time.
 	local ELEMENT_ORDER = { "None", "Fire", "Freeze", "Gold", "Multiplier" }
@@ -208,6 +217,7 @@ function V7ForgePanel.new(): V7ForgeController
 				end
 			end
 		end
+		dirty = true
 		refresh()
 	end
 
@@ -333,6 +343,7 @@ function V7ForgePanel.new(): V7ForgeController
 		for i = 1, count do
 			draft[i] = share
 		end
+		dirty = true
 		refresh()
 	end)
 
@@ -448,14 +459,7 @@ function V7ForgePanel.new(): V7ForgeController
 			Format.formatNumber(ev), voidP * 100)
 
 		-- The cost of the pending change, quoted before committing (FR-3.3).
-		local changed = false
-		for i = 1, count do
-			if math.abs((committed[i] or 0) - draft[i]) > 1e-6 then
-				changed = true
-				break
-			end
-		end
-		if changed then
+		if dirty then
 			-- FR-3.4: the price is quoted BEFORE committing, using the SAME shared
 			-- function the server charges with -- not a client reimplementation,
 			-- which is how a quote and a charge drift apart (L-026).
@@ -491,6 +495,8 @@ function V7ForgePanel.new(): V7ForgeController
 			return
 		end
 		activeDie = index
+		-- A new die starts clean; the previous die's edit is not carried over.
+		dirty = false
 		-- Re-read from the last snapshot so switching tabs shows that die's real
 		-- state rather than the previous die's draft.
 		local st = lastSnapshot
@@ -501,6 +507,7 @@ function V7ForgePanel.new(): V7ForgeController
 
 	resetBtn.Activated:Connect(function()
 		draft = table.clone(committed)
+		dirty = false
 		refresh()
 	end)
 
@@ -546,6 +553,7 @@ function V7ForgePanel.new(): V7ForgeController
 			-- survives a screenshot.
 			local ok, reason = NetClient.forge(activeDie, out)
 			if ok then
+				dirty = false
 				UITheme.setButtonText(commitBtn, "FORGED")
 			else
 				-- The server's refusal code, shown as-is. It is an enumerated
@@ -554,6 +562,7 @@ function V7ForgePanel.new(): V7ForgeController
 				-- Snap the draft back to the truth so the panel cannot keep
 				-- displaying a distribution the server rejected.
 				draft = table.clone(committed)
+				dirty = false
 			end
 			task.wait(1.2)
 			UITheme.setButtonText(commitBtn, "FORGE")
@@ -612,20 +621,16 @@ function V7ForgePanel.new(): V7ForgeController
 				committed[i] = tonumber(face.Mass) or 0
 				faceElements[i] = tostring(face.Element or "None")
 			end
-			-- The draft follows the server unless the player is mid-edit; a
-			-- snapshot arriving during a roll must not silently discard changes
-			-- they have not committed yet.
-			local editing = false
-			if #draft == #committed then
-				for i = 1, #draft do
-					if math.abs(draft[i] - committed[i]) > 1e-6 then
-						editing = true
-						break
-					end
-				end
-			end
-			if not editing or #draft ~= #committed then
+			-- The draft follows the server unless the PLAYER is mid-edit. `dirty`
+			-- is set only by this panel's own controls, so a server-side change --
+			-- a mass upgrade, a shape switch, an element write -- refreshes the
+			-- view instead of being mistaken for the player's unsaved work.
+			--
+			-- A face-count change always wins: a draft sized for the old shape
+			-- cannot be applied to the new one.
+			if not dirty or #draft ~= #committed then
 				draft = table.clone(committed)
+				dirty = false
 			end
 			refresh()
 	end
