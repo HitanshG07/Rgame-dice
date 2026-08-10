@@ -341,30 +341,17 @@ end
 -- the finding. Real numbers come from the P-6B balance sweep, which is the only
 -- place a claim about late-game triviality can actually be settled.
 function ForgeService.computeForgeCost(oldDist: { number }, newDist: { number }, budget: number?, player: Player?): number
-	if #oldDist ~= #newDist then
+	-- DELEGATES to the shared implementation. The formula used to live here, in
+	-- a server-only module, which meant the forge UI could not quote a price
+	-- without reimplementing it -- and a quoted price that drifts from the
+	-- actual charge is the worst possible version of ledger L-026.
+	--
+	-- The pure maths is shared; the ENTITLEMENT DISCOUNT stays here, because
+	-- pass ownership is server state and no client may compute it.
+	local cost = ForgeMath.forgeCost(oldDist, newDist, budget)
+	if not ForgeMath.isFinite(cost) then
 		return math.huge
 	end
-	local deltaSum = 0.0
-	for i = 1, #oldDist do
-		local d = math.abs(newDist[i] - oldDist[i])
-		if not ForgeMath.isFinite(d) then
-			return math.huge
-		end
-		deltaSum += d
-	end
-
-	local scale = 1.0
-	if budget ~= nil then
-		if not ForgeMath.isFinite(budget) or budget <= 0 then
-			return math.huge
-		end
-		scale = (budget / REFERENCE_BUDGET) ^ SCALE_EXPONENT
-		if not ForgeMath.isFinite(scale) or scale < 1.0 then
-			scale = 1.0  -- never cheaper than the starting die
-		end
-	end
-
-	local cost = ForgeMath.snap(deltaSum * BASE_COST_PER_MASS_UNIT * scale)
 	if player ~= nil then
 		cost = ForgeMath.snap(cost * PurchaseService.forgeCostMultiplier(player))
 	end

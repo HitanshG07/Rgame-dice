@@ -120,6 +120,13 @@ function UITheme.neumorphicButton(text: string, accentColor: Color3?, size: UDim
 	end
 
 	local lbl = Instance.new("TextLabel")
+	-- NAMED so callers can restyle it. The button's visible text is THIS LABEL,
+	-- not the TextButton's own `.Text`, which is deliberately empty. Setting
+	-- `button.Text = "..."` therefore renders unstyled text UNDERNEATH the label
+	-- instead of updating it -- correct-looking in a screenshot, wrong font and
+	-- wrong size next to any button built with its text up front. Callers that
+	-- change a label at runtime must use `UITheme.setButtonText`.
+	lbl.Name = "Label"
 	lbl.Size = UDim2.fromScale(0.9, 0.6)
 	lbl.Position = UDim2.fromScale(0.05, 0.2)
 	lbl.BackgroundTransparency = 1
@@ -431,9 +438,46 @@ function UITheme.neumorphicTile(size: UDim2, pos: UDim2): (Frame, Frame)
 	return container, body
 end
 
+-- The sanctioned way to change a neumorphic button's caption at runtime.
+--
+-- Falls back to the button's own Text for any button not built by
+-- `neumorphicButton`, so callers do not have to know which builder made it.
+function UITheme.setButtonText(button: TextButton, text: string): ()
+	local lbl = button:FindFirstChild("Label")
+	if lbl ~= nil and lbl:IsA("TextLabel") then
+		lbl.Text = text
+	else
+		button.Text = text
+	end
+end
+
+-- Greys a button out AND STOPS IT FIRING.
+--
+-- TWO DEFECTS FIXED HERE, both of which made "disabled" purely decorative:
+--
+--   IT RECOLOURED THE WRONG THING. `button.TextColor3` tints the TextButton's
+--   own text, which for a neumorphic button is empty -- the visible caption is a
+--   child label. A disabled button looked identical to an enabled one.
+--
+--   IT NEVER DISABLED INPUT. `AutoButtonColor` is a HOVER TINT, not an
+--   interaction switch. Every `Activated` handler still fired, so a button
+--   reading LOCKED or MAX still sent its request -- the server refused it, which
+--   is why nothing visibly broke, but the client was asking for things it had
+--   just told the player it could not do.
+--
+-- `Active` and `Interactable` are what actually gate input.
 function UITheme.setEnabled(button: TextButton, enabled: boolean): ()
-	button.TextColor3 = if enabled then UITheme.Colors.TextPrimary else UITheme.Colors.TextDim
 	button.AutoButtonColor = enabled
+	button.Active = enabled
+	button.Interactable = enabled
+
+	local lbl = button:FindFirstChild("Label")
+	if lbl ~= nil and lbl:IsA("TextLabel") then
+		lbl.TextTransparency = if enabled then 0 else 0.55
+	else
+		button.TextColor3 = if enabled then UITheme.Colors.TextPrimary else UITheme.Colors.TextDim
+	end
+
 	local stroke = button:FindFirstChildOfClass("UIStroke")
 	if stroke then
 		stroke.Color = if enabled then UITheme.Colors.ShadowDark else UITheme.Colors.BaseCream

@@ -77,6 +77,7 @@ function V7ForgePanel.new(): V7ForgeController
 
 	local shapeId: string = DiceCatalog.STARTING_SHAPE
 	local budget = 0
+	local cash = 0
 	local committed: { number } = {}
 	local draft: { number } = {}
 	local faceRows: { any } = {}
@@ -284,11 +285,29 @@ function V7ForgePanel.new(): V7ForgeController
 			end
 		end
 		if changed then
-			costLbl.Text = "Cost to forge: see server on commit"
-			UITheme.setEnabled(commitBtn, true)
+			-- FR-3.4: the price is quoted BEFORE committing, using the SAME shared
+			-- function the server charges with -- not a client reimplementation,
+			-- which is how a quote and a charge drift apart (L-026).
+			--
+			-- HONEST CAVEAT: the server applies the VIP Forge discount on top, and
+			-- pass ownership is server state this snapshot does not carry. So an
+			-- owner is charged LESS than quoted, never more. Over-quoting is the
+			-- only safe direction to be wrong about a price.
+			local quoted = ForgeMath.forgeCost(committed, draft, budget)
+			if ForgeMath.isFinite(quoted) then
+				local afford = cash >= quoted
+				costLbl.Text = "Cost: $" .. Format.formatNumber(quoted)
+				costLbl.TextColor3 = if afford then UITheme.Colors.TextGold else UITheme.Colors.Negative
+				UITheme.setEnabled(commitBtn, afford)
+			else
+				costLbl.Text = "Invalid distribution"
+				costLbl.TextColor3 = UITheme.Colors.Negative
+				UITheme.setEnabled(commitBtn, false)
+			end
 			UITheme.setEnabled(resetBtn, true)
 		else
 			costLbl.Text = "No changes pending"
+			costLbl.TextColor3 = UITheme.Colors.TextDim
 			UITheme.setEnabled(commitBtn, false)
 			UITheme.setEnabled(resetBtn, false)
 		end
@@ -324,7 +343,27 @@ function V7ForgePanel.new(): V7ForgeController
 			end
 			out[heaviestIdx] += drift
 		end
-		NetClient.forge(1, out)
+		-- FEEDBACK. A commit that silently succeeds or silently fails teaches the
+		-- player nothing; the button state is the only signal they get, so it has
+		-- to reflect the actual result.
+		UITheme.setButtonText(commitBtn, "...")
+		UITheme.setEnabled(commitBtn, false)
+		task.spawn(function()
+			local ok, reason = NetClient.forge(1, out)
+			if ok then
+				UITheme.setButtonText(commitBtn, "FORGED")
+			else
+				-- The server's refusal code, shown as-is. It is an enumerated
+				-- Notice, never an internal detail (T-7).
+				UITheme.setButtonText(commitBtn, string.upper(tostring(reason or "REFUSED")))
+				-- Snap the draft back to the truth so the panel cannot keep
+				-- displaying a distribution the server rejected.
+				draft = table.clone(committed)
+			end
+			task.wait(1.2)
+			UITheme.setButtonText(commitBtn, "FORGE")
+			refresh()
+		end)
 	end)
 
 	----------------------------------------------------------------------------
@@ -340,6 +379,7 @@ function V7ForgePanel.new(): V7ForgeController
 			end
 			shapeId = tostring(die.Shape)
 			budget = tonumber(die.MassBudget) or 0
+			cash = tonumber(state.cash) or 0
 
 			committed = {}
 			for i, face in ipairs(die.Faces) do

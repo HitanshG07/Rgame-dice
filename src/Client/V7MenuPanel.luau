@@ -222,12 +222,12 @@ function V7MenuPanel.new(): V7MenuController
 			if shapeId == currentShape then
 				entry.status.Text = "IN USE"
 				entry.status.TextColor3 = UITheme.Colors.TextGold
-				entry.button.Text = "ACTIVE"
+				UITheme.setButtonText(entry.button, "ACTIVE")
 				UITheme.setEnabled(entry.button, false)
 			elseif owned then
 				entry.status.Text = "OWNED"
 				entry.status.TextColor3 = UITheme.Colors.Positive
-				entry.button.Text = "USE"
+				UITheme.setButtonText(entry.button, "USE")
 				UITheme.setEnabled(entry.button, true)
 			elseif allowed then
 				-- The next rung. Affordability decides whether it is pressable,
@@ -235,7 +235,7 @@ function V7MenuPanel.new(): V7MenuController
 				entry.status.Text = "$" .. Format.formatNumber(cost)
 				entry.status.TextColor3 = if cash >= cost
 					then UITheme.Colors.Positive else UITheme.Colors.TextDim
-				entry.button.Text = "UNLOCK"
+				UITheme.setButtonText(entry.button, "UNLOCK")
 				UITheme.setEnabled(entry.button, cash >= cost)
 			else
 				-- Locked behind an earlier rung. Naming the prerequisite is what
@@ -243,7 +243,7 @@ function V7MenuPanel.new(): V7MenuController
 				local prereq = DiceCatalog.getPrerequisite(shapeId)
 				entry.status.Text = "needs " .. tostring(prereq)
 				entry.status.TextColor3 = UITheme.Colors.TextDim
-				entry.button.Text = "LOCKED"
+				UITheme.setButtonText(entry.button, "LOCKED")
 				UITheme.setEnabled(entry.button, false)
 			end
 		end
@@ -375,13 +375,13 @@ function V7MenuPanel.new(): V7MenuController
 				ui.fill.Size = UDim2.fromScale(math.clamp(prog / math.max(goal, 1), 0, 1), 1)
 
 				if q.claimed then
-					ui.button.Text = "DONE"
+					UITheme.setButtonText(ui.button, "DONE")
 					UITheme.setEnabled(ui.button, false)
 				elseif q.ready then
-					ui.button.Text = "CLAIM"
+					UITheme.setButtonText(ui.button, "CLAIM")
 					UITheme.setEnabled(ui.button, true)
 				else
-					ui.button.Text = "LOCKED"
+					UITheme.setButtonText(ui.button, "LOCKED")
 					UITheme.setEnabled(ui.button, false)
 				end
 			end
@@ -452,7 +452,7 @@ function V7MenuPanel.new(): V7MenuController
 			.. "once, and elements that read across dice have more to work with.",
 			slots, if slots == 1 then "die" else "dice")
 		UITheme.setEnabled(addSlotBtn, slots < 7)
-		addSlotBtn.Text = if slots < 7 then "ADD SLOT" else "MAX (7)"
+		UITheme.setButtonText(addSlotBtn, if slots < 7 then "ADD SLOT" else "MAX (7)")
 	end
 
 	screenGui.Parent = playerGui

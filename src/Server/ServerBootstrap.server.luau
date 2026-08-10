@@ -332,9 +332,26 @@ RemoteGateway.register("RedeemCode", announcing(function(player: Player, code: s
 	return ProgressionService.redeemCode(player, code)
 end))
 
-RemoteGateway.register("ClaimGroupReward", announcing(function(player: Player)
-	return ProgressionService.claimGroupReward(player)
-end))
+-- GROUP REWARDS -- UNPLUGGED 2026-08-11 (operator-directed), not deleted.
+--
+-- WHY IT IS COMMENTED RATHER THAN REMOVED: the feature is complete and correct
+-- on the server side -- `ProgressionService.claimGroupReward` really does verify
+-- membership through the platform and fails closed on an unset group id. What is
+-- missing is the OPERATOR'S GROUP, and there is no reason to throw away working
+-- code while waiting for a configuration value.
+--
+-- TO BRING IT BACK: set `ProgressionService.GROUP_ID` to the real group and
+-- uncomment the two lines below. Nothing else needs changing -- the claim path,
+-- the once-only flag and the membership check are all still in place and still
+-- covered by their own logic.
+--
+-- While unplugged the remote is DECLARED but unhandled, so a call returns the
+-- gateway's default refusal rather than reaching a reward path. That is the
+-- correct failure: silence, not a grant.
+--
+-- RemoteGateway.register("ClaimGroupReward", announcing(function(player: Player)
+-- 	return ProgressionService.claimGroupReward(player)
+-- end))
 
 RemoteGateway.register("ClaimQuest", announcing(function(player: Player, questId: string)
 	-- WAS `return true, nil`: it granted nothing and reported SUCCESS, so the

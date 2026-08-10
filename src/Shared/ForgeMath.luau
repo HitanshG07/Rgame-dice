@@ -310,4 +310,76 @@ function ForgeMath.sampleFace(mass: Distribution, rng: Random): number
 	return #p
 end
 
+
+--------------------------------------------------------------------------------
+-- FORGE COST (SRS FR-3.3)
+--
+-- SHARED, not server-only, and that is the point. FR-3.4 requires the forge UI
+-- to show what a change will cost BEFORE it is committed, and the only honest
+-- way to do that is for the client to run the SAME function the server charges
+-- with. A client-side reimplementation is exactly the failure ledger L-026
+-- records: the copy nobody executes is the one that drifts, and here the two
+-- copies would be a quoted price and an actual charge.
+--
+-- PURE. No Player, no profile, no entitlements -- so the server can apply its
+-- pass multiplier on top and the client can render the base figure.
+--------------------------------------------------------------------------------
+
+ForgeMath.BASE_COST_PER_MASS_UNIT = 5.0
+ForgeMath.COST_REFERENCE_BUDGET = 60.0
+ForgeMath.COST_SCALE_EXPONENT = 2.0
+
+-- Cost of moving from `oldDist` to `newDist`, before any ownership discount.
+--
+-- Scales with the SUM OF ABSOLUTE DELTAS across faces. Note this counts a
+-- zero-sum move at both ends -- moving 5 mass from face A to face B registers as
+-- 10 units of change. That is the behaviour the shipped cost curve was tuned
+-- against, so it is preserved EXACTLY here rather than "corrected" to 5; halving
+-- it would quietly halve every forge price in the game.
+--
+-- Scales again with the die's budget, so re-forging a developed
+-- die is not free relative to its earnings (FR-3.3, and ledger L-016 -- free
+-- re-forging collapses the cross-die puzzle into a solved symmetric state).
+--
+-- Returns math.huge for any malformed input, which every caller treats as
+-- unaffordable rather than as zero.
+function ForgeMath.forgeCost(oldDist: { number }, newDist: { number }, budget: number?): number
+	if type(oldDist) ~= "table" or type(newDist) ~= "table" then
+		return math.huge
+	end
+	if #oldDist ~= #newDist then
+		return math.huge
+	end
+
+	local deltaSum = 0
+	for i = 1, #newDist do
+		local a, b = oldDist[i], newDist[i]
+		if type(a) ~= "number" or type(b) ~= "number" then
+			return math.huge
+		end
+		local d = math.abs(b - a)
+		if not ForgeMath.isFinite(d) then
+			return math.huge
+		end
+		deltaSum += d
+	end
+
+	local scale = 1.0
+	if budget ~= nil then
+		if not ForgeMath.isFinite(budget) or budget <= 0 then
+			return math.huge
+		end
+		scale = (budget / ForgeMath.COST_REFERENCE_BUDGET) ^ ForgeMath.COST_SCALE_EXPONENT
+		if not ForgeMath.isFinite(scale) or scale < 1.0 then
+			scale = 1.0  -- never cheaper than the starting die
+		end
+	end
+
+	local cost = ForgeMath.snap(deltaSum * ForgeMath.BASE_COST_PER_MASS_UNIT * scale)
+	if not ForgeMath.isFinite(cost) then
+		return math.huge
+	end
+	return cost
+end
+
 return ForgeMath
