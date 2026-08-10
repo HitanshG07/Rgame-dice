@@ -21,76 +21,103 @@ export type ShapeDef = {
 -- neutral prior, and differentiating them is a balance decision that changes
 -- Void probability and therefore the sniper/grinder crossover.
 --
--- SRS FR-6.3 requires that no shape dominate at every Streak Strength `b`.
--- THAT CROSSOVER IS NOT YET VERIFIED for these numbers. It cannot be verified
--- by inspection; it needs the numerical sweep in roadmap prompt P-6B. Until
--- that sweep runs, treat every constant in this file as provisional. Budgets
--- are set to 10 mass per face at every shape so the sweep starts from a clean
--- baseline where shape differs only in face count.
+-- FR-6.3's crossover HAS now been verified numerically; see the budget note
+-- immediately below for the sweep and its result.
+--
+-- THE BUDGET IS SHAPE-INDEPENDENT, and this is the single most important
+-- balance constant in the game.
+--
+-- MEASURED DEFECT, 2026-08-11. These were per-shape and scaled with face count
+-- (D2 = 20 ... D20 = 200, a flat 10 per face). Because payout is superlinear in
+-- mass (FR-2.4, alpha = 2), more budget is STRICTLY better -- so the D20 simply
+-- had ten times the mass of the D2 and won at every Streak Strength. A sweep
+-- over b in {0, 0.02, 0.05, 0.10, 0.15, 0.20, 0.30, 0.50} returned D20 eight
+-- times out of eight. That is FR-6.3 violated outright: "a build where one shape
+-- wins at every b is a balance defect."
+--
+-- It was never caught because it cannot be seen by inspection -- each row looked
+-- individually reasonable, and the file's own header said the numbers were
+-- provisional pending a sweep that had not been run.
+--
+-- WITH A SHARED BUDGET the crossover FR-6.2 describes appears immediately, and
+-- it appears for the right reason: shapes now differ ONLY in how many faces the
+-- same mass is spread across.
+--
+--   b <= 0.05   D3 wins    EV ~450     Void 0.492   the volatile sniper
+--   b >= 0.10   D20 wins   EV 527+     Void 0.052   the steady grinder
+--
+-- That is the sniper/grinder fork the whole design rests on (ledger L-016), and
+-- the measured Void range 0.49 -> 0.05 brackets the SRS's predicted 0.33 -> 0.05.
+--
+-- CHANGING THESE THREE NUMBERS RE-OPENS FR-6.3. Re-run the sweep after any edit.
+local SHARED_DEFAULT_BUDGET = 60
+local SHARED_CASH_CAP = 300
+local SHARED_DIAMOND_CEILING = 1500
+
 local SHAPES: { [string]: ShapeDef } = {
 	D2 = {
 		id = "D2",
 		faceCount = 2,
 		massFloor = 1,
-		defaultBudget = 20,
-		cashBudgetCap = 100,
-		diamondCeiling = 500,
+		defaultBudget = SHARED_DEFAULT_BUDGET,
+		cashBudgetCap = SHARED_CASH_CAP,
+		diamondCeiling = SHARED_DIAMOND_CEILING,
 	},
 	D3 = {
 		id = "D3",
 		faceCount = 3,
 		massFloor = 1,
-		defaultBudget = 30,
-		cashBudgetCap = 150,
-		diamondCeiling = 750,
+		defaultBudget = SHARED_DEFAULT_BUDGET,
+		cashBudgetCap = SHARED_CASH_CAP,
+		diamondCeiling = SHARED_DIAMOND_CEILING,
 	},
 	D4 = {
 		id = "D4",
 		faceCount = 4,
 		massFloor = 1,
-		defaultBudget = 40,
-		cashBudgetCap = 200,
-		diamondCeiling = 1000,
+		defaultBudget = SHARED_DEFAULT_BUDGET,
+		cashBudgetCap = SHARED_CASH_CAP,
+		diamondCeiling = SHARED_DIAMOND_CEILING,
 	},
 	D6 = {
 		id = "D6",
 		faceCount = 6,
 		massFloor = 1,
-		defaultBudget = 60,
-		cashBudgetCap = 300,
-		diamondCeiling = 1500,
+		defaultBudget = SHARED_DEFAULT_BUDGET,
+		cashBudgetCap = SHARED_CASH_CAP,
+		diamondCeiling = SHARED_DIAMOND_CEILING,
 	},
 	D8 = {
 		id = "D8",
 		faceCount = 8,
 		massFloor = 1,
-		defaultBudget = 80,
-		cashBudgetCap = 400,
-		diamondCeiling = 2000,
+		defaultBudget = SHARED_DEFAULT_BUDGET,
+		cashBudgetCap = SHARED_CASH_CAP,
+		diamondCeiling = SHARED_DIAMOND_CEILING,
 	},
 	D10 = {
 		id = "D10",
 		faceCount = 10,
 		massFloor = 1,
-		defaultBudget = 100,
-		cashBudgetCap = 500,
-		diamondCeiling = 2500,
+		defaultBudget = SHARED_DEFAULT_BUDGET,
+		cashBudgetCap = SHARED_CASH_CAP,
+		diamondCeiling = SHARED_DIAMOND_CEILING,
 	},
 	D12 = {
 		id = "D12",
 		faceCount = 12,
 		massFloor = 1,
-		defaultBudget = 120,
-		cashBudgetCap = 600,
-		diamondCeiling = 3000,
+		defaultBudget = SHARED_DEFAULT_BUDGET,
+		cashBudgetCap = SHARED_CASH_CAP,
+		diamondCeiling = SHARED_DIAMOND_CEILING,
 	},
 	D20 = {
 		id = "D20",
 		faceCount = 20,
 		massFloor = 1,
-		defaultBudget = 200,
-		cashBudgetCap = 1000,
-		diamondCeiling = 5000,
+		defaultBudget = SHARED_DEFAULT_BUDGET,
+		cashBudgetCap = SHARED_CASH_CAP,
+		diamondCeiling = SHARED_DIAMOND_CEILING,
 	},
 }
 

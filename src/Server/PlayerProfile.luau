@@ -87,17 +87,21 @@ local TEMPLATE: Profile = {
 	-- along the ladder in `DiceCatalog.UNLOCK_ORDER`; see that file's header for
 	-- why an ordered unlock does not make shapes a power tier.
 	--
-	-- Two faces at the D2's default budget of 20, split evenly. Even is the
-	-- honest starting distribution: it is the ONLY one that expresses no opinion,
-	-- and the first thing the game teaches is that moving mass off a face is what
-	-- makes that face pay.
+	-- Two faces at the SHARED budget of 60, split evenly. The budget is
+	-- shape-independent by balance necessity -- see DiceCatalog, where making it
+	-- scale with face count was measured handing the D20 an unconditional win at
+	-- every Streak Strength.
+	--
+	-- Even is the honest starting distribution: it is the only one that expresses
+	-- no opinion, and the first thing the game teaches is that moving mass OFF a
+	-- face is what makes that face pay.
 	Dice = {
 		{
 			Shape = "D2",
-			MassBudget = 20,
-			PurchasedBudget = 20,
+			MassBudget = 60,
+			PurchasedBudget = 60,
 			Faces = {
-				{ Mass = 10, Element = "None" }, { Mass = 10, Element = "None" },
+				{ Mass = 30, Element = "None" }, { Mass = 30, Element = "None" },
 			},
 		},
 	},

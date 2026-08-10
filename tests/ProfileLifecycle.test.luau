@@ -204,7 +204,12 @@ local function run(): (boolean, string?, number)
 	e = e or check(b.Dice[1].Faces[1].Mass ~= 12345,
 		"mutating one profile's die changed another profile's die -- template is shared")
 	local fresh = PlayerProfile._reconcile({})
-	e = e or check(fresh.Dice[1].Faces[1].Mass == 10,
+	-- Compared against the TEMPLATE's own value rather than a literal. The point
+	-- of this check is that the template is UNCHANGED by a profile mutation --
+	-- what that value happens to be is a balance decision this suite has no
+	-- opinion on, and hardcoding it coupled the test to one.
+	local templateMass = PlayerProfile.getTemplate().Dice[1].Faces[1].Mass
+	e = e or check(fresh.Dice[1].Faces[1].Mass == templateMass,
 		string.format("the TEMPLATE was corrupted by a profile mutation: fresh mass is %s",
 			tostring(fresh.Dice[1].Faces[1].Mass)))
 

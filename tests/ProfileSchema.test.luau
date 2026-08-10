@@ -231,7 +231,9 @@ local function run(): (boolean, string?, number)
 	-- Migration must not hand the migrated profile a reference INTO the template.
 	v0Profile.Dice[1].Faces[1].Mass = 4321
 	local afterMigrate = PlayerProfile._reconcile({})
-	e = e or check(afterMigrate.Dice[1].Faces[1].Mass == 10, string.format(
+	-- Read from the template, not hardcoded: see the matching note in UT-8.
+	local templateMass = PlayerProfile.getTemplate().Dice[1].Faces[1].Mass
+	e = e or check(afterMigrate.Dice[1].Faces[1].Mass == templateMass, string.format(
 		"migration shared the TEMPLATE die by reference -- a migrated player's forge "
 		.. "would rewrite the starting die for everyone else (fresh mass is %s)",
 		tostring(afterMigrate.Dice[1].Faces[1].Mass)))
