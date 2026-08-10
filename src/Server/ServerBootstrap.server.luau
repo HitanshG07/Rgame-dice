@@ -193,6 +193,43 @@ RemoteGateway.register("BuyUpgrade", announcing(function(player: Player, upgrade
 	end
 	PlayerProfile.mutate(player, function(d)
 		d.Upgrades[upgradeId] = currentLvl + 1
+
+		-- MASS BUDGET is the one Cash upgrade that changes a DIE rather than a
+		-- multiplier, so the level alone is not the effect -- the die has to
+		-- actually get bigger, and the new mass has to land somewhere legal or
+		-- `assertDieInvariant` will reject the next write.
+		--
+		-- Applied to EVERY die the player owns: the upgrade is an account-level
+		-- entitlement, and granting it to die 1 only would make extra slots
+		-- strictly worse the moment a player bought one.
+		if upgradeId == "MassBudget" then
+			local grant = UpgradeCatalog.MASS_PER_LEVEL
+			for _, die in ipairs(d.Dice) do
+				local shape = DiceCatalog.getShape(die.Shape)
+				if shape ~= nil then
+					-- Capped by the SHAPE. Past this the Diamond tree is the only
+					-- way up, which is FR-3.6's two-stage design.
+					local ceiling = shape.cashBudgetCap
+					local target = math.min(ceiling, die.PurchasedBudget + grant)
+					local added = target - die.PurchasedBudget
+					if added > 0 then
+						die.PurchasedBudget = target
+						die.MassBudget += added
+						-- The new mass goes onto the LIGHTEST face. Anywhere else
+						-- would silently reshape a distribution the player tuned;
+						-- the lightest face is the one they have already chosen to
+						-- starve, so adding there disturbs their build least.
+						local lightest, lightestIdx = math.huge, 1
+						for i, f in ipairs(die.Faces) do
+							if f.Mass < lightest then
+								lightest, lightestIdx = f.Mass, i
+							end
+						end
+						die.Faces[lightestIdx].Mass += added
+					end
+				end
+			end
+		end
 	end)
 	return true, nil
 end))

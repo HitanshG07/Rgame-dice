@@ -156,6 +156,24 @@ function V.numberArray(value: unknown, maxLen: number): (boolean, string?)
 	return true, nil
 end
 
+-- THE VALIDATOR TABLE, EXPORTED.
+--
+-- `V` was a module-local and every caller reached for `RemoteGateway.V`, which
+-- was nil -- so EIGHT registered handlers threw on their first line and returned
+-- `server_error`: SetAutoRoll, BuyUpgrade, BuyDiamondNode, ClaimVault,
+-- RedeemCode, ClaimQuest, ClaimChest and GetLeaderboard.
+--
+-- Every one of them LOOKED implemented. They were registered, they had real
+-- bodies, and a producer-direction sweep counted them as present. They failed
+-- at runtime, uniformly, on a nil index -- and because the gateway catches
+-- handler errors and returns an enumerated code, the failure surfaced to the
+-- player as a generic refusal rather than as a crash anyone would investigate.
+--
+-- The neighbouring constants WERE exported, which is what made the omission
+-- invisible: `RemoteGateway.MAX_STRING_ID` resolves fine on the same line that
+-- `RemoteGateway.V` does not.
+RemoteGateway.V = V
+
 RemoteGateway.MAX_STRING_CODE = MAX_STRING_CODE
 RemoteGateway.MAX_STRING_ID = MAX_STRING_ID
 

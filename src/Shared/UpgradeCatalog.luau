@@ -25,7 +25,28 @@ export type DiamondNodeDef = {
 }
 
 -- Keys match PlayerProfile.Upgrades table exactly
+-- Mass added to a die's purchased budget per MassBudget level.
+UpgradeCatalog.MASS_PER_LEVEL = 10
+
 local CASH_UPGRADES: { [string]: CashUpgradeDef } = {
+	-- FR-3.6: "Mass budget increases are purchased with Cash up to a per-shape
+	-- cap, and beyond that with Prestige Diamonds."
+	--
+	-- THE CASH HALF DID NOT EXIST. Only the Diamond node (`MassCeiling`) was ever
+	-- declared, so a player's die was stuck at its starting budget for an entire
+	-- first run -- the forge was a fixed puzzle with no progression in it at all.
+	--
+	-- Each level adds MASS_PER_LEVEL to the die's purchased budget, and the
+	-- per-shape `cashBudgetCap` in DiceCatalog is what stops it there; past that
+	-- the Diamond tree takes over. maxLevel is generous because the CAP is the
+	-- real limit and it differs by shape.
+	MassBudget = {
+		id = "MassBudget",
+		name = "Mass Budget",
+		maxLevel = 24,
+		baseCost = 400,
+		costMultiplier = 1.55,
+	},
 	AutoRollSpeed = {
 		id = "AutoRollSpeed",
 		name = "Auto-Roll Speed",

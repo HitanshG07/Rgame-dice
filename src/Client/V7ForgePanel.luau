@@ -91,6 +91,7 @@ function V7ForgePanel.new(): V7ForgeController
 	local faceElements: { string } = {}
 	local unlockedElements: { [string]: boolean } = { None = true }
 	local dieTabs: { any } = {}
+	local emptySlots = 0
 
 	-- The element order is fixed so the cycle is predictable: pressing the same
 	-- face repeatedly walks the same list every time.
@@ -122,6 +123,13 @@ function V7ForgePanel.new(): V7ForgeController
 		end)
 		table.insert(dieTabs, { container = tc, button = tb })
 	end
+
+	local slotNote = UITheme.label("", UDim2.fromScale(0.34, 0.05), UDim2.fromScale(0.64, 0.008),
+		UITheme.Colors.TextDim)
+	slotNote.TextScaled = true
+	slotNote.TextXAlignment = Enum.TextXAlignment.Right
+	slotNote.Visible = false
+	slotNote.Parent = bodyFrame
 
 	local header = UITheme.label("", UDim2.fromScale(0.6, 0.055), UDim2.fromScale(0.02, 0.065),
 		UITheme.Colors.TextGold)
@@ -277,10 +285,33 @@ function V7ForgePanel.new(): V7ForgeController
 		})
 	end
 
-	local costLbl = UITheme.label("", UDim2.fromScale(0.44, 0.05), UDim2.fromScale(0.02, 0.885),
+	local costLbl = UITheme.label("", UDim2.fromScale(0.5, 0.045), UDim2.fromScale(0.02, 0.825),
 		UITheme.Colors.TextDim)
 	costLbl.TextScaled = true
 	costLbl.Parent = bodyFrame
+
+	-- BUY MASS (FR-3.6). The forge had no way to increase a die's TOTAL mass, so
+	-- it was a one-time puzzle rather than something a player grows into. Moving
+	-- mass around is the tactic; buying more of it is the progression.
+	--
+	-- Priced and validated entirely server-side through the existing
+	-- `BuyUpgrade` path -- the client names the upgrade and shows the result, and
+	-- never computes an entitlement.
+	local buyMassC, buyMassBtn = UITheme.neumorphicButton("+ MASS", UITheme.Colors.Positive,
+		UDim2.fromScale(0.24, 0.07), UDim2.fromScale(0.02, 0.875))
+	buyMassC.Parent = bodyFrame
+	buyMassBtn.Activated:Connect(function()
+		UITheme.setEnabled(buyMassBtn, false)
+		task.spawn(function()
+			local ok, reason = NetClient.buyUpgrade("MassBudget")
+			if not ok then
+				UITheme.setButtonText(buyMassBtn, string.upper(tostring(reason or "NO")))
+				task.wait(1.2)
+			end
+			UITheme.setButtonText(buyMassBtn, "+ MASS")
+			refresh()
+		end)
+	end)
 
 	-- EVEN (operator-requested). Spreads the budget equally across every face.
 	--
@@ -291,7 +322,7 @@ function V7ForgePanel.new(): V7ForgeController
 	-- useful because rebuilding a flat spread by hand from a concentrated die is
 	-- a lot of taps.
 	local evenC, evenBtn = UITheme.neumorphicButton("EVEN", UITheme.Colors.Gems,
-		UDim2.fromScale(0.17, 0.07), UDim2.fromScale(0.30, 0.875))
+		UDim2.fromScale(0.15, 0.07), UDim2.fromScale(0.29, 0.875))
 	evenC.Parent = bodyFrame
 	evenBtn.Activated:Connect(function()
 		local count = #draft
@@ -306,11 +337,11 @@ function V7ForgePanel.new(): V7ForgeController
 	end)
 
 	local resetC, resetBtn = UITheme.neumorphicButton("RESET", UITheme.Colors.TextDim,
-		UDim2.fromScale(0.17, 0.07), UDim2.fromScale(0.49, 0.875))
+		UDim2.fromScale(0.15, 0.07), UDim2.fromScale(0.46, 0.875))
 	resetC.Parent = bodyFrame
 
 	local commitC, commitBtn = UITheme.neumorphicButton("FORGE", UITheme.Colors.Cash,
-		UDim2.fromScale(0.24, 0.07), UDim2.fromScale(0.70, 0.875))
+		UDim2.fromScale(0.21, 0.07), UDim2.fromScale(0.63, 0.875))
 	commitC.Parent = bodyFrame
 
 	----------------------------------------------------------------------------
@@ -392,16 +423,25 @@ function V7ForgePanel.new(): V7ForgeController
 		header.Text = string.format("DIE %d   %s  -  %d faces  -  %d mass",
 			activeDie, shapeId, count, math.floor(total + 0.5))
 
-		-- Tabs: one per owned slot, the active one held down.
+		-- Tabs: one per die that EXISTS, the active one held down. Numbered, not
+		-- shape-named -- labelling by shape made six slots read "D6 D6 D6 D6 D6
+		-- D6", identical and unusable.
 		for i, tab in ipairs(dieTabs) do
 			tab.container.Visible = i <= dieCount
 			if i <= dieCount then
-				-- NUMBERED, not shape-named. Labelling tabs by shape made six slots
-				-- read "D6 D6 D6 D6 D6 D6" -- identical and unusable -- and an
-				-- empty slot fell back to "D5", which looks like a die type.
 				UITheme.setButtonText(tab.button, tostring(i))
 				UITheme.setEnabled(tab.button, i ~= activeDie)
 			end
+		end
+		-- Owning a slot with no die in it is a real state and the player should
+		-- be told, not left wondering why the tab count does not match what they
+		-- bought.
+		if emptySlots > 0 then
+			slotNote.Text = string.format("%d empty slot%s -- add a die in SLOTS",
+				emptySlots, if emptySlots == 1 then "" else "s")
+			slotNote.Visible = true
+		else
+			slotNote.Visible = false
 		end
 		readout.Text = string.format(
 			"Projected: %s per roll   |   Void risk %.1f%%   -   heavier faces land LESS often",
@@ -495,7 +535,16 @@ function V7ForgePanel.new(): V7ForgeController
 		UITheme.setButtonText(commitBtn, "...")
 		UITheme.setEnabled(commitBtn, false)
 		task.spawn(function()
-			local ok, reason = NetClient.forge(1, out)
+			-- `activeDie`, NOT a literal 1.
+			--
+			-- THE BUG THIS FIXES DESTROYED DATA. The commit sent `forge(1, out)`
+			-- regardless of which tab was open, so editing die 2 and pressing
+			-- FORGE wrote die 2's distribution ONTO DIE 1 -- silently replacing a
+			-- build the player had already paid to create, and reported as
+			-- success. Every other control in this panel already used `activeDie`;
+			-- this one line did not, which is exactly the kind of miss that
+			-- survives a screenshot.
+			local ok, reason = NetClient.forge(activeDie, out)
 			if ok then
 				UITheme.setButtonText(commitBtn, "FORGED")
 			else
@@ -518,7 +567,19 @@ function V7ForgePanel.new(): V7ForgeController
 
 	applySnapshot = function(state: any)
 			lastSnapshot = state
-			dieCount = math.clamp(tonumber(state.dieSlots) or 1, 1, 7)
+			-- TABS FOLLOW THE DICE THAT EXIST, not the slots owned.
+			--
+			-- `dieSlots` is the ENTITLEMENT -- how many the player may have -- and
+			-- `#state.dice` is how many they actually do. Drawing tabs from the
+			-- entitlement produced tabs 5 and 6 for a player with four dice, and
+			-- selecting one found no die, returned early, and left the previous
+			-- die's numbers on screen under the new tab's header. The player was
+			-- then editing what looked like an empty slot and was really editing
+			-- nothing.
+			local owned = if type(state.dice) == "table" then #state.dice else 1
+			local slots = math.clamp(tonumber(state.dieSlots) or 1, 1, 7)
+			dieCount = math.clamp(owned, 1, slots)
+			emptySlots = math.max(0, slots - owned)
 			if activeDie > dieCount then
 				activeDie = 1
 			end
