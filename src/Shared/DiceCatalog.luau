@@ -28,6 +28,22 @@ export type ShapeDef = {
 -- are set to 10 mass per face at every shape so the sweep starts from a clean
 -- baseline where shape differs only in face count.
 local SHAPES: { [string]: ShapeDef } = {
+	D2 = {
+		id = "D2",
+		faceCount = 2,
+		massFloor = 1,
+		defaultBudget = 20,
+		cashBudgetCap = 100,
+		diamondCeiling = 500,
+	},
+	D3 = {
+		id = "D3",
+		faceCount = 3,
+		massFloor = 1,
+		defaultBudget = 30,
+		cashBudgetCap = 150,
+		diamondCeiling = 750,
+	},
 	D4 = {
 		id = "D4",
 		faceCount = 4,
@@ -51,6 +67,14 @@ local SHAPES: { [string]: ShapeDef } = {
 		defaultBudget = 80,
 		cashBudgetCap = 400,
 		diamondCeiling = 2000,
+	},
+	D10 = {
+		id = "D10",
+		faceCount = 10,
+		massFloor = 1,
+		defaultBudget = 100,
+		cashBudgetCap = 500,
+		diamondCeiling = 2500,
 	},
 	D12 = {
 		id = "D12",

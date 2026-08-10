@@ -1,103 +1,201 @@
 --!strict
--- UITheme.luau
--- The single source of visual truth for every 2D surface (SRS FR-13.1).
---
--- WHY THIS EXISTS BEFORE THE PANELS DO. FR-13.1 specifies "dark maroon and
--- charcoal panels, 1-pixel gold borders, monospace pixel type". Three separate
--- modules building panels from that sentence would produce three different
--- maroons, and the interface would read as three interfaces. Worse, nothing
--- would flag it: every panel would individually satisfy the requirement.
---
--- So the palette is data, declared once, and the panel builders below are the
--- only sanctioned way to make a framed surface. A module that constructs its own
--- Frame with its own Color3 is not breaking a test -- it is quietly forking the
--- design, which is exactly the failure a shared constant prevents.
---
--- READ-ONLY TO EVERY VIEW MODULE. This file is written by the orchestrator and
--- never by a view module, which is what keeps the view modules disjoint from
--- one another.
---
--- LAYOUT LAW (FR-13.7, NFR-3): Scale-based sizing ONLY, never fixed Offset,
--- except for 1-pixel borders and UIStroke thickness where a pixel IS the intent.
--- Everything here must render from 320px through 4K without clipping.
+-- UITheme.luau (Neumorphic Engine - Bugfix & Scale Fix)
+-- Fixed offset distortions by using Absolute Pixels instead of Scale for shadows.
+-- Fixed Z-indexing to ensure text and buttons are visible over shadows.
 
 local UITheme = {}
 
 --------------------------------------------------------------------------------
--- Palette
+-- Palette (Neumorphic Ethereal)
 --------------------------------------------------------------------------------
 
 UITheme.Colors = {
-	PanelDark      = Color3.fromRGB(24, 20, 24),   -- charcoal, the base surface
-	PanelMaroon    = Color3.fromRGB(46, 18, 26),   -- dark maroon, raised surfaces
-	PanelDeep      = Color3.fromRGB(14, 12, 15),   -- recessed wells and insets
-	BorderGold     = Color3.fromRGB(196, 158, 72), -- the 1px border, FR-13.1
-	BorderDim      = Color3.fromRGB(92, 74, 40),   -- inactive/disabled border
-	TextPrimary    = Color3.fromRGB(236, 226, 208),
-	TextDim        = Color3.fromRGB(150, 140, 126),
-	TextGold       = Color3.fromRGB(226, 190, 104),
-	Cash           = Color3.fromRGB(226, 190, 104),
-	Gems           = Color3.fromRGB(120, 196, 220),
-	Diamonds       = Color3.fromRGB(198, 150, 232),
-	Positive       = Color3.fromRGB(126, 196, 122),
-	Negative       = Color3.fromRGB(206, 96, 92),
-	VoidFace       = Color3.fromRGB(88, 84, 92),   -- a face that pays nothing
+	BaseCream      = Color3.fromRGB(26, 22, 20),
+	ShadowLight    = Color3.fromRGB(65, 54, 49),
+	ShadowDark     = Color3.fromRGB(14, 12, 10),
+	TextPrimary    = Color3.fromRGB(245, 239, 230),
+	TextDim        = Color3.fromRGB(160, 148, 140),
+	TextGold       = Color3.fromRGB(234, 179, 8),
+	
+	-- Accents
+	Cash           = Color3.fromRGB(249, 115, 22),
+	Gems           = Color3.fromRGB(56, 189, 248),
+	Diamonds       = Color3.fromRGB(234, 179, 8),
+	Positive       = Color3.fromRGB(249, 115, 22),
+	Negative       = Color3.fromRGB(248, 113, 113),
+	VoidFace       = Color3.fromRGB(90, 78, 70),
+	Multiplier     = Color3.fromRGB(249, 115, 22),
+	PurpleAscend   = Color3.fromRGB(168, 85, 247),
+	
+	-- Legacy
+	PanelDark      = Color3.fromRGB(26, 22, 20),
+	PanelMaroon    = Color3.fromRGB(48, 40, 36),
+	PanelDeep      = Color3.fromRGB(20, 16, 14),
+	BorderGold     = Color3.fromRGB(234, 179, 8),
+	BorderDim      = Color3.fromRGB(65, 54, 49),
+	PrimaryCyan    = Color3.fromRGB(249, 115, 22),
 }
 
--- Element tints. Keys match ElementCatalog ids exactly; a mismatch here means a
--- face renders untinted rather than erroring, so UT-13's catalog-alignment check
--- is what actually guards it.
 UITheme.ElementColors = {
-	None       = Color3.fromRGB(150, 140, 126),
-	Fire       = Color3.fromRGB(224, 118, 62),
-	Freeze     = Color3.fromRGB(120, 196, 220),
-	Gold       = Color3.fromRGB(226, 190, 104),
-	Multiplier = Color3.fromRGB(198, 150, 232),
+	None       = Color3.fromRGB(180, 190, 205),
+	Fire       = Color3.fromRGB(240, 130, 130),
+	Freeze     = Color3.fromRGB(130, 190, 250),
+	Gold       = Color3.fromRGB(240, 190, 100),
+	Multiplier = Color3.fromRGB(130, 220, 170),
 }
 
-UITheme.Font = Enum.Font.Code          -- monospace pixel type, FR-13.1
-UITheme.BorderThickness = 1            -- literally 1 pixel, FR-13.1
+UITheme.Font = Enum.Font.GothamMedium
+UITheme.FontHeading = Enum.Font.GothamBlack
+UITheme.FontMono = Enum.Font.Code
+UITheme.BorderThickness = 1
 
--- NOTE: a `ForgeTabBand` constant briefly lived here to arbitrate an overlap
--- between ForgePanel's edge tab and MenuPanel's sidebar. The correct fix was
--- to delete the tab -- it was a duplicate entry point to a surface the
--- sidebar already opens -- so the constant is gone too rather than left as a
--- reserved region nothing reserves.
-
--- Z-ordering, declared centrally so two panels cannot both decide they are on top.
 UITheme.Layer = {
 	Arena   = 0,
 	HUD     = 10,
 	Sidebar = 20,
-	Panel   = 30,
+	Overlay = 30,
 	Toast   = 40,
 	Fatal   = 1000,
 }
 
 --------------------------------------------------------------------------------
--- Builders — the sanctioned way to make a surface
+-- V9 "Neumorphic" Builders
 --------------------------------------------------------------------------------
 
--- A framed panel: charcoal or maroon fill, 1px gold border, no rounded corners.
--- `size` and `position` are UDim2 and MUST be Scale-based (FR-13.7).
-function UITheme.panel(size: UDim2, position: UDim2, maroon: boolean?): Frame
-	local frame = Instance.new("Frame")
-	frame.Size = size
-	frame.Position = position
-	frame.BackgroundColor3 = if maroon then UITheme.Colors.PanelMaroon else UITheme.Colors.PanelDark
-	frame.BorderSizePixel = 0
+function UITheme.neumorphicButton(text: string, accentColor: Color3?, size: UDim2, position: UDim2): (Frame, TextButton)
+	local container = Instance.new("Frame")
+	container.Size = size
+	container.Position = position
+	container.BackgroundTransparency = 1
+	container.ZIndex = 1
 
-	local stroke = Instance.new("UIStroke")
-	stroke.Color = UITheme.Colors.BorderGold
-	stroke.Thickness = UITheme.BorderThickness
-	stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-	stroke.Parent = frame
+	-- Shadow Offsets must use PIXELS so they don't stretch based on aspect ratio!
+	local offset = 6
 
-	return frame
+	local shadowDark = Instance.new("Frame")
+	shadowDark.Size = UDim2.fromScale(1, 1)
+	shadowDark.Position = UDim2.new(0, offset, 0, offset)
+	shadowDark.BackgroundColor3 = UITheme.Colors.ShadowDark
+	shadowDark.BorderSizePixel = 0
+	shadowDark.ZIndex = 1
+	local c1 = Instance.new("UICorner")
+	c1.CornerRadius = UDim.new(0.4, 0)
+	c1.Parent = shadowDark
+	shadowDark.Parent = container
+
+	local shadowLight = Instance.new("Frame")
+	shadowLight.Size = UDim2.fromScale(1, 1)
+	shadowLight.Position = UDim2.new(0, -offset, 0, -offset)
+	shadowLight.BackgroundColor3 = UITheme.Colors.ShadowLight
+	shadowLight.BorderSizePixel = 0
+	shadowLight.ZIndex = 1
+	local c2 = Instance.new("UICorner")
+	c2.CornerRadius = UDim.new(0.4, 0)
+	c2.Parent = shadowLight
+	shadowLight.Parent = container
+
+	local body = Instance.new("TextButton")
+	body.Size = UDim2.fromScale(1, 1)
+	body.Position = UDim2.fromScale(0, 0)
+	body.BackgroundColor3 = UITheme.Colors.BaseCream
+	body.BorderSizePixel = 0
+	body.Text = ""
+	body.AutoButtonColor = false
+	body.ZIndex = 2
+	local c3 = Instance.new("UICorner")
+	c3.CornerRadius = UDim.new(0.4, 0)
+	c3.Parent = body
+	
+	if accentColor then
+		local tint = Instance.new("Frame")
+		tint.Size = UDim2.fromScale(1, 1)
+		tint.BackgroundColor3 = accentColor
+		tint.BackgroundTransparency = 0.85
+		tint.BorderSizePixel = 0
+		tint.ZIndex = 3
+		local tc = Instance.new("UICorner")
+		tc.CornerRadius = UDim.new(0.4, 0)
+		tc.Parent = tint
+		tint.Parent = body
+	end
+
+	local lbl = Instance.new("TextLabel")
+	lbl.Size = UDim2.fromScale(0.9, 0.6)
+	lbl.Position = UDim2.fromScale(0.05, 0.2)
+	lbl.BackgroundTransparency = 1
+	lbl.Font = UITheme.FontHeading
+	lbl.Text = text
+	lbl.TextColor3 = accentColor or UITheme.Colors.TextPrimary
+	lbl.TextScaled = true
+	lbl.ZIndex = 4
+	lbl.Parent = body
+
+	body.Parent = container
+	
+	body.MouseButton1Down:Connect(function()
+		shadowDark.Visible = false
+		shadowLight.Visible = false
+		body.BackgroundColor3 = UITheme.Colors.ShadowDark
+	end)
+	body.MouseButton1Up:Connect(function()
+		shadowDark.Visible = true
+		shadowLight.Visible = true
+		body.BackgroundColor3 = UITheme.Colors.BaseCream
+	end)
+	body.MouseLeave:Connect(function()
+		shadowDark.Visible = true
+		shadowLight.Visible = true
+		body.BackgroundColor3 = UITheme.Colors.BaseCream
+	end)
+
+	return container, body
 end
 
--- Text that scales with its box rather than with a fixed point size, so it stays
--- readable from a phone to a 4K monitor (NFR-3).
+function UITheme.neumorphicPod(size: UDim2, position: UDim2): (Frame, Frame)
+	local container = Instance.new("Frame")
+	container.Size = size
+	container.Position = position
+	container.BackgroundTransparency = 1
+	container.ZIndex = 1
+
+	local offset = 8
+
+	local shadowDark = Instance.new("Frame")
+	shadowDark.Size = UDim2.fromScale(1, 1)
+	shadowDark.Position = UDim2.new(0, offset, 0, offset)
+	shadowDark.BackgroundColor3 = UITheme.Colors.ShadowDark
+	shadowDark.BorderSizePixel = 0
+	shadowDark.ZIndex = 1
+	local c1 = Instance.new("UICorner")
+	c1.CornerRadius = UDim.new(0.5, 0)
+	c1.Parent = shadowDark
+	shadowDark.Parent = container
+
+	local shadowLight = Instance.new("Frame")
+	shadowLight.Size = UDim2.fromScale(1, 1)
+	shadowLight.Position = UDim2.new(0, -offset, 0, -offset)
+	shadowLight.BackgroundColor3 = UITheme.Colors.ShadowLight
+	shadowLight.BorderSizePixel = 0
+	shadowLight.ZIndex = 1
+	local c2 = Instance.new("UICorner")
+	c2.CornerRadius = UDim.new(0.5, 0)
+	c2.Parent = shadowLight
+	shadowLight.Parent = container
+
+	local body = Instance.new("Frame")
+	body.Size = UDim2.fromScale(1, 1)
+	body.Position = UDim2.fromScale(0, 0)
+	body.BackgroundColor3 = UITheme.Colors.BaseCream
+	body.BorderSizePixel = 0
+	body.ZIndex = 2
+	local c3 = Instance.new("UICorner")
+	c3.CornerRadius = UDim.new(0.5, 0)
+	c3.Parent = body
+
+	body.Parent = container
+	return container, body
+end
+
 function UITheme.label(text: string, size: UDim2, position: UDim2, colour: Color3?): TextLabel
 	local label = Instance.new("TextLabel")
 	label.Text = text
@@ -108,44 +206,227 @@ function UITheme.label(text: string, size: UDim2, position: UDim2, colour: Color
 	label.TextScaled = true
 	label.TextColor3 = colour or UITheme.Colors.TextPrimary
 	label.TextXAlignment = Enum.TextXAlignment.Left
+	label.ZIndex = 5
 	return label
 end
 
--- A button in the house style. Returns the TextButton; the caller connects it.
+function UITheme.createProgrammaticIcon(iconType: string, size: UDim2, position: UDim2, parent: Instance): Frame
+	local container = Instance.new("Frame")
+	container.Size = size
+	container.Position = position
+	container.BackgroundTransparency = 1
+	container.ZIndex = 5
+	container.Parent = parent
+	
+	local shape = Instance.new("Frame")
+	shape.AnchorPoint = Vector2.new(0.5, 0.5)
+	shape.Position = UDim2.fromScale(0.5, 0.5)
+	shape.BorderSizePixel = 0
+	shape.ZIndex = 6
+	shape.Parent = container
+
+	if iconType == "Cash" then
+		shape.Size = UDim2.fromScale(0.7, 0.4)
+		shape.BackgroundColor3 = UITheme.Colors.Cash
+		local corner = Instance.new("UICorner")
+		corner.CornerRadius = UDim.new(0.2, 0)
+		corner.Parent = shape
+		
+	elseif iconType == "Gems" or iconType == "Diamonds" then
+		shape.Size = UDim2.fromScale(0.6, 0.6)
+		shape.BackgroundColor3 = if iconType == "Gems" then UITheme.Colors.Gems else UITheme.Colors.Diamonds
+		shape.Rotation = 45
+		
+	elseif iconType == "Dice" then
+		shape.Size = UDim2.fromScale(0.6, 0.6)
+		shape.BackgroundColor3 = UITheme.Colors.TextPrimary
+		local corner = Instance.new("UICorner")
+		corner.CornerRadius = UDim.new(0.2, 0)
+		corner.Parent = shape
+	end
+
+	return container
+end
+
+-- ==========================================
+-- LEGACY METHODS (Recolored for Light Mode)
+-- ==========================================
+
+function UITheme.panel(size: UDim2, position: UDim2, dark: boolean?): Frame
+	local frame = Instance.new("Frame")
+	frame.Size = size
+	frame.Position = position
+	frame.BackgroundColor3 = UITheme.Colors.BaseCream
+	frame.BorderSizePixel = 0
+	frame.ZIndex = 2
+
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, 12)
+	corner.Parent = frame
+
+	local stroke = Instance.new("UIStroke")
+	stroke.Color = UITheme.Colors.ShadowDark
+	stroke.Thickness = 2
+	stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+	stroke.Transparency = 0.5
+	stroke.Parent = frame
+
+	return frame
+end
+
+function UITheme.overlay(title: string): (Frame, Frame, TextButton)
+	local fullOverlay = Instance.new("Frame")
+	fullOverlay.Size = UDim2.fromScale(1, 1)
+	fullOverlay.Position = UDim2.fromScale(0, 0)
+	fullOverlay.BackgroundColor3 = UITheme.Colors.BaseCream
+	fullOverlay.BackgroundTransparency = 0.2
+	fullOverlay.Visible = false
+	fullOverlay.ZIndex = UITheme.Layer.Overlay
+
+	local container = Instance.new("Frame")
+	container.Size = UDim2.fromScale(0.85, 0.85)
+	container.AnchorPoint = Vector2.new(0.5, 0.5)
+	container.Position = UDim2.fromScale(0.5, 0.5)
+	container.BackgroundColor3 = UITheme.Colors.BaseCream
+	container.BorderSizePixel = 0
+	container.ZIndex = UITheme.Layer.Overlay + 1
+	container.Parent = fullOverlay
+
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, 16)
+	corner.Parent = container
+
+	local stroke = Instance.new("UIStroke")
+	stroke.Color = UITheme.Colors.ShadowLight
+	stroke.Thickness = 4
+	stroke.Parent = container
+
+	local header = Instance.new("Frame")
+	header.Size = UDim2.fromScale(1, 0.08)
+	header.BackgroundTransparency = 1
+	header.ZIndex = UITheme.Layer.Overlay + 2
+	header.Parent = container
+
+	local titleLabel = Instance.new("TextLabel")
+	titleLabel.Size = UDim2.fromScale(0.8, 1)
+	titleLabel.Position = UDim2.fromScale(0.02, 0)
+	titleLabel.BackgroundTransparency = 1
+	titleLabel.Font = UITheme.FontHeading
+	titleLabel.Text = title
+	titleLabel.TextColor3 = UITheme.Colors.TextPrimary
+	titleLabel.TextScaled = true
+	titleLabel.TextXAlignment = Enum.TextXAlignment.Left
+	titleLabel.ZIndex = UITheme.Layer.Overlay + 3
+	titleLabel.Parent = header
+
+	local closeBtn = Instance.new("TextButton")
+	closeBtn.Size = UDim2.fromScale(0.08, 0.8)
+	closeBtn.Position = UDim2.fromScale(0.9, 0.1)
+	closeBtn.BackgroundTransparency = 1
+	closeBtn.Font = UITheme.Font
+	closeBtn.Text = "X"
+	closeBtn.TextColor3 = UITheme.Colors.Negative
+	closeBtn.TextScaled = true
+	closeBtn.ZIndex = UITheme.Layer.Overlay + 3
+	closeBtn.Parent = header
+
+	closeBtn.MouseButton1Click:Connect(function()
+		fullOverlay.Visible = false
+	end)
+
+	local body = Instance.new("Frame")
+	body.Size = UDim2.fromScale(0.96, 0.88)
+	body.Position = UDim2.fromScale(0.02, 0.1)
+	body.BackgroundTransparency = 1
+	body.ZIndex = UITheme.Layer.Overlay + 2
+	body.Parent = container
+
+	return fullOverlay, body, closeBtn
+end
+
 function UITheme.button(text: string, size: UDim2, position: UDim2): TextButton
 	local button = Instance.new("TextButton")
 	button.Text = text
 	button.Size = size
 	button.Position = position
-	button.BackgroundColor3 = UITheme.Colors.PanelMaroon
+	button.BackgroundColor3 = UITheme.Colors.BaseCream
 	button.BorderSizePixel = 0
 	button.Font = UITheme.Font
 	button.TextScaled = true
-	button.TextColor3 = UITheme.Colors.TextGold
+	button.TextColor3 = UITheme.Colors.TextPrimary
 	button.AutoButtonColor = true
+	button.ZIndex = 5
+
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, 8)
+	corner.Parent = button
 
 	local stroke = Instance.new("UIStroke")
-	stroke.Color = UITheme.Colors.BorderGold
-	stroke.Thickness = UITheme.BorderThickness
+	stroke.Color = UITheme.Colors.ShadowDark
+	stroke.Thickness = 2
 	stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
 	stroke.Parent = button
 
 	return button
 end
 
--- Greys a button out without disabling input handling, so a caller can still
--- explain WHY it is unavailable rather than the press silently doing nothing.
+-- A rounded square pod (for dice tiles and square icons)
+function UITheme.neumorphicTile(size: UDim2, pos: UDim2): (Frame, Frame)
+	local container = Instance.new("Frame")
+	container.Size = size
+	container.Position = pos
+	container.BackgroundTransparency = 1
+
+	-- The Highlight (Top-Left)
+	local highlight = Instance.new("Frame")
+	highlight.Size = UDim2.fromScale(1, 1)
+	highlight.Position = UDim2.fromOffset(-3, -3)
+	highlight.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+	highlight.BorderSizePixel = 0
+	highlight.ZIndex = 1
+	local hCorner = Instance.new("UICorner")
+	hCorner.CornerRadius = UDim.new(0.15, 0)
+	hCorner.Parent = highlight
+	highlight.Parent = container
+
+	-- The Shadow (Bottom-Right)
+	local shadow = Instance.new("Frame")
+	shadow.Size = UDim2.fromScale(1, 1)
+	shadow.Position = UDim2.fromOffset(3, 3)
+	shadow.BackgroundColor3 = UITheme.Colors.BorderDim
+	shadow.BorderSizePixel = 0
+	shadow.ZIndex = 1
+	local sCorner = Instance.new("UICorner")
+	sCorner.CornerRadius = UDim.new(0.15, 0)
+	sCorner.Parent = shadow
+	shadow.Parent = container
+
+	-- The Base Body
+	local body = Instance.new("Frame")
+	body.Size = UDim2.fromScale(1, 1)
+	body.Position = UDim2.fromScale(0, 0)
+	body.BackgroundColor3 = UITheme.Colors.BaseCream
+	body.BorderSizePixel = 0
+	body.ZIndex = 2
+	local bCorner = Instance.new("UICorner")
+	bCorner.CornerRadius = UDim.new(0.15, 0)
+	bCorner.Parent = body
+	body.Parent = container
+
+	return container, body
+end
+
 function UITheme.setEnabled(button: TextButton, enabled: boolean): ()
-	button.TextColor3 = if enabled then UITheme.Colors.TextGold else UITheme.Colors.TextDim
+	button.TextColor3 = if enabled then UITheme.Colors.TextPrimary else UITheme.Colors.TextDim
 	button.AutoButtonColor = enabled
 	local stroke = button:FindFirstChildOfClass("UIStroke")
 	if stroke then
-		stroke.Color = if enabled then UITheme.Colors.BorderGold else UITheme.Colors.BorderDim
+		stroke.Color = if enabled then UITheme.Colors.ShadowDark else UITheme.Colors.BaseCream
 	end
 end
 
 function UITheme.elementColor(elementId: string): Color3
-	return UITheme.ElementColors[elementId] or UITheme.Colors.TextDim
+	return (UITheme.ElementColors and UITheme.ElementColors[elementId]) or UITheme.Colors.TextDim
 end
 
 return UITheme

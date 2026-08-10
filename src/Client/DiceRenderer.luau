@@ -72,6 +72,8 @@ local DEFAULT_SHAPE = "D6"
 -- An id absent from this table is an UNKNOWN shape and is drawn unnumbered
 -- rather than guessed at.
 local FACE_COUNTS: { [string]: number } = {
+	D2 = 2,
+	D3 = 3,
 	D4 = 4,
 	D6 = 6,
 	D8 = 8,
@@ -159,8 +161,7 @@ local REST_TILT_X = math.rad(22)
 local REST_TILT_Y = math.rad(28)
 
 -- Where the dice models live once generated. The renderer never builds geometry
--- itself -- it clones from here.
-local DICE_FOLDER = "dice_faces"
+local DICE_FOLDER = "DiceGroupFinal"
 
 --------------------------------------------------------------------------------
 -- Types
@@ -168,8 +169,8 @@ local DICE_FOLDER = "dice_faces"
 
 type DieVisual = {
 	tile: Frame,
-	viewport: ViewportFrame,
-	-- The 3D solid currently inside the viewport, and the shape it represents.
+	modelRadius: number,
+	-- The 3D solid currently representing the die.
 	-- nil until a known shape arrives, because a die whose shape is unknown must
 	-- not be drawn as some other shape.
 	model: Model?,
@@ -258,10 +259,10 @@ local function findDiceFolder(): Folder?
 	if diceFolder ~= nil and diceFolder.Parent ~= nil then
 		return diceFolder
 	end
-	local found = ReplicatedStorage:FindFirstChild(DICE_FOLDER)
-	if found ~= nil and found:IsA("Folder") then
-		diceFolder = found
-		return found
+	local found = Workspace:FindFirstChild(DICE_FOLDER)
+	if found ~= nil and (found:IsA("Folder") or found:IsA("Model")) then
+		diceFolder = found :: Folder
+		return found :: Folder
 	end
 	return nil
 end
@@ -277,7 +278,7 @@ local function watchForDice(): RBXScriptConnection?
 	if findDiceFolder() ~= nil then
 		return nil
 	end
-	return ReplicatedStorage.ChildAdded:Connect(function(child: Instance)
+	return Workspace.ChildAdded:Connect(function(child: Instance)
 		if child.Name == DICE_FOLDER and child:IsA("Folder") then
 			diceFolder = child :: Folder
 			local notify = onDiceAvailable
@@ -306,33 +307,22 @@ end
 -- die vanish.
 local function rotationShowingFace(model: Model, faceIndex: number): CFrame
 	local normal = model:GetAttribute("FaceNormal" .. tostring(faceIndex))
+	local up = model:GetAttribute("FaceUp" .. tostring(faceIndex))
+	
 	if typeof(normal) ~= "Vector3" then
 		return CFrame.identity
 	end
 
-	local n = normal :: Vector3
-	if n.Magnitude < 1e-4 then
-		return CFrame.identity
-	end
-	n = n.Unit
+	local n = (normal :: Vector3).Unit
+	local u = if typeof(up) == "Vector3"
+		then (up :: Vector3).Unit
+		else (if math.abs(n.Y) < 0.99 then (Vector3.new(0, 1, 0) - n * n.Y).Unit else Vector3.new(0, 0, -n.Y).Unit)
 
-	local target = Vector3.new(0, 0, 1) -- toward the viewport camera
-	local dot = math.clamp(n:Dot(target), -1, 1)
+	-- Ensure u is orthogonal to n
+	u = (u - n * u:Dot(n)).Unit
+	local r = u:Cross(n).Unit
 
-	if dot > 0.9999 then
-		-- Already facing the camera.
-		return CFrame.identity
-	end
-	if dot < -0.9999 then
-		-- Facing directly away: any perpendicular axis gives a valid half-turn.
-		return CFrame.fromAxisAngle(Vector3.new(0, 1, 0), math.pi)
-	end
-
-	local axis = n:Cross(target)
-	if axis.Magnitude < 1e-6 then
-		return CFrame.identity
-	end
-	return CFrame.fromAxisAngle(axis.Unit, math.acos(dot))
+	return CFrame.fromMatrix(Vector3.zero, r, u, n)
 end
 
 -- Swaps the solid inside a tile's viewport to `shapeId`, or clears it when the
@@ -359,8 +349,9 @@ local function applyModel(visual: DieVisual, shapeId: string?): ()
 		return
 	end
 
-	local existing = visual.model
-	if existing ~= nil then
+	if visual.model then
+		local existing = visual.model
+		existing.Parent = nil
 		existing:Destroy()
 	end
 	visual.model = nil
@@ -370,55 +361,37 @@ local function applyModel(visual: DieVisual, shapeId: string?): ()
 		return
 	end
 
-	local folder = findDiceFolder()
-	if folder == nil then
+	local folder = game:GetService("ReplicatedStorage"):FindFirstChild("dice_faces")
+	if not folder then
+		print("DiceRenderer applyModel failed: no dice_faces folder in ReplicatedStorage!")
 		return
 	end
 	local source = folder:FindFirstChild(shapeId)
-	if source == nil or not source:IsA("Model") then
+	if not source then
+		print("DiceRenderer applyModel failed: source model " .. tostring(shapeId) .. " not found!")
 		return
 	end
-
+	
 	local clone = source:Clone()
-	clone.Parent = visual.viewport
+	clone.PrimaryPart = clone:FindFirstChild("Pivot")
+	
+	local viewport = visual.tile:FindFirstChild("Viewport", true)
+	if viewport then
+		clone.Parent = viewport
+	end
 	visual.model = clone
 
-	-- FRAME THE DIE THAT IS ACTUALLY THERE, rather than the one a constant says
-	-- should be. Camera distance is solved from this model's own measured radius
-	-- so every shape fills the tile identically -- a D12 and a D4 are visually
-	-- the same size on the board even though their geometry is not.
-	--
-	-- Solved here rather than fixed at the top of the file because two attempts
-	-- at a hand-tuned constant were wrong: the number has to agree with whatever
-	-- the builder's normalisation actually produced, and the only way to be sure
-	-- of that is to measure the clone. A camera three times too far away renders
-	-- a perfectly good die as a speck of thin edges, which is indistinguishable
-	-- from broken geometry until you measure it.
-	local camera = visual.viewport.CurrentCamera
-	if camera ~= nil then
-		local centre = clone:GetPivot().Position
-		local radius = 0
-		for _, d in ipairs(clone:GetDescendants()) do
-			if d:IsA("BasePart") and d.Name ~= "Pivot" then
-				local reach = (d.Position - centre).Magnitude + d.Size.Magnitude * 0.5
-				if reach > radius then
-					radius = reach
-				end
+	local centre = clone:GetPivot().Position
+	local radius = 0
+	for _, d in ipairs(clone:GetDescendants()) do
+		if d:IsA("BasePart") and d.Name ~= "Pivot" then
+			local reach = (d.Position - centre).Magnitude + d.Size.Magnitude * 0.5
+			if reach > radius then
+				radius = reach
 			end
 		end
-		if radius > 1e-3 then
-			local distance = (radius / CAMERA_FILL) / math.tan(math.rad(CAMERA_FOV) * 0.5)
-			-- Orbited off both axes so three faces are visible at rest. The die
-			-- itself is never tilted -- moving the CAMERA keeps the server's
-			-- chosen face pointing squarely down +Z, which is the assumption
-			-- `rotationShowingFace` is built on.
-			local eye = CFrame.Angles(0, REST_TILT_Y, 0)
-				* CFrame.Angles(REST_TILT_X, 0, 0)
-				* CFrame.new(0, 0, distance)
-			camera.CFrame = CFrame.lookAt(centre + eye.Position, centre)
-			camera.FieldOfView = CAMERA_FOV
-		end
 	end
+	visual.modelRadius = radius
 end
 
 --------------------------------------------------------------------------------
@@ -427,11 +400,29 @@ end
 
 local function makeVisual(index: number): DieVisual
 	local tile = Instance.new("Frame")
+	tile.Size = UDim2.fromScale(1, 1)
+	tile.BackgroundTransparency = 1
 	tile.Name = "Die" .. tostring(index)
 	tile.AnchorPoint = Vector2.new(0.5, 0.5)
-	tile.BackgroundColor3 = UITheme.Colors.PanelMaroon
-	tile.BorderSizePixel = 0
 	tile.Visible = false
+	
+	local body = tile
+	
+	local viewport = Instance.new("ViewportFrame")
+	viewport.Name = "Viewport"
+	viewport.Size = UDim2.fromScale(1, 1)
+	viewport.BackgroundTransparency = 1
+	viewport.Ambient = Color3.fromRGB(80, 80, 80)
+	viewport.LightColor = Color3.fromRGB(220, 220, 220)
+	viewport.LightDirection = Vector3.new(-1, -1, -1)
+	viewport.ZIndex = 2
+	viewport.Parent = body
+	
+	local cam = Instance.new("Camera")
+	cam.FieldOfView = CAMERA_FOV
+	cam.CFrame = CFrame.new(0, 0, 0)
+	viewport.CurrentCamera = cam
+	cam.Parent = viewport
 
 	-- A die must be SQUARE on screen. A fraction of a non-square parent is not,
 	-- so the aspect is constrained rather than assumed.
@@ -444,39 +435,18 @@ local function makeVisual(index: number): DieVisual
 	stroke.Color = UITheme.Colors.BorderGold
 	stroke.Thickness = UITheme.BorderThickness
 	stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-	stroke.Parent = tile
+	stroke.Enabled = false -- Hidden for 3D dice focus
+	stroke.Parent = body
+    
+    -- Make body background transparent
+    body.BackgroundTransparency = 1
+    for _, child in ipairs(tile:GetChildren()) do
+        if child:IsA("ImageLabel") then
+            child.ImageTransparency = 1 -- Hide the drop shadow
+        end
+    end
 
-	-- THE DIE ITSELF: a real 3D solid, rendered inside the flat tile.
-	--
-	-- A `ViewportFrame` draws a 3D model inside a 2D UI element with its own
-	-- camera and no relationship to the world. That is what lets the board stay
-	-- a flat ScreenGui while the dice stay solid -- and it is what buys back the
-	-- thing flatness cost: a die with uneven mass is VISIBLY lopsided as it
-	-- tumbles, so FR-2's inverted-mass rule is once again something you watch
-	-- happen rather than infer from a number appearing less often.
-	--
-	-- Empty until `applyConfig` learns the shape. A ViewportFrame with no model
-	-- draws nothing, which is the honest state before StateSync arrives.
-	local viewport = Instance.new("ViewportFrame")
-	viewport.Name = "Die3D"
-	viewport.Size = UDim2.fromScale(1, 1)
-	viewport.Position = UDim2.fromScale(0, 0)
-	viewport.BackgroundTransparency = 1
-	viewport.BorderSizePixel = 0
-	-- Lit from the front so facets read as facets. Ambient alone flattens the
-	-- solid back into a silhouette, which would defeat the entire purpose.
-	viewport.LightDirection = Vector3.new(-0.3, -0.6, -1).Unit
-	viewport.Ambient = Color3.fromRGB(120, 112, 120)
-	viewport.LightColor = Color3.fromRGB(255, 248, 232)
-	viewport.Parent = tile
-
-	-- Placed provisionally; `applyModel` re-solves the distance against the
-	-- actual die once one is cloned in. Until then there is nothing to frame.
-	local vpCamera = Instance.new("Camera")
-	vpCamera.CFrame = CFrame.lookAt(Vector3.new(0, 0, 8), Vector3.zero)
-	vpCamera.FieldOfView = CAMERA_FOV
-	vpCamera.Parent = viewport
-	viewport.CurrentCamera = vpCamera
+	-- THE DIE ITSELF: a real 3D solid, rendered in Workspace and projected to screen.
 
 	-- The numeral. STILL PRESENT, and deliberately so.
 	--
@@ -495,36 +465,46 @@ local function makeVisual(index: number): DieVisual
 	numeral.TextXAlignment = Enum.TextXAlignment.Right
 	numeral.Text = ""
 	numeral.ZIndex = 3
-	numeral.Parent = tile
+    numeral.Visible = false -- Hidden for 3D dice focus
+	numeral.Parent = body
 
 	-- The shape, named on the tile. In 3D the silhouette said what the die was;
 	-- flat, every shape is the same square, so the name has to be printed or the
 	-- information is simply gone.
 	local shapeTag = Instance.new("TextLabel")
 	shapeTag.Name = "Shape"
-	-- Left-aligned in the top corner, opposite the numeral. Centred, it sat
-	-- behind the die and read as a smudge on the solid.
-	shapeTag.Size = UDim2.fromScale(0.44, 0.18)
-	shapeTag.Position = UDim2.fromScale(0.05, 0.04)
+	shapeTag.Size = UDim2.fromScale(0.3, 0.15)
+	shapeTag.Position = UDim2.fromScale(0.05, 0.05)
 	shapeTag.BackgroundTransparency = 1
 	shapeTag.Font = UITheme.Font
 	shapeTag.TextScaled = true
 	shapeTag.TextColor3 = UITheme.Colors.TextDim
 	shapeTag.TextXAlignment = Enum.TextXAlignment.Left
 	shapeTag.ZIndex = 3
-	shapeTag.Text = ""
-	shapeTag.Parent = tile
+    shapeTag.Visible = false -- Hidden for 3D dice focus
+	shapeTag.Parent = body
 
-	-- THE WEIGHT BAR (FR-1.3). How much mass sits on the face currently showing,
-	-- as a fraction of this die's total. This is the compensation for losing the
-	-- lopsided silhouette: without it, mass would be invisible outside the forge.
+	-- Face count (top right)
+	local countTag = shapeTag:Clone()
+	countTag.Position = UDim2.fromScale(0.65, 0.05)
+	countTag.TextXAlignment = Enum.TextXAlignment.Right
+    countTag.Visible = false -- Hidden for 3D dice focus
+	countTag.Parent = body
+
+	-- 3. The weight bar. Shown whenever the die is resting, to communicate
+	--    mass without opening the forge (FR-1.3).
+
 	local bar = Instance.new("Frame")
-	bar.Name = "Weight"
-	bar.Size = UDim2.fromScale(1 - BAR_INSET * 2, BAR_H)
-	bar.Position = UDim2.fromScale(BAR_INSET, 1 - BAR_H - 0.06)
+	bar.Size = UDim2.fromScale(0.8, 0.06)
+	bar.Position = UDim2.fromScale(0.1, 0.88)
 	bar.BackgroundColor3 = UITheme.Colors.PanelDeep
 	bar.BorderSizePixel = 0
-	bar.Parent = tile
+	bar.ZIndex = 4
+    bar.Visible = false -- Hidden for 3D dice focus
+	local barCorner = Instance.new("UICorner")
+	barCorner.CornerRadius = UDim.new(1, 0)
+	barCorner.Parent = bar
+	bar.Parent = body
 
 	local barFill = Instance.new("Frame")
 	barFill.Name = "Fill"
@@ -532,15 +512,25 @@ local function makeVisual(index: number): DieVisual
 	barFill.BackgroundColor3 = UITheme.Colors.TextGold
 	barFill.BorderSizePixel = 0
 	barFill.Parent = bar
+	local fillCorner = Instance.new("UICorner")
+	fillCorner.CornerRadius = UDim.new(1, 0)
+	fillCorner.Parent = barFill
+
+	local popScale = Instance.new("UIScale")
+	popScale.Scale = 1
+	popScale.Parent = tile
 
 	return {
 		tile = tile,
-		viewport = viewport,
+		popScale = popScale,
+		body = body,
+		modelRadius = 0,
 		model = nil,
 		modelShape = nil,
 		numeral = numeral,
 		shapeTag = shapeTag,
-		bar = bar,
+		countTag = countTag,
+		barContainer = bar,
 		barFill = barFill,
 		stroke = stroke,
 		shape = DEFAULT_SHAPE,
@@ -614,6 +604,7 @@ local function applyConfig(visual: DieVisual, shapeId: string?, faces: { any }):
 	visual.numbered = shapeId ~= nil
 	visual.weights = readWeights(faces, visual.faceCount)
 	visual.shapeTag.Text = if shapeId ~= nil then resolved else ""
+	visual.countTag.Text = if shapeId ~= nil then "D" .. visual.faceCount else ""
 
 	-- The solid follows the shape. Passing `shapeId` rather than `resolved` on
 	-- purpose: an unknown shape must draw NO die, not a default D6 that would be
@@ -626,7 +617,7 @@ local function showFace(visual: DieVisual, faceIndex: number): ()
 	if not visual.numbered then
 		-- Shape unknown. No numeral, no bar -- nothing asserted.
 		visual.numeral.Text = ""
-		visual.bar.Visible = false
+		visual.barContainer.Visible = false
 		visual.stroke.Color = UITheme.Colors.BorderDim
 		return
 	end
@@ -636,13 +627,13 @@ local function showFace(visual: DieVisual, faceIndex: number): ()
 	local weight = visual.weights[faceIndex]
 	if weight == nil then
 		-- Masses unreadable. Better to draw no bar than a bar at a guess.
-		visual.bar.Visible = false
+		visual.barContainer.Visible = false
 		visual.numeral.TextColor3 = UITheme.Colors.TextPrimary
 		visual.stroke.Color = UITheme.Colors.BorderGold
 		return
 	end
 
-	visual.bar.Visible = true
+	visual.barContainer.Visible = false
 
 	-- The bar is scaled against an EVEN share, not against 1.0. A D20 face
 	-- holding 10% of the die's mass is carrying twice its share and must read as
@@ -827,58 +818,89 @@ local function easeOut(a: number): number
 end
 
 local function step(_delta: number): ()
+	local cam = workspace.CurrentCamera
+	if cam then
+		cam.CameraType = Enum.CameraType.Scriptable
+		cam.CFrame = CFrame.new(0, 10000, 0) * CFrame.Angles(math.rad(-90), 0, 0)
+	end
+	
+	local bgPart = workspace:FindFirstChild("DiceBackground")
+	if not bgPart then
+		bgPart = Instance.new("Part")
+		bgPart.Name = "DiceBackground"
+		bgPart.Size = Vector3.new(600, 600, 1)
+		bgPart.Anchored = true
+		bgPart.CanCollide = false
+		bgPart.Color = UITheme.Colors.BaseCream
+		bgPart.Material = Enum.Material.SmoothPlastic
+		
+		local light = Instance.new("SurfaceLight")
+		light.Face = Enum.NormalId.Back
+		light.Brightness = 2
+		light.Range = 600
+		light.Color = Color3.fromRGB(255, 255, 255)
+		light.Parent = bgPart
+		
+		bgPart.Parent = workspace
+	end
+	if cam then
+		bgPart.CFrame = cam.CFrame * CFrame.new(0, 0, -200)
+	end
+
 	for i = 1, MAX_DICE do
 		local slot = slots[i]
-		if slot == nil or not slot.animating then
+		if slot == nil or not slot.inUse then
+			if slot and slot.visual.model then
+				slot.visual.model:PivotTo(CFrame.new(0, 100000, 0))
+			end
 			continue
 		end
+		local a = 1
+		if slot.animating then
+			slot.elapsed += _delta
+			a = math.clamp(slot.elapsed / math.max(slot.duration, 1e-3), 0, 1)
+		end
+		
+		-- Custom ease out for a snappy landing
+		local eased = 1 - (1 - a) * (1 - a) * (1 - a)
 
-		slot.elapsed += _delta
-		local a = math.clamp(slot.elapsed / math.max(slot.duration, 1e-3), 0, 1)
-		local eased = easeOut(a)
-
-		-- Position: from the spawn point to the slot, with a lateral drift that
-		-- decays out, plus a small overshoot that eases back so the die looks
-		-- thrown rather than moved.
-		local overshoot = math.sin(a * math.pi) * SETTLE_OVERSHOOT * slot.visual.extent
-		local x = slot.startPos.X.Scale + (slot.endPos.X.Scale - slot.startPos.X.Scale) * eased
-			+ slot.drift * (1 - eased)
-		local y = slot.startPos.Y.Scale + (slot.endPos.Y.Scale - slot.startPos.Y.Scale) * eased
-			+ overshoot
+		-- Dynamic fly-in from the bottom of the screen
+		local startY = 1.5 -- Off-screen bottom
+		local targetY = slot.endPos.Y.Scale
+		local targetX = slot.endPos.X.Scale
+		
+		-- Add a slight arc/bounce to the path
+		local arcY = math.sin(a * math.pi) * 0.3
+		
+		local y = startY + (targetY - startY) * eased - arcY
+		local x = slot.startPos.X.Scale + (targetX - slot.startPos.X.Scale) * eased + slot.drift * (1 - eased)
 
 		slot.visual.tile.Position = UDim2.fromScale(x, y)
 
-		-- Rotation: the RESIDUAL spin still to be unwound. At a == 0 this is the
-		-- full multi-turn budget and at a == 1 it is exactly zero, so the die
-		-- always finishes on its answer and never rewinds -- the property the
-		-- very first 3D renderer had to be rewritten to obtain.
-		local residual = slot.spinTotal * (1 - eased)
-
-		-- The heavy-side lean, applied only through the settle. It grows as the
-		-- spin dies and fades to nothing at rest, so the die leans off its heavy
-		-- face and then straightens.
+		-- Residual spin (tumble) - extremely wild at start, settling to 0
+		local residual = slot.spinTotal * (1 - eased) * 2.0
 		local lean = slot.heavyLean * math.sin(a * math.pi) * eased
 
 		local model = slot.visual.model
 		if model ~= nil then
-			-- THE TUMBLE, IN THREE DIMENSIONS. The residual turn is applied about
-			-- the random axis and composed ONTO the destination orientation, so
-			-- the die spins its way to the server's face rather than being placed
-			-- there and jittered. At a == 1 the residual is zero and what remains
-			-- is exactly `finalRot`.
-			--
-			-- The lean is a small extra turn about the view axis, which reads as
-			-- the die tipping as it loses momentum.
+			-- Tumble wildly along a random axis, settling on the final face
 			local spin = CFrame.fromAxisAngle(slot.spinAxis, residual * slot.spinDir)
 			local tip = CFrame.fromAxisAngle(Vector3.new(0, 0, 1), lean)
-			model:PivotTo(tip * spin * slot.finalRot)
-			-- The tile itself stays square; only the solid inside it turns. A
-			-- rotating ViewportFrame would rotate the numeral and weight bar too.
+			
+			local restTilt = CFrame.Angles(math.rad(-20), math.rad(25), math.rad(10))
+			local finalRot = slot.finalRot * spin * tip * restTilt
+
+			local targetSize = slot.visual.modelRadius * 2 * CAMERA_FILL
+			local distance = targetSize / (2 * math.tan(math.rad(CAMERA_FOV) * 0.5))			
+			local popDist = math.sin(a * math.pi) * (distance * 0.35)
+			
+			local cam = slot.visual.tile:FindFirstChild("Viewport", true).CurrentCamera
+			if cam then
+				cam.CFrame = finalRot * CFrame.new(0, 0, distance - popDist)
+			end
+			
 			slot.visual.tile.Rotation = 0
 		else
-			-- No solid available (shape unknown, or the models have not been
-			-- generated yet). Fall back to turning the flat tile, so a roll is
-			-- still visibly a roll rather than a silent text change.
 			slot.visual.tile.Rotation = math.deg(residual * slot.spinDir + lean)
 		end
 
@@ -886,8 +908,18 @@ local function step(_delta: number): ()
 			slot.animating = false
 			slot.visual.tile.Position = slot.endPos
 			slot.visual.tile.Rotation = 0
-			if model ~= nil then
-				model:PivotTo(slot.finalRot)
+			if slot.visual.popScale then
+				slot.visual.popScale.Scale = 1
+			end
+			
+			local restTilt = CFrame.Angles(math.rad(-20), math.rad(25), math.rad(10))
+			local finalRot = slot.finalRot * restTilt
+			local targetSize = slot.visual.modelRadius * 2 * CAMERA_FILL
+			local distance = targetSize / (2 * math.tan(math.rad(CAMERA_FOV) * 0.5))
+			
+			local cam = slot.visual.tile:FindFirstChild("Viewport", true).CurrentCamera
+			if cam then
+				cam.CFrame = finalRot * CFrame.new(0, 0, distance)
 			end
 		end
 	end
@@ -956,6 +988,8 @@ function DiceRenderer.init(net: Net): ()
 			slot.endPos = BoardView.getAnchor(i, count, slot.visual.extent)
 			slot.visual.tile.Position = slot.endPos
 			slot.visual.tile.Rotation = 0
+			slot.inUse = true
+			slot.visual.tile.Parent = BoardView.getContainer()
 			slot.visual.tile.Visible = true
 			showFace(slot.visual, slot.faceIndex)
 
@@ -966,7 +1000,16 @@ function DiceRenderer.init(net: Net): ()
 			local resting = slot.visual.model
 			if resting ~= nil then
 				slot.finalRot = rotationShowingFace(resting, slot.faceIndex)
-				resting:PivotTo(slot.finalRot)
+				local restTilt = CFrame.Angles(math.rad(-20), math.rad(25), math.rad(10))
+				local finalRot = slot.finalRot * restTilt
+				
+				local targetSize = slot.visual.modelRadius * 2 * CAMERA_FILL
+				local distance = targetSize / (2 * math.tan(math.rad(CAMERA_FOV) * 0.5))
+				
+				local cam = slot.visual.tile:FindFirstChild("Viewport", true).CurrentCamera
+				if cam then
+					cam.CFrame = finalRot * CFrame.new(0, 0, distance)
+				end
 			end
 			if not slot.inUse then
 				slot.inUse = true

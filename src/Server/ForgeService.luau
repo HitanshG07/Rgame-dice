@@ -17,6 +17,7 @@ local ElementCatalog = require(Shared:WaitForChild("ElementCatalog"))
 local Remotes = require(Shared:WaitForChild("Remotes"))
 
 local PlayerProfile = require(script.Parent:WaitForChild("PlayerProfile"))
+local PurchaseService = require(script.Parent:WaitForChild("PurchaseService"))
 local EconomyService = require(script.Parent:WaitForChild("EconomyService"))
 local RemoteGateway = require(script.Parent:WaitForChild("RemoteGateway"))
 
@@ -329,7 +330,7 @@ end
 -- SCALE_EXPONENT and BASE are the tuning surface; the STRUCTURE is what closes
 -- the finding. Real numbers come from the P-6B balance sweep, which is the only
 -- place a claim about late-game triviality can actually be settled.
-function ForgeService.computeForgeCost(oldDist: { number }, newDist: { number }, budget: number?): number
+function ForgeService.computeForgeCost(oldDist: { number }, newDist: { number }, budget: number?, player: Player?): number
 	if #oldDist ~= #newDist then
 		return math.huge
 	end
@@ -354,6 +355,9 @@ function ForgeService.computeForgeCost(oldDist: { number }, newDist: { number },
 	end
 
 	local cost = ForgeMath.snap(deltaSum * BASE_COST_PER_MASS_UNIT * scale)
+	if player ~= nil then
+		cost = ForgeMath.snap(cost * PurchaseService.forgeCostMultiplier(player))
+	end
 	if not ForgeMath.isFinite(cost) then
 		return math.huge
 	end
@@ -426,7 +430,7 @@ function ForgeService.performForge(player: Player, dieIndex: number, distributio
 		end
 	end
 
-	local cost = ForgeService.computeForgeCost(oldDist, distribution, die.MassBudget)
+	local cost = ForgeService.computeForgeCost(oldDist, distribution, die.MassBudget, player)
 	if not EconomyService.canAfford(player, "Cash", cost) then
 		return false, Remotes.Notice.InsufficientFunds
 	end

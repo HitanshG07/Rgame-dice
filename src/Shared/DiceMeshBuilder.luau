@@ -204,7 +204,20 @@ local function drawPolygonFace(
 	return allWedges
 end
 
--- Adds a clear face number GUI on the die face outward normal
+local DIGIT_PATTERNS: { [string]: { string } } = {
+	["0"] = { "###", "# #", "# #", "# #", "###" },
+	["1"] = { " # ", "## ", " # ", " # ", "###" },
+	["2"] = { "###", "  #", "###", "#  ", "###" },
+	["3"] = { "###", "  #", "###", "  #", "###" },
+	["4"] = { "# #", "# #", "###", "  #", "  #" },
+	["5"] = { "###", "#  ", "###", "  #", "###" },
+	["6"] = { "###", "#  ", "###", "# #", "###" },
+	["7"] = { "###", "  #", "  #", "  #", "  #" },
+	["8"] = { "###", "# #", "###", "# #", "###" },
+	["9"] = { "###", "# #", "###", "  #", "###" },
+}
+
+-- Adds clear 3D part numerals directly on the die face outward normal (ViewportFrame-native)
 local function addFaceNumberLabel(
 	faceCenter: Vector3,
 	faceNormal: Vector3,
@@ -212,33 +225,70 @@ local function addFaceNumberLabel(
 	parent: Instance,
 	dieScale: number
 )
-	local labelPart = Instance.new("Part")
-	labelPart.Name = "FaceLabel_" .. numberText
-	labelPart.Size = Vector3.new(dieScale * 0.3, dieScale * 0.3, 0.02)
-	labelPart.Transparency = 1
-	labelPart.CanCollide = false
-	labelPart.Anchored = true
-	labelPart.CFrame = CFrame.lookAt(faceCenter, faceCenter + faceNormal.Unit * 2)
-	labelPart.Parent = parent
+	local n = faceNormal.Unit
+	local up: Vector3
+	local right: Vector3
 
-	local gui = Instance.new("SurfaceGui")
-	gui.Face = Enum.NormalId.Front
-	gui.SizingMode = Enum.SurfaceGuiSizingMode.FixedSize
-	gui.CanvasSize = Vector2.new(128, 128)
-	gui.AlwaysOnTop = false
-	gui.LightInfluence = 0
-	gui.Parent = labelPart
+	if math.abs(n.Y) < 0.99 then
+		-- Side face: Project World UP (0, 1, 0) onto the face plane
+		up = (Vector3.new(0, 1, 0) - n * n.Y).Unit
+		right = up:Cross(n).Unit
+	else
+		-- Top/Bottom face: Align UP with (0, 0, -n.Y)
+		up = Vector3.new(0, 0, -n.Y).Unit
+		right = Vector3.new(1, 0, 0)
+	end
 
-	local txt = Instance.new("TextLabel")
-	txt.Size = UDim2.fromScale(1, 1)
-	txt.BackgroundTransparency = 1
-	txt.Text = numberText
-	txt.TextColor3 = Color3.fromRGB(255, 255, 255)
-	txt.TextScaled = true
-	txt.Font = Enum.Font.FredokaOne
-	txt.TextStrokeTransparency = 0
-	txt.TextStrokeColor3 = Color3.fromRGB(20, 20, 20)
-	txt.Parent = gui
+	if parent and parent:IsA("Model") then
+		parent:SetAttribute("FaceNormal" .. numberText, n)
+		parent:SetAttribute("FaceUp" .. numberText, up)
+	end
+
+	local digits = {}
+	for i = 1, #numberText do
+		local ch = numberText:sub(i, i)
+		if DIGIT_PATTERNS[ch] then
+			table.insert(digits, DIGIT_PATTERNS[ch])
+		end
+	end
+
+	if #digits == 0 then
+		return
+	end
+
+	local pixelSize = dieScale * 0.075
+	local pixelDepth = 0.12
+	local digitWidth = 3 * pixelSize
+	local digitSpacing = 1.2 * pixelSize
+	local totalWidth = #digits * digitWidth + (#digits - 1) * digitSpacing
+	local startX = -totalWidth / 2 + digitWidth / 2
+
+	for dIdx, pattern in ipairs(digits) do
+		local dCenterX = startX + (dIdx - 1) * (digitWidth + digitSpacing)
+		for r = 1, 5 do
+			local rowStr = pattern[r]
+			local dCenterY = (3 - r) * pixelSize
+			for c = 1, 3 do
+				if rowStr:sub(c, c) == "#" then
+					local dCenterXPixel = dCenterX + (c - 2) * pixelSize
+					local pPos = faceCenter + n * (pixelDepth / 2 + 0.02) + right * dCenterXPixel + up * dCenterY
+					
+					local p = Instance.new("Part")
+					p.Name = "NumeralPixel"
+					p.Size = Vector3.new(pixelSize * 0.88, pixelSize * 0.88, pixelDepth)
+					p.CFrame = CFrame.fromMatrix(pPos, right, up, n)
+					p.Color = Color3.fromRGB(255, 255, 255)
+					p.Material = Enum.Material.SmoothPlastic
+					p.Anchored = true
+					p.CanCollide = false
+					p.CanQuery = false
+					p.CanTouch = false
+					p.CastShadow = false
+					p.Parent = parent
+				end
+			end
+		end
+	end
 end
 
 --------------------------------------------------------------------------------
@@ -732,22 +782,10 @@ end
 -- the client without a parallel lookup table that could drift out of step with
 -- the geometry (L-026: the copy nobody executes is the one that drifts).
 local function recordFaceNormals(model: Model): number
-	local cf = model:GetBoundingBox()
-	local centre = cf.Position
 	local found = 0
-
-	for _, d in ipairs(model:GetDescendants()) do
-		if d:IsA("TextLabel") then
-			local host = d.Parent and d.Parent.Parent
-			local index = tonumber(d.Text)
-			if index ~= nil and host ~= nil and host:IsA("BasePart") then
-				local offset = (host :: BasePart).Position - centre
-				if offset.Magnitude > 1e-4 then
-					local n = offset.Unit
-					model:SetAttribute("FaceNormal" .. tostring(index), n)
-					found += 1
-				end
-			end
+	for i = 1, 20 do
+		if model:GetAttribute("FaceNormal" .. tostring(i)) ~= nil then
+			found += 1
 		end
 	end
 
@@ -771,9 +809,6 @@ function DiceMeshBuilder.buildInto(parent: Instance): { Model }
 		local faces = recordFaceNormals(model)
 		anchorPivot(model)
 
-		-- Every part is display-only. A die living in a ViewportFrame must never
-		-- be touchable, queryable or shadow-casting -- and a die cloned into the
-		-- Workspace for inspection must not become world collision.
 		for _, d in ipairs(model:GetDescendants()) do
 			if d:IsA("BasePart") then
 				d.Anchored = true
@@ -786,16 +821,11 @@ function DiceMeshBuilder.buildInto(parent: Instance): { Model }
 
 		local expected = ({ D4 = 4, D6 = 6, D8 = 8, D12 = 12, D20 = 20 })[entry.name]
 		if expected ~= nil and faces ~= expected then
-			-- Loud, not silent. A shape whose normals could not be recovered
-			-- cannot be rotated to a chosen face, which means the renderer would
-			-- animate to an arbitrary result while the server credited a
-			-- different one. That must never be discovered on a player's screen.
 			warn(string.format(
-				"[DiceMeshBuilder] %s recovered %d face normals, expected %d -- this die"
-				.. " CANNOT be rotated to a chosen face and must not be used",
+				"[DiceMeshBuilder] %s recovered %d face normals, expected %d",
 				entry.name, faces, expected))
 		end
-
+		model.PrimaryPart = pivot
 		model.Parent = parent
 		table.insert(built, model)
 	end

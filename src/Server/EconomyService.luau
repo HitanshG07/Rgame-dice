@@ -74,9 +74,15 @@ function EconomyService.credit(player: Player, currency: Currency, amount: numbe
 		return true, nil
 	end
 
+	local finalAmount = amount
+	if currency == "Cash" and source == "roll" then
+		local PurchaseService = require(script.Parent:WaitForChild("PurchaseService"))
+		finalAmount = amount * PurchaseService.cashMultiplier(player)
+	end
+
 	return PlayerProfile.mutate(player, function(data)
 		local current = readBalance(data, currency)
-		local next_ = current + amount
+		local next_ = current + finalAmount
 		if next_ > MAX_CURRENCY then
 			next_ = MAX_CURRENCY
 		end

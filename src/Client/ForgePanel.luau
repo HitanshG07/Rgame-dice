@@ -678,7 +678,7 @@ local function buildInterface(target: PlayerGui): ()
 	screen.Name = "ForgePanel"
 	screen.ResetOnSpawn = false
 	screen.IgnoreGuiInset = true
-	screen.DisplayOrder = UITheme.Layer.Panel
+	screen.DisplayOrder = UITheme.Layer.Overlay
 	screen.Enabled = true
 	-- Recorded BEFORE the surface is populated or parented. If anything below
 	-- throws, `init`'s latch never sets and the next `init` calls `shutdown`

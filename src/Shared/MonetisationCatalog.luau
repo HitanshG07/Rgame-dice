@@ -204,7 +204,6 @@ MonetisationCatalog.Products = {
 	-- ---------------------------------------------------------------------
 	LuckBoost = {
 		key = "LuckBoost",
-		unavailable = true,
 		assetId = 3655545836,
 		name = "2x Luck Boost",
 		blurb = "Heavy faces bite less, for a while.",
@@ -214,7 +213,6 @@ MonetisationCatalog.Products = {
 	},
 	OfflineX2 = {
 		key = "OfflineX2",
-		unavailable = true,
 		assetId = 3655618937,
 		name = "2x Offline Payout",
 		blurb = "Double your next offline collection.",
@@ -223,7 +221,6 @@ MonetisationCatalog.Products = {
 	},
 	TimeSkip24 = {
 		key = "TimeSkip24",
-		unavailable = true,
 		assetId = 3655695933,
 		name = "Time Skip (24h)",
 		blurb = "Collect a full day of offline earnings now.",

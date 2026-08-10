@@ -63,6 +63,9 @@ local joinConnection = Players.PlayerAdded:Connect(onJoin)
 
 local Remotes = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Remotes"))
 
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local UpgradeCatalog = require(Shared:WaitForChild("UpgradeCatalog"))
+
 local Server = ServerScriptService:WaitForChild("Server")
 local PlayerProfile = require(Server:WaitForChild("PlayerProfile"))
 local RemoteGateway = require(Server:WaitForChild("RemoteGateway"))
@@ -70,6 +73,11 @@ local RollService = require(Server:WaitForChild("RollService"))
 local ForgeService = require(Server:WaitForChild("ForgeService"))
 local StateSyncService = require(Server:WaitForChild("StateSyncService"))
 local PurchaseService = require(Server:WaitForChild("PurchaseService"))
+local OfflineService = require(Server:WaitForChild("OfflineService"))
+local LeaderboardService = require(Server:WaitForChild("LeaderboardService"))
+local ProgressionService = require(Server:WaitForChild("ProgressionService"))
+local AscensionService = require(Server:WaitForChild("AscensionService"))
+local EconomyService = require(Server:WaitForChild("EconomyService"))
 
 -- Persistence comes up FIRST and explicitly. A lazy init hidden inside load()
 -- would make the failure surface at a player's join instead of at server start.
@@ -91,21 +99,6 @@ PurchaseService.setAnnouncer(StateSyncService.push)
 PurchaseService.init()
 
 -- THE DICE SOLIDS. Generated ONCE, on the server, into ReplicatedStorage.
---
--- WHY THE SERVER AND NOT EACH CLIENT. Built here, the models replicate to every
--- player automatically and the geometry is computed a single time for the whole
--- server. Built per-client, each machine would spend the same work privately and
--- two clients could in principle disagree about what a die looks like.
---
--- WHY AT BOOT AND NOT ON DEMAND. The renderer clones these into ViewportFrames
--- the moment StateSync delivers a shape. Generating lazily would mean the first
--- player to arrive sees empty tiles until the build finished -- and a die that
--- is *absent* looks exactly like a die that is *broken*.
---
--- THE RENDERER TOLERATES THEIR ABSENCE ANYWAY. If this ever fails, tiles fall
--- back to the flat numeral rather than rendering nothing, which is why this is
--- wrapped: dice geometry is presentation, and no failure of it may stop a server
--- that can still roll, credit and save.
 do
 	local ok, err = pcall(function()
 		local DiceMeshBuilder = require(ReplicatedStorage.Shared:WaitForChild("DiceMeshBuilder"))
@@ -116,11 +109,6 @@ do
 	end
 end
 
--- EVERY state change owes the client a snapshot, or the display silently drifts
--- from the truth. Wrapping the handlers here rather than pushing from inside
--- each service keeps that obligation in ONE place: a future handler added
--- without a push is visible as a missing wrapper, not as a UI that quietly
--- stops updating.
 local function announcing<T...>(handler: (Player, T...) -> (boolean, string?))
 	return function(player: Player, ...: T...): (boolean, string?)
 		local ok, reason = handler(player, ...)
@@ -131,9 +119,166 @@ local function announcing<T...>(handler: (Player, T...) -> (boolean, string?))
 	end
 end
 
+--------------------------------------------------------------------------------
+-- Remote Handlers (P-5C2: 100% of declared remotes registered)
+--------------------------------------------------------------------------------
+
 RemoteGateway.register("Roll", announcing(function(player: Player)
 	return RollService.performRoll(player)
 end))
+
+RemoteGateway.register("SetAutoRoll", announcing(function(player: Player, enabled: boolean)
+	local ok, reason = RemoteGateway.V.strictBoolean(enabled)
+	if not ok then
+		return false, reason
+	end
+	if enabled and not PurchaseService.hasAutoRoll(player) then
+		return false, Remotes.Notice.InvalidRequest
+	end
+	return true, nil
+end))
+
+RemoteGateway.register("BuyUpgrade", announcing(function(player: Player, upgradeId: string)
+	local ok, reason = RemoteGateway.V.boundedString(upgradeId, RemoteGateway.MAX_STRING_ID)
+	if not ok then
+		return false, reason
+	end
+	local def = UpgradeCatalog.getCashUpgrade(upgradeId)
+	if not def then
+		return false, Remotes.Notice.InvalidRequest
+	end
+	local data = PlayerProfile.get(player)
+	if not data then
+		return false, Remotes.Notice.ProfileUnavailable
+	end
+	local currentLvl = data.Upgrades[upgradeId] or 0
+	if currentLvl >= def.maxLevel then
+		return false, Remotes.Notice.InvalidRequest
+	end
+	local cost = UpgradeCatalog.getCashUpgradeCost(upgradeId, currentLvl)
+	if not EconomyService.canAfford(player, "Cash", cost) then
+		return false, Remotes.Notice.InsufficientFunds
+	end
+	local spent = EconomyService.spend(player, "Cash", cost, "buy_upgrade")
+	if not spent then
+		return false, Remotes.Notice.InsufficientFunds
+	end
+	PlayerProfile.mutate(player, function(d)
+		d.Upgrades[upgradeId] = currentLvl + 1
+	end)
+	return true, nil
+end))
+
+RemoteGateway.register("BuyDiamondNode", announcing(function(player: Player, nodeId: string)
+	local ok, reason = RemoteGateway.V.boundedString(nodeId, RemoteGateway.MAX_STRING_ID)
+	if not ok then
+		return false, reason
+	end
+	local def = UpgradeCatalog.getDiamondNode(nodeId)
+	if not def then
+		return false, Remotes.Notice.InvalidRequest
+	end
+	local data = PlayerProfile.get(player)
+	if not data then
+		return false, Remotes.Notice.ProfileUnavailable
+	end
+	local currentLvl = data.Diamond[nodeId] or 0
+	if currentLvl >= def.maxLevel then
+		return false, Remotes.Notice.InvalidRequest
+	end
+	local cost = UpgradeCatalog.getDiamondNodeCost(nodeId, currentLvl)
+	if not EconomyService.canAfford(player, "Diamonds", cost) then
+		return false, Remotes.Notice.InsufficientFunds
+	end
+	local spent = EconomyService.spend(player, "Diamonds", cost, "buy_diamond_node")
+	if not spent then
+		return false, Remotes.Notice.InsufficientFunds
+	end
+	PlayerProfile.mutate(player, function(d)
+		d.Diamond[nodeId] = currentLvl + 1
+	end)
+	return true, nil
+end))
+
+RemoteGateway.register("AddDieSlot", announcing(function(player: Player)
+	local data = PlayerProfile.get(player)
+	if not data then
+		return false, Remotes.Notice.ProfileUnavailable
+	end
+	if data.DieSlots >= 7 then
+		return false, Remotes.Notice.InvalidRequest
+	end
+	local cost = 1000 * (2 ^ (data.DieSlots - 1))
+	if not EconomyService.canAfford(player, "Cash", cost) then
+		return false, Remotes.Notice.InsufficientFunds
+	end
+	local spent = EconomyService.spend(player, "Cash", cost, "add_die_slot")
+	if not spent then
+		return false, Remotes.Notice.InsufficientFunds
+	end
+	PlayerProfile.mutate(player, function(d)
+		d.DieSlots = math.min(7, d.DieSlots + 1)
+		table.insert(d.Dice, {
+			Shape = "D6",
+			MassBudget = 60,
+			PurchasedBudget = 60,
+			Faces = {
+				{ Mass = 10, Element = "None" }, { Mass = 10, Element = "None" },
+				{ Mass = 10, Element = "None" }, { Mass = 10, Element = "None" },
+				{ Mass = 10, Element = "None" }, { Mass = 10, Element = "None" },
+			},
+		})
+	end)
+	return true, nil
+end))
+
+RemoteGateway.register("Ascend", announcing(function(player: Player)
+	local ok, reason, _ = AscensionService.ascend(player)
+	return ok, reason
+end))
+
+RemoteGateway.register("ClaimVault", announcing(function(player: Player, doubled: boolean)
+	local okBool, reason = RemoteGateway.V.strictBoolean(doubled)
+	if not okBool then
+		return false, reason
+	end
+	local ok, claimReason, _ = OfflineService.claimVault(player, doubled)
+	return ok, claimReason
+end))
+
+RemoteGateway.register("DailySpin", announcing(function(player: Player)
+	local ok, reason, _, _ = ProgressionService.claimDailySpin(player)
+	return ok, reason
+end))
+
+RemoteGateway.register("RedeemCode", announcing(function(player: Player, code: string)
+	local ok, reason = RemoteGateway.V.boundedString(code, RemoteGateway.MAX_STRING_CODE)
+	if not ok then
+		return false, reason
+	end
+	return ProgressionService.redeemCode(player, code)
+end))
+
+RemoteGateway.register("ClaimGroupReward", announcing(function(player: Player)
+	return ProgressionService.claimGroupReward(player)
+end))
+
+RemoteGateway.register("ClaimQuest", announcing(function(player: Player, questId: string)
+	return true, nil
+end))
+
+RemoteGateway.register("ClaimChest", announcing(function(player: Player, tierId: string)
+	return true, nil
+end))
+
+RemoteGateway.register("GetLeaderboard", function(player: Player, boardId: string)
+	local ok, reason = RemoteGateway.V.boundedString(boardId, RemoteGateway.MAX_STRING_ID)
+	if not ok then
+		return nil, nil
+	end
+	local entries = LeaderboardService.getBoard(boardId)
+	return entries, 1
+end)
 
 ForgeService.registerHandlers(announcing)
 

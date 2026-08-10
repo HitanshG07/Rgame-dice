@@ -27,6 +27,7 @@ local DiceCatalog = require(Shared:WaitForChild("DiceCatalog"))
 local Remotes = require(Shared:WaitForChild("Remotes"))
 
 local PlayerProfile = require(script.Parent:WaitForChild("PlayerProfile"))
+local PurchaseService = require(script.Parent:WaitForChild("PurchaseService"))
 local EconomyService = require(script.Parent:WaitForChild("EconomyService"))
 
 local RollService = {}
@@ -430,7 +431,7 @@ function RollService.performRoll(player: Player): (boolean, string?)
 	end
 
 	local now = os.clock()
-	local hasShield = data.Diamond ~= nil and (data.Upgrades.BadRollShield or 0) > 0
+	local hasShield = (data.Diamond ~= nil and (data.Upgrades.BadRollShield or 0) > 0) or PurchaseService.hasStreakShield(player)
 	local shieldReady = hasShield and (now - session.lastShieldUse) >= RollService.SHIELD_COOLDOWN
 
 	local result = RollService.computeThrow(dice :: any, session.rng, {

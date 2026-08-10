@@ -29,6 +29,7 @@ local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Remotes = require(Shared:WaitForChild("Remotes"))
 
 local PlayerProfile = require(script.Parent:WaitForChild("PlayerProfile"))
+local PurchaseService = require(script.Parent:WaitForChild("PurchaseService"))
 local RollService = require(script.Parent:WaitForChild("RollService"))
 
 local StateSyncService = {}
@@ -63,7 +64,7 @@ end
 -- PurchaseOrder and CodesRedeemed to the client, and would silently start
 -- shipping every future field the moment someone added one to the template.
 -- The client cannot be trusted with what it does not need to know.
-function StateSyncService.buildSnapshot(data: PlayerProfile.Profile, streak: number): any
+function StateSyncService.buildSnapshot(data: PlayerProfile.Profile, streak: number, player: Player?): any
 	local dice = {}
 	for i, die in ipairs(data.Dice) do
 		local faces = {}
@@ -101,6 +102,8 @@ function StateSyncService.buildSnapshot(data: PlayerProfile.Profile, streak: num
 		settings[key] = enabled
 	end
 
+	local extraSlots = if player ~= nil then PurchaseService.bonusDieSlots(player) else 0
+
 	return {
 		cash = data.Cash,
 		gems = data.Gems,
@@ -124,7 +127,7 @@ function StateSyncService.buildSnapshot(data: PlayerProfile.Profile, streak: num
 		highestRoll = data.HighestRoll,
 		ascensions = data.Ascensions,
 		totalRolls = data.TotalRolls,
-		dieSlots = data.DieSlots,
+		dieSlots = math.min(7, data.DieSlots + extraSlots),
 	}
 end
 
@@ -143,7 +146,7 @@ function StateSyncService.push(player: Player): boolean
 	if not data then
 		return false
 	end
-	emitState(player, StateSyncService.buildSnapshot(data, RollService.getStreak(player)))
+	emitState(player, StateSyncService.buildSnapshot(data, RollService.getStreak(player), player))
 	return true
 end
 

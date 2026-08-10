@@ -103,3 +103,10 @@ Dice Forge's `performSetShape` was wrong three times in three different directio
 - **NEVER COMMIT DURING AN ACTIVE FAN-OUT.** A commit taken on one agent's completion notification captures whatever is on disk for the others, and a half-written file produces a diff that looks entirely normal. A worker noticed it, not the orchestrator. Wait for every agent to report, then commit once.
 - **Isolated contexts converging on the same finding is the strongest signal available.** Three workers independently reported the same missing event; four verifiers independently reported the same shared-module divergence. One agent flagging something may be a misreading; several isolated ones cannot be.
 - **Verifiers cannot run the toolchain.** Every one reported honestly that no Luau analyser, linter or headless runtime exists in the workspace, so their Gate 2 was UNVERIFIED and their findings were source-derived. Their value is cognitive, not mechanical: P-1 and the suite still have to be run by whoever can actually run them, and a verifier saying AUDIT-APPROVED never means the code was executed.
+
+## 10. CIRCULAR DEPENDENCY AVOIDANCE IN SERVER MODULES
+*(Added 2026-08-09 from Block 5 construction; see ledger L-035)*
+
+- **Top-level `require` cycles between ModuleScripts cause silent module loading failures.** In Luau, requiring Module A which requires Module B which requires Module A causes `require` to throw "Requested module experienced an error while loading", failing every dependent module and test suite.
+- **Enforce a strict Directed Acyclic Graph (DAG) for top-level requires.** High-level orchestration services require lower-level authority modules; lower-level modules must never require their orchestrators at top-level scope.
+- **Lazy-require inside function bodies when cross-references are unavoidable.** If Service A needs a method from Service B and Service B needs Service A, defer the `require` into the function scope where it is actually called rather than declaring it at module level.

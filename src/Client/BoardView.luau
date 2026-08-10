@@ -235,7 +235,7 @@ local function build(): (ScreenGui, Frame, Frame)
 		UDim2.fromScale(TRAY_X, TRAY_Y)
 	)
 	frame.Name = "Tray"
-	frame.BackgroundColor3 = UITheme.Colors.PanelDeep
+	frame.BackgroundTransparency = 1
 	frame.Parent = gui
 
 	-- A second, inset border marking the playable interior. This is not
@@ -245,7 +245,7 @@ local function build(): (ScreenGui, Frame, Frame)
 	interior.Name = "Interior"
 	interior.Size = UDim2.fromScale(1 - INNER_INSET * 2, 1 - INNER_INSET * 2)
 	interior.Position = UDim2.fromScale(INNER_INSET, INNER_INSET)
-	interior.BackgroundColor3 = UITheme.Colors.PanelDark
+	interior.BackgroundTransparency = 1
 	interior.BorderSizePixel = 0
 	interior.Parent = frame
 
@@ -290,7 +290,8 @@ local function buildBackdrop(gui: ScreenGui): ()
 	backdrop.Name = "Backdrop"
 	backdrop.Size = UDim2.fromScale(1, 1)
 	backdrop.Position = UDim2.fromScale(0, 0)
-	backdrop.BackgroundColor3 = UITheme.Colors.PanelDark
+	backdrop.BackgroundColor3 = UITheme.Colors.BaseCream
+	backdrop.BackgroundTransparency = 0
 	backdrop.BorderSizePixel = 0
 	-- Behind every other child of this ScreenGui, including the tray.
 	backdrop.ZIndex = 0
@@ -308,6 +309,7 @@ local function claimView(): ()
 	if camera ~= nil then
 		restoreCameraType = camera.CameraType
 		camera.CameraType = Enum.CameraType.Scriptable
+		camera.CFrame = CFrame.new(0, 10000, 0) * CFrame.Angles(math.rad(-90), 0, 0)
 	end
 
 	local player = Players.LocalPlayer

@@ -1045,7 +1045,7 @@ function MenuPanel.init(client: Net): ()
 	local overlay = Instance.new("ScreenGui")
 	overlay.Name = "DiceForgeMenuOverlay"
 	overlay.ResetOnSpawn = false
-	overlay.DisplayOrder = UITheme.Layer.Panel
+	overlay.DisplayOrder = UITheme.Layer.Overlay
 	overlay.IgnoreGuiInset = false
 	overlay.Enabled = false
 	overlay.Parent = playerGui

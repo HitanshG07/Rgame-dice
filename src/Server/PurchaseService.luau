@@ -41,8 +41,12 @@ local MarketplaceService = game:GetService("MarketplaceService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local Catalog = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("MonetisationCatalog"))
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Catalog = require(Shared:WaitForChild("MonetisationCatalog"))
+local ForgeMath = require(Shared:WaitForChild("ForgeMath"))
 local PlayerProfile = require(script.Parent:WaitForChild("PlayerProfile"))
+local BoostService = require(script.Parent:WaitForChild("BoostService"))
+local OfflineService = require(script.Parent:WaitForChild("OfflineService"))
 
 local PurchaseService = {}
 
@@ -134,12 +138,45 @@ local function applyGrant(player: Player, entry: Catalog.Entry): (boolean, strin
 		end)
 		return ok, reason
 
-	elseif kind == "Boost" or kind == "TimeSkip" then
-		-- Both are specified by FR-12.2 but neither has an asset id yet, so
-		-- neither is reachable: `isResolved` refused above. The branch exists so
-		-- that filling in an id is the ONLY change required -- and so that this
-		-- row is visibly unimplemented rather than silently missing (L-027).
-		return false, "not_implemented_boosts"
+	elseif kind == "Boost" then
+		local mult = entry.amount or 2.0
+		local duration = entry.durationSeconds or 900
+		local applied = BoostService.addBoost(player, entry.key, mult, duration)
+		return applied, if applied then nil else "boost_apply_failed"
+
+	elseif kind == "TimeSkip" then
+		-- "Collect N hours of offline earnings now", so the payout is N hours at
+		-- the player's OWN established rate. Nothing else is honest: a fixed
+		-- number would be worth a fortune to a new player and an insult to a
+		-- developed one.
+		--
+		-- THERE IS NO FALLBACK FIGURE HERE, DELIBERATELY. A flat floor stood here
+		-- ("baseline so time skip never credits zero") and it was a live money
+		-- defect: `getStatus` returns nil with no profile and `ratePerSec` is 0
+		-- until the player has actually earned, so both cases fell through to a
+		-- constant -- and then returned PurchaseGranted, which tells Roblox to
+		-- keep the money and stop retrying. A player earning 50k/sec would have
+		-- been charged for 24 hours and handed 1,000.
+		--
+		-- When the rate cannot be established we return FALSE, which answers
+		-- NotProcessedYet and keeps the receipt alive. The player establishes a
+		-- rate simply by playing, and the platform's own retry then grants the
+		-- correct amount. Slower, and it cannot short-change anyone.
+		local seconds = entry.durationSeconds or (24 * 3600)
+		local status = OfflineService.getStatus(player)
+		if status == nil then
+			return false, "no_vault_status"
+		end
+		local rate = status.ratePerSec
+		if not ForgeMath.isFinite(rate) or rate <= 0 then
+			return false, "no_income_rate_established"
+		end
+
+		local payout = seconds * rate
+		if not ForgeMath.isFinite(payout) or payout <= 0 then
+			return false, "time_skip_payout_not_finite"
+		end
+		return grantCurrency(player, "Cash", payout)
 	end
 
 	-- A pass kind arriving through the receipt path means the catalog is
