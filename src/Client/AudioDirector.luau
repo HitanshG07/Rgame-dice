@@ -41,10 +41,26 @@
 -- not at init. In today's all-placeholder state no Sound is built, so no folder
 -- is published either and a session leaves nothing behind in SoundService.
 --
--- WHAT THIS MODULE DOES NOT DO. It subscribes to no remote and holds no game
--- state. Cues are pushed to it by the surface that caused them, so the audio
--- layer can never disagree with what is on screen about whether something
--- happened. `init` therefore ignores its NetClient argument, deliberately.
+-- WHAT THIS MODULE DOES NOT DO. It holds no game state, and CUES are pushed to
+-- it by the surface that caused them -- never pulled from a remote -- so the
+-- audio layer can never disagree with what is on screen about whether something
+-- happened.
+--
+-- IT DOES SUBSCRIBE TO ONE THING (added 2026-08-11): StateSync, for the two
+-- settings booleans, and nothing else off that snapshot is read.
+--
+-- WHY THAT CHANGED. This module used to ignore its NetClient argument entirely,
+-- on the reasoning that MenuPanel would push settings in. MenuPanel was replaced
+-- by V7MenuPanel, which never made that call, so `applySettings` had exactly one
+-- caller left -- `init`, passing the module's own defaults back to itself. The
+-- Music and SFX toggles were therefore INERT: the value saved to the profile and
+-- replicated correctly and reached nothing that made a sound.
+--
+-- Subscribing directly is what removes the class of failure rather than the
+-- instance: a bridge through a third module is a wire that can be forgotten
+-- again the next time the panel layer is rewritten, and forgetting it is silent.
+-- FeedbackFX already reads its own two settings off the snapshot for the same
+-- reason; this makes the audio half symmetrical with it.
 
 local SoundService = game:GetService("SoundService")
 
@@ -131,10 +147,13 @@ local voices: { [string]: { Sound } } = {}
 -- Round-robin cursor per cue, always a valid index into that cue's pool.
 local cursor: { [string]: number } = {}
 local musicSound: Sound? = nil
+-- Held so `shutdown` can release it. A Studio play-test that re-inits without
+-- disconnecting would stack a second handler on every replay.
+local settingsConnection: RBXScriptConnection? = nil
 
--- Audio is ON until MenuPanel tells us otherwise. MenuPanel pushes the real
--- values during its own init; because both toggles default true here and there,
--- the two cannot disagree during the window between the two inits.
+-- Audio is ON until the first snapshot says otherwise. These defaults match
+-- SettingsCatalog's, so the window before the first StateSync cannot disagree
+-- with what the server holds for a new player.
 local settings: AudioSettings = {
 	sfx = true,
 	music = true,
@@ -252,9 +271,10 @@ function AudioDirector.play(cue: Cue): ()
 	sound:Play()
 end
 
--- Applies the player's settings. Called by MenuPanel on init and on every
--- toggle. Accepts anything shaped like AudioSettings, so MenuPanel can pass a
--- narrowed view of its own larger record without a shared type module.
+-- Applies the player's settings. The live caller is this module's own StateSync
+-- subscription; it stays public because a surface that already holds a snapshot
+-- can push one in without a second round trip. Accepts anything shaped like
+-- AudioSettings, so a caller can pass a narrowed view of a larger record.
 --
 -- The parameter is GUARDED rather than trusted. The only caller reaches this
 -- across an erased-type boundary (`local Audio: any`) and does not pcall, so a
@@ -298,9 +318,7 @@ function AudioDirector.isCueAvailable(cue: Cue): boolean
 	return pool ~= nil and #pool > 0
 end
 
--- `net` is unused on purpose -- see the header. The parameter exists to satisfy
--- the ClientBootstrap module contract, which calls every module as init(net).
-function AudioDirector.init(_net: any): ()
+function AudioDirector.init(net: any): ()
 	if initialised then
 		return
 	end
@@ -326,10 +344,36 @@ function AudioDirector.init(_net: any): ()
 
 	initialised = true
 
-	-- Re-apply whatever settings are current. If MenuPanel already pushed a
-	-- value before the sounds existed, this is what makes it take effect; if it
-	-- has not, this starts the music under the default.
+	-- Re-apply whatever settings are current. If a snapshot already arrived
+	-- before the sounds existed, this is what makes it take effect; if it has
+	-- not, this starts the music under the default.
 	AudioDirector.applySettings(settings)
+
+	-- THE SETTINGS SUBSCRIPTION. Two booleans off the snapshot and nothing else.
+	--
+	-- Guarded rather than assumed: `init` is called with whatever ClientBootstrap
+	-- holds, and a module that hard-required a live NetClient here would turn a
+	-- missing subscription into a fatal boot abort -- the audio layer taking down
+	-- every visual surface, which is the exact outcome loading this module LAST
+	-- exists to prevent.
+	if type(net) == "table" and type(net.onStateSync) == "function" then
+		settingsConnection = net.onStateSync(function(state: any)
+			if type(state) ~= "table" then
+				return
+			end
+			local incoming = state.settings
+			if type(incoming) ~= "table" then
+				return
+			end
+			-- ABSENT MEANS ON for audio, which is the opposite default from a
+			-- security check and correct here: a snapshot that omits the key must
+			-- not silence a player who never turned anything off.
+			AudioDirector.applySettings({
+				music = incoming.Music ~= false,
+				sfx = incoming.SFX ~= false,
+			})
+		end)
+	end
 end
 
 -- Tears the audio layer down. Not used during normal play -- the client lives
@@ -337,6 +381,12 @@ end
 -- tree should be able to remove them again, or a Studio play-test leaves them
 -- behind in SoundService.
 function AudioDirector.shutdown(): ()
+	local conn = settingsConnection
+	if conn ~= nil then
+		conn:Disconnect()
+	end
+	settingsConnection = nil
+
 	local folder = container
 	if folder ~= nil then
 		folder:Destroy()

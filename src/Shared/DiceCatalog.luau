@@ -225,7 +225,20 @@ local UNLOCK_COST: { [string]: number } = {
 
 -- Which currency the ladder is priced in. Named here rather than assumed at each
 -- call site so the server, the shop UI and the tests cannot disagree.
-DiceCatalog.UNLOCK_CURRENCY = "Cash" 
+DiceCatalog.UNLOCK_CURRENCY = "Cash"
+
+-- SRS FR-6.1: "A shape change costs Prestige Diamonds and is freely reversible."
+-- "Freely reversible" means the player may switch back and forth without losing
+-- purchased progression -- NOT that switching is free of charge.
+--
+-- MOVED HERE FROM ForgeService (2026-08-11) so the client can DISPLAY it.
+-- It was a server-side local, so the shape panel showed a bare "USE" button with
+-- no price on it: a player pressed it, five Diamonds they did not have were
+-- required, the server refused, and NOTHING happened on screen. The value is
+-- unchanged at 5 -- this move must not retune the economy, only let the UI tell
+-- the truth about it. The server still owns the charge; the client only reads
+-- this to render a label and grey a button, and never sends a price (NFR-5).
+DiceCatalog.SHAPE_CHANGE_DIAMOND_COST = 5
 
 function DiceCatalog.getUnlockOrder(): { string }
 	return table.clone(UNLOCK_ORDER)

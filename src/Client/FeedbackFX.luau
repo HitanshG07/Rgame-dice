@@ -26,23 +26,24 @@
 -- ask to stop being told what they earned. Both default to ENABLED when neither
 -- source states otherwise -- the absence of a preference is not a preference.
 --
--- THE TOGGLES HAVE TWO SOURCES AND THIS MODULE NEEDS BOTH.
---   1. `StateSync.settings` (API_DATA_CONTRACT §1.2, emitted by
---      StateSyncService from the PlayerProfile `Settings` template, keys
---      `Particles` / `MotionBlur`). This is the authoritative value at join and
---      the only one that survives a rejoin.
---   2. `MenuPanel`, which owns the live toggles for the session. A player who
---      flips particles mid-session changes MenuPanel's record, NOT the profile:
---      persisting a settings change needs a remote that does not exist, and
---      MenuPanel's own header is explicit that its state is session-scoped.
--- So this module exposes `applySettings` as a PUSH entry point, mirroring
--- `AudioDirector.applySettings`, and the Orchestrator bridges
--- `MenuPanel.onSettingsChanged` into it. This module deliberately does not
--- subscribe to MenuPanel itself -- a view module reaching sideways into another
--- view module is how a UI layer becomes a graph instead of a tree.
--- Both sources funnel through the same setter, so last write wins, which is the
--- correct rule: the snapshot lands at join, and a mid-session toggle is by
--- definition newer than the profile it has not been able to write back to.
+-- THE TOGGLES HAVE ONE SOURCE (corrected 2026-08-11).
+--
+-- `StateSync.settings` (API_DATA_CONTRACT §1.2, emitted by StateSyncService from
+-- the PlayerProfile `Settings` template, keys `Particles` / `MotionBlur`). It is
+-- authoritative at join and it is what survives a rejoin.
+--
+-- WHAT THIS COMMENT USED TO SAY, and why the correction matters. It described a
+-- SECOND source -- MenuPanel holding session-scoped toggles -- on the stated
+-- grounds that "persisting a settings change needs a remote that does not
+-- exist". The `SetSetting` remote now exists (FR-13.6), so a toggle writes to the
+-- profile and comes back down this same snapshot path. There is no session-only
+-- copy of a setting anywhere any more, and there should not be one: two sources
+-- for one boolean is how a panel ends up showing a value the server does not
+-- hold.
+--
+-- `applySettings` stays public as a PUSH entry point, mirroring
+-- `AudioDirector.applySettings`, so a surface already holding a snapshot can
+-- apply it without a second round trip. Nothing pushes through it today.
 --
 -- ACCEPTED ALLOCATION (NFR-1 says "no allocation inside per-frame loops").
 -- `step` constructs UDim2 values: one per active item for the frame position,

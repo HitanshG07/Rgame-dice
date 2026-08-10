@@ -57,6 +57,7 @@ function V7HUD.new(): V7HUDController
 	-- 1. TOP NEUMORPHIC BAR (Currencies)
 	-- ==========================================
 	local topBar, topBarBody = UITheme.neumorphicPod(UDim2.fromScale(0.6, 0.08), UDim2.fromScale(0.2, 0.02))
+	topBar.Name = "CurrencyBar"
 	topBar.Parent = gui
 
 	local topLayout = Instance.new("UIListLayout")
@@ -167,9 +168,43 @@ function V7HUD.new(): V7HUDController
 	local _, diamondsLabel = createCurrency("diamonds", "DIAMONDS", 0.25)
 
 	-- ==========================================
+	-- 1b. SETTINGS GEAR
+	-- ==========================================
+	--
+	-- The settings overlay existed and NOTHING OPENED IT. Both side panels are
+	-- full at four buttons each and both hold gameplay, so a fifth would have
+	-- meant shrinking eight live controls to reach a menu a player touches twice
+	-- a session.
+	--
+	-- Beside the currency bar instead: out of the way, always visible, and where
+	-- a gear is conventionally found. Deliberately OUTSIDE `topBarBody`, whose
+	-- UIListLayout would have folded it into the currency row and squeezed the
+	-- three balances.
+	local gearWrapper, gearBtn = UITheme.neumorphicButton("⚙", UITheme.Colors.TextDim,
+		UDim2.fromScale(0.045, 0.08), UDim2.fromScale(0.815, 0.02))
+	-- NAMED. Every other pod in this GUI is an anonymous "Frame", which makes
+	-- them indistinguishable by path -- and a control that cannot be addressed by
+	-- path cannot be driven by a test or an automated click.
+	gearWrapper.Name = "SettingsGear"
+	gearWrapper.Parent = gui
+
+	do
+		local lastGear = 0
+		local function triggerGear()
+			local now = os.clock()
+			if now - lastGear < 0.15 then return end
+			lastGear = now
+			for _, cb in ipairs(menuCallbacks) do pcall(cb, "settings") end
+		end
+		gearBtn.MouseButton1Click:Connect(triggerGear)
+		gearBtn.Activated:Connect(triggerGear)
+	end
+
+	-- ==========================================
 	-- 2. CENTER ARC (Streak Data)
 	-- ==========================================
 	local centerArea, centerBody = UITheme.neumorphicPod(UDim2.fromScale(0.4, 0.12), UDim2.fromScale(0.3, 0.66))
+	centerArea.Name = "StreakArc"
 	centerArea.Parent = gui
 
 	local centerLayout = Instance.new("UIListLayout")
@@ -217,6 +252,7 @@ function V7HUD.new(): V7HUDController
 	-- 3. LEFT & RIGHT NEUMORPHIC PANELS
 	-- ==========================================
 	local leftPanel, leftPanelBody = UITheme.neumorphicPod(UDim2.fromScale(0.12, 0.5), UDim2.fromScale(0.02, 0.25))
+	leftPanel.Name = "LeftMenu"
 	leftPanel.Parent = gui
 	
 	local leftLayout = Instance.new("UIListLayout")
@@ -227,6 +263,7 @@ function V7HUD.new(): V7HUDController
 	leftLayout.Parent = leftPanelBody
 
 	local rightPanel, rightPanelBody = UITheme.neumorphicPod(UDim2.fromScale(0.12, 0.5), UDim2.fromScale(0.86, 0.25))
+	rightPanel.Name = "RightMenu"
 	rightPanel.Parent = gui
 	
 	local rightLayout = Instance.new("UIListLayout")
@@ -238,6 +275,13 @@ function V7HUD.new(): V7HUDController
 
 	local function addMenuBtn(parentBody: Instance, id: string, text: string, color: Color3?)
 		local btnWrapper, btn = UITheme.neumorphicButton(text, color, UDim2.fromScale(0.8, 0.18), UDim2.fromScale(0, 0))
+		-- NAMED BY MENU ID. All eight of these were anonymous "Frame" wrappers
+		-- nested inside anonymous pods, so every button in the HUD -- FORGE,
+		-- SHAPE, SLOTS, ASCEND, SHOP, BOARDS, QUESTS, VAULT, ROLL and AUTO --
+		-- resolved to the identical instance path. Nothing could address any of
+		-- them, which means nothing could drive or inspect the primary controls of
+		-- the game.
+		btnWrapper.Name = "Menu_" .. id
 		btnWrapper.Parent = parentBody
 		
 		local lastTrigger = 0
@@ -266,6 +310,7 @@ function V7HUD.new(): V7HUDController
 	-- 4. BOTTOM CENTER ROLL STATION
 	-- ==========================================
 	local rollStation, rollStationBody = UITheme.neumorphicPod(UDim2.fromScale(0.35, 0.16), UDim2.fromScale(0.325, 0.8))
+	rollStation.Name = "RollStation"
 	rollStation.Parent = gui
 	
 	-- The Main Roll Button (Extruded deeply)
@@ -275,6 +320,7 @@ function V7HUD.new(): V7HUDController
 		UDim2.fromScale(0.6, 0.7), 
 		UDim2.fromScale(0.05, 0.15)
 	)
+	rollWrapper.Name = "RollButton"
 	rollWrapper.Parent = rollStationBody
 
 	-- The Auto Toggle
@@ -284,6 +330,7 @@ function V7HUD.new(): V7HUDController
 		UDim2.fromScale(0.25, 0.5),
 		UDim2.fromScale(0.7, 0.25)
 	)
+	autoWrapper.Name = "AutoButton"
 	autoWrapper.Parent = rollStationBody
 
 	gui.Parent = playerGui

@@ -86,6 +86,16 @@ local function run(): (boolean, string?, number)
 	-- deliberate and it is a real check: anything a view module does at MODULE
 	-- SCOPE must be safe without a LocalPlayer, because module scope runs before
 	-- init. Work needing a player belongs in init(), which this suite never calls.
+	--   4. AND AGAIN, found 2026-08-11. This list named HUD, ForgePanel and
+	--      MenuPanel -- the LEGACY surfaces. ClientBootstrap has been constructing
+	--      V7HUD, V7ForgePanel and V7MenuPanel for the whole of the V7 work, so
+	--      the three modules the player actually touches were required by nothing,
+	--      while the suite reported client coverage from three files that no
+	--      longer render. A list of module names is exactly the kind of thing that
+	--      keeps passing after the thing it names has been replaced.
+	--
+	-- The V7 modules are CONSTRUCTED (`.new`) rather than initialised (`.init`),
+	-- so the lifecycle check below accepts either.
 	local VIEW_MODULES: { string } = {
 		"UITheme",
 		"BoardView",
@@ -95,6 +105,9 @@ local function run(): (boolean, string?, number)
 		"ForgePanel",
 		"MenuPanel",
 		"AudioDirector",
+		"V7HUD",
+		"V7ForgePanel",
+		"V7MenuPanel",
 	}
 
 	local failedToLoad: { string } = {}
@@ -118,9 +131,13 @@ local function run(): (boolean, string?, number)
 			table.insert(notATable, name)
 			continue
 		end
-		-- UITheme is data plus builders, not a lifecycle module; every other view
-		-- module is constructed by ClientBootstrap and must expose init.
-		if name ~= "UITheme" and type(result.init) ~= "function" then
+		-- UITheme is data plus builders, not a lifecycle module. Every other view
+		-- module must give ClientBootstrap a way in: `init(net)` for the modules
+		-- it initialises, `new()` for the V7 surfaces it constructs. A module with
+		-- neither is loaded and then never touched, silently.
+		if name ~= "UITheme"
+			and type(result.init) ~= "function"
+			and type(result.new) ~= "function" then
 			table.insert(missingInit, name)
 		end
 	end
@@ -130,8 +147,8 @@ local function run(): (boolean, string?, number)
 	e = e or check(#notATable == 0, string.format(
 		"view modules not returning a table: %s", table.concat(notATable, ", ")))
 	e = e or check(#missingInit == 0, string.format(
-		"view modules with no init(): ClientBootstrap would skip them silently -- %s",
-		table.concat(missingInit, ", ")))
+		"view modules with no init() or new(): ClientBootstrap would skip them "
+		.. "silently -- %s", table.concat(missingInit, ", ")))
 
 	----------------------------------------------------------------------------
 	-- Teardown symmetry

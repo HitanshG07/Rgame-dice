@@ -66,6 +66,7 @@ local Remotes = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("R
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local UpgradeCatalog = require(Shared:WaitForChild("UpgradeCatalog"))
 local DiceCatalog = require(Shared:WaitForChild("DiceCatalog"))
+local SettingsCatalog = require(Shared:WaitForChild("SettingsCatalog"))
 
 local Server = ServerScriptService:WaitForChild("Server")
 local PlayerProfile = require(Server:WaitForChild("PlayerProfile"))
@@ -359,6 +360,43 @@ end))
 RemoteGateway.register("DailySpin", announcing(function(player: Player)
 	local ok, reason, _, _ = ProgressionService.claimDailySpin(player)
 	return ok, reason
+end))
+
+-- SETTINGS (FR-13.6). The write path that made the panel possible.
+--
+-- WHAT WAS TRUE BEFORE: `PlayerProfile` declared four settings, StateSyncService
+-- faithfully emitted them, and `FeedbackFX` read two of them off every snapshot.
+-- Everything was in place except the ability to CHANGE one -- there was no
+-- remote, so the values were permanently whatever the template said. Read
+-- implemented, write absent: ledger L-027, for the third time.
+--
+-- THE KEY IS ALLOWLISTED THROUGH `SettingsCatalog.isSetting`, never used to
+-- index the profile directly. `d.Settings[key] = value` with an unchecked key
+-- would let a client create arbitrary profile fields and grow the saved document
+-- without bound (threats T-5, Matrix E-1/E-2).
+--
+-- NOTHING ECONOMIC CAN CROSS HERE by construction: the payload is one allowlisted
+-- key and one strict boolean, and no setting in the catalog gates a reward, a
+-- rate or a price. There is no shape of call that could name a value.
+RemoteGateway.register("SetSetting", announcing(function(player: Player, key: string, enabled: boolean)
+	local okKey, keyReason = RemoteGateway.V.boundedString(key, RemoteGateway.MAX_STRING_ID)
+	if not okKey then
+		return false, keyReason
+	end
+	if not SettingsCatalog.isSetting(key) then
+		return false, Remotes.Notice.InvalidRequest
+	end
+	-- STRICT boolean. Accepting a truthy value would let a client send the string
+	-- "false" and have it stored as an enabled setting.
+	local okVal, valReason = RemoteGateway.V.strictBoolean(enabled)
+	if not okVal then
+		return false, valReason
+	end
+
+	local wrote = PlayerProfile.mutate(player, function(d)
+		d.Settings[key] = enabled
+	end)
+	return wrote, if wrote then nil else Remotes.Notice.ProfileUnavailable
 end))
 
 RemoteGateway.register("RedeemCode", announcing(function(player: Player, code: string)

@@ -59,6 +59,7 @@ local MIN_INTERVAL: { [string]: number } = {
 	RedeemCode = 1.0,
 	ClaimGroupReward = 1.0,
 	GetLeaderboard = 2.0,
+	SetSetting = 0.15,
 }
 local DEFAULT_INTERVAL = 0.25
 
@@ -187,6 +188,13 @@ end
 
 function NetClient.claimGroupReward(): Result
 	return call("ClaimGroupReward")
+end
+
+-- A key and a boolean (FR-13.6). The key is allowlisted server-side against
+-- SettingsCatalog, so a client naming a field outside it is refused rather than
+-- writing into the saved profile.
+function NetClient.setSetting(key: string, enabled: boolean): Result
+	return call("SetSetting", key, enabled == true)
 end
 
 -- Reads the server's cache; never triggers a fetch (threat T-22). Returns the

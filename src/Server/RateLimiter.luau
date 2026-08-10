@@ -18,6 +18,10 @@ local LIMITS: { [string]: Limit } = {
 	AddDieSlot = { sustained = 4, burst = 8 },
 	GetLeaderboard = { sustained = 0.5, burst = 2 },
 	RedeemCode = { sustained = 0.2, burst = 3 },
+	-- Settings are cheap to write and a player flicking four toggles in a row is
+	-- ordinary behaviour, so the burst is generous. The sustained rate still
+	-- stops a loop from hammering the profile.
+	SetSetting = { sustained = 3, burst = 8 },
 }
 
 local DEFAULT_LIMIT: Limit = { sustained = 2, burst = 5 }

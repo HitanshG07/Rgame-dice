@@ -9,6 +9,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local MonetisationCatalog = require(Shared:WaitForChild("MonetisationCatalog"))
 local DiceCatalog = require(Shared:WaitForChild("DiceCatalog"))
+local SettingsCatalog = require(Shared:WaitForChild("SettingsCatalog"))
 local Format = require(Shared:WaitForChild("Format"))
 local UITheme = require(script.Parent:WaitForChild("UITheme"))
 local NetClient = require(script.Parent:WaitForChild("NetClient"))
@@ -28,6 +29,7 @@ export type V7MenuController = {
 	questRefresh: ((any) -> ())?,
 	vaultRefresh: ((any) -> ())?,
 	slotsRefresh: ((any) -> ())?,
+	settingsRefresh: ((any) -> ())?,
 	lastState: any,
 }
 
@@ -140,10 +142,23 @@ function V7MenuPanel.new(): V7MenuController
 
 	local shapeCards: { [string]: any } = {}
 
+	-- Server refusal codes rendered as sentences. The server sends an enumerated
+	-- code and never prose (NFR-5, T-7), so the wording lives here.
+	local SHAPE_REFUSAL: { [string]: string } = {
+		insufficient_funds = string.format("Needs %d diamonds",
+			DiceCatalog.SHAPE_CHANGE_DIAMOND_COST),
+		not_unlocked = "Unlock the shape before it",
+		invalid_request = "Cannot switch to that",
+		profile_unavailable = "Still loading -- try again",
+		rate_limited = "Slow down a moment",
+		throttled = "Slow down a moment",
+	}
+
 	for rung, shapeId in ipairs(DiceCatalog.getUnlockOrder()) do
 		local def = DiceCatalog.getShape(shapeId)
 		if def ~= nil then
 			local card = UITheme.panel(UDim2.fromScale(1, 0), UDim2.fromScale(0, 0))
+			card.Name = "Shape_" .. shapeId
 			card.Size = UDim2.new(1, 0, 0, 86)
 			card.LayoutOrder = rung
 			card.Parent = shapesBody
@@ -182,18 +197,34 @@ function V7MenuPanel.new(): V7MenuController
 
 			local btnContainer, btn = UITheme.neumorphicButton("", UITheme.Colors.Cash,
 				UDim2.fromScale(0.26, 0.56), UDim2.fromScale(0.70, 0.22))
+			btnContainer.Name = "Action"
 			btnContainer.Parent = card
 
 			btn.Activated:Connect(function()
-				local owned = shapeCards[shapeId] and shapeCards[shapeId].owned
-				if owned then
-					-- Switching is free and reversible among owned shapes (FR-6.1).
-					NetClient.setShape(1, shapeId)
-				else
-					-- Unlock. BuyDiamondNode carries shape ids too; the server
-					-- prices them in Cash and enforces the ladder order.
-					NetClient.buyDiamondNode(shapeId)
-				end
+				local entry = shapeCards[shapeId]
+				local owned = entry and entry.owned
+				UITheme.setEnabled(btn, false)
+				task.spawn(function()
+					local result
+					if owned then
+						-- Switching costs Diamonds and is freely reversible (FR-6.1).
+						result = NetClient.setShape(1, shapeId)
+					else
+						-- Unlock. BuyDiamondNode carries shape ids too; the server
+						-- prices them in Cash and enforces the ladder order.
+						result = NetClient.buyDiamondNode(shapeId)
+					end
+					-- A REFUSAL HAS TO SHOW. Pressing USE with too few Diamonds used
+					-- to do nothing at all: no movement, no message, no clue. The
+					-- next snapshot repaints the row, so this note is transient by
+					-- construction and cannot linger as a stale claim.
+					if not result.ok and entry ~= nil then
+						entry.status.Text = SHAPE_REFUSAL[tostring(result.reason)]
+							or "Not right now."
+						entry.status.TextColor3 = UITheme.Colors.Negative
+					end
+					UITheme.setEnabled(btn, true)
+				end)
 			end)
 
 			shapeCards[shapeId] = {
@@ -212,6 +243,8 @@ function V7MenuPanel.new(): V7MenuController
 		local ownedMap = (state.diamondTree and state.diamondTree.Shapes) or {}
 		local currentShape = state.dice and state.dice[1] and state.dice[1].Shape
 		local cash = tonumber(state.cash) or 0
+		local diamonds = tonumber(state.diamonds) or 0
+		local switchCost = DiceCatalog.SHAPE_CHANGE_DIAMOND_COST
 
 		for shapeId, entry in pairs(shapeCards) do
 			local owned = ownedMap[shapeId] == true
@@ -225,10 +258,22 @@ function V7MenuPanel.new(): V7MenuController
 				UITheme.setButtonText(entry.button, "ACTIVE")
 				UITheme.setEnabled(entry.button, false)
 			elseif owned then
-				entry.status.Text = "OWNED"
-				entry.status.TextColor3 = UITheme.Colors.Positive
-				UITheme.setButtonText(entry.button, "USE")
-				UITheme.setEnabled(entry.button, true)
+				-- THE SWITCH PRICE, ON THE BUTTON.
+				--
+				-- This read "OWNED" and "USE" with no mention of a cost. FR-6.1
+				-- charges Diamonds to change shape, so a player who owned D3 and
+				-- had no Diamonds pressed USE and watched nothing happen -- the
+				-- server refused, correctly, and the panel had never said there was
+				-- a price to refuse over.
+				local affordable = diamonds >= switchCost
+				entry.status.Text = if affordable
+					then "OWNED"
+					else string.format("OWNED - needs %d\u{2666}", switchCost)
+				entry.status.TextColor3 = if affordable
+					then UITheme.Colors.Positive else UITheme.Colors.TextDim
+				UITheme.setButtonText(entry.button,
+					string.format("USE %d\u{2666}", switchCost))
+				UITheme.setEnabled(entry.button, affordable)
 			elseif allowed then
 				-- The next rung. Affordability decides whether it is pressable,
 				-- but the price is shown either way so the goal is visible.
@@ -422,9 +467,169 @@ function V7MenuPanel.new(): V7MenuController
 			.. "Press CLAIM to collect whatever has built up.", hours)
 	end
 
+	-- 7. SETTINGS OVERLAY
 	local settingsOverlay, settingsBody = UITheme.overlay("⚙️ SETTINGS & PROMO CODES")
 	settingsOverlay.Parent = screenGui
 	overlays["settings"] = settingsOverlay
+
+	-- THIS OVERLAY HAD ZERO CHILDREN and no button anywhere opened it. It was a
+	-- titled empty rectangle that nothing could reach.
+	--
+	-- Everything below is driven by `SettingsCatalog`, so the rows drawn here and
+	-- the keys the server will accept are the same list by construction (L-025).
+	local settingsList = Instance.new("UIListLayout")
+	settingsList.Padding = UDim.new(0, 10)
+	settingsList.SortOrder = Enum.SortOrder.LayoutOrder
+	settingsList.Parent = settingsBody
+
+	local settingRows: { [string]: any } = {}
+
+	for order, def in ipairs(SettingsCatalog.ordered()) do
+		local row = UITheme.panel(UDim2.fromScale(1, 0), UDim2.fromScale(0, 0))
+		-- NAMED PER SETTING. Every row is otherwise an anonymous "Frame", so all
+		-- four resolved to the identical instance path and none of them could be
+		-- addressed -- not by a click driver, not by an inspector, not by anything
+		-- that needs to say WHICH switch it means.
+		row.Name = "Setting_" .. def.key
+		row.Size = UDim2.new(1, 0, 0, 76)
+		row.LayoutOrder = order
+		row.Parent = settingsBody
+
+		local label = UITheme.label(def.label, UDim2.fromScale(0.5, 0.36),
+			UDim2.fromScale(0.03, 0.12), UITheme.Colors.TextGold)
+		label.TextScaled = true
+		label.Parent = row
+
+		local blurb = UITheme.label(def.blurb, UDim2.fromScale(0.66, 0.3),
+			UDim2.fromScale(0.03, 0.52), UITheme.Colors.TextDim)
+		blurb.TextScaled = true
+		blurb.TextWrapped = true
+		blurb.Parent = row
+
+		local toggleC, toggleBtn, setToggle = UITheme.toggle(
+			UDim2.fromScale(0.16, 0.34), UDim2.fromScale(0.78, 0.33))
+		toggleC.Parent = row
+
+		local key = def.key
+		toggleBtn.Activated:Connect(function()
+			-- Sends the OPPOSITE of what the server last told us, not the opposite
+			-- of what the knob is showing. Those are the same thing while the panel
+			-- is in sync, and when they are not, the server's value is the one worth
+			-- inverting.
+			local entry = settingRows[key]
+			local current = entry ~= nil and entry.value == true
+			-- The knob does not move here. It moves when the snapshot comes back
+			-- confirming the write, so a refusal leaves the switch showing the
+			-- truth instead of a value that never saved.
+			NetClient.setSetting(key, not current)
+		end)
+
+		settingRows[key] = { set = setToggle, value = def.default, button = toggleBtn }
+	end
+
+	-- PROMO CODES (FR-10.6). The server already had `RedeemCode` wired to a real
+	-- code table; there was no way for a player to type one in.
+	local codeCard = UITheme.panel(UDim2.fromScale(1, 0), UDim2.fromScale(0, 0))
+	codeCard.Name = "PromoCard"
+	codeCard.Size = UDim2.new(1, 0, 0, 118)
+	codeCard.LayoutOrder = 90
+	codeCard.Parent = settingsBody
+
+	local codeTitle = UITheme.label("PROMO CODE", UDim2.fromScale(0.5, 0.24),
+		UDim2.fromScale(0.03, 0.06), UITheme.Colors.TextGold)
+	codeTitle.TextScaled = true
+	codeTitle.Parent = codeCard
+
+	local codeBox = Instance.new("TextBox")
+	codeBox.Name = "CodeBox"
+	codeBox.Size = UDim2.fromScale(0.58, 0.34)
+	codeBox.Position = UDim2.fromScale(0.03, 0.36)
+	codeBox.BackgroundColor3 = UITheme.Colors.BaseCream
+	codeBox.BorderSizePixel = 0
+	codeBox.Font = UITheme.FontMono
+	codeBox.PlaceholderText = "ENTER CODE"
+	codeBox.Text = ""
+	codeBox.TextColor3 = UITheme.Colors.TextPrimary
+	codeBox.TextScaled = true
+	codeBox.ClearTextOnFocus = false
+	codeBox.ZIndex = 4
+	codeBox.Parent = codeCard
+
+	local codeCorner = Instance.new("UICorner")
+	codeCorner.CornerRadius = UDim.new(0, 8)
+	codeCorner.Parent = codeBox
+
+	local codeStroke = Instance.new("UIStroke")
+	codeStroke.Color = UITheme.Colors.ShadowDark
+	codeStroke.Thickness = 2
+	codeStroke.Parent = codeBox
+
+	local codeStatus = UITheme.label("", UDim2.fromScale(0.94, 0.2),
+		UDim2.fromScale(0.03, 0.76), UITheme.Colors.TextDim)
+	codeStatus.Name = "CodeStatus"
+	codeStatus.TextScaled = true
+	codeStatus.Parent = codeCard
+
+	local redeemC, redeemBtn = UITheme.neumorphicButton("REDEEM", UITheme.Colors.Positive,
+		UDim2.fromScale(0.28, 0.3), UDim2.fromScale(0.66, 0.38))
+	redeemC.Name = "RedeemButton"
+	redeemC.Parent = codeCard
+
+	-- The reasons the server can give, rendered as sentences. The server sends a
+	-- CODE, never prose (NFR-5 / T-7), and it never echoes the submitted text back
+	-- -- so an unknown code is reported as unknown without repeating what was
+	-- typed.
+	local REDEEM_MESSAGE: { [string]: string } = {
+		invalid_code = "That code is not recognised.",
+		already_redeemed = "You have already used that code.",
+		no_profile = "Your profile is still loading -- try again in a moment.",
+		rate_limited = "Slow down a moment, then try again.",
+		throttled = "Slow down a moment, then try again.",
+	}
+
+	local function submitCode()
+		local raw = codeBox.Text
+		if raw == nil or #raw == 0 then
+			codeStatus.Text = "Type a code first."
+			codeStatus.TextColor3 = UITheme.Colors.TextDim
+			return
+		end
+		UITheme.setEnabled(redeemBtn, false)
+		codeStatus.Text = "Checking..."
+		codeStatus.TextColor3 = UITheme.Colors.TextDim
+		task.spawn(function()
+			local result = NetClient.redeemCode(raw)
+			if result.ok then
+				codeStatus.Text = "Redeemed. Your balance is updated."
+				codeStatus.TextColor3 = UITheme.Colors.Positive
+				codeBox.Text = ""
+			else
+				local reason = tostring(result.reason or "invalid_code")
+				codeStatus.Text = REDEEM_MESSAGE[reason] or "That code could not be used."
+				codeStatus.TextColor3 = UITheme.Colors.Negative
+			end
+			UITheme.setEnabled(redeemBtn, true)
+		end)
+	end
+
+	redeemBtn.Activated:Connect(submitCode)
+	codeBox.FocusLost:Connect(function(enterPressed: boolean)
+		if enterPressed then
+			submitCode()
+		end
+	end)
+
+	-- Redraws every switch from the snapshot. This is the ONLY thing that moves a
+	-- knob, which is what makes the panel incapable of showing a value the server
+	-- does not hold.
+	local function refreshSettings(state: any)
+		local settings = if type(state) == "table" then state.settings else nil
+		for key, entry in pairs(settingRows) do
+			local value = SettingsCatalog.read(settings, key)
+			entry.value = value
+			entry.set(value)
+		end
+	end
 
 	-- 8. SLOTS OVERLAY
 	local slotsOverlay, slotsBody = UITheme.overlay("⚡ DIE SLOTS")
@@ -455,6 +660,17 @@ function V7MenuPanel.new(): V7MenuController
 		UITheme.setButtonText(addSlotBtn, if slots < 7 then "ADD SLOT" else "MAX (7)")
 	end
 
+	-- NAME EVERY OVERLAY BY ITS KEY.
+	--
+	-- `UITheme.overlay` returns an anonymous Frame, so all eight overlays sat
+	-- under one ScreenGui as siblings called "Frame" -- `V7MenuGui.Frame`
+	-- resolved whichever happened to be first (the shop), and no path could name
+	-- any of the other seven. Naming them here rather than at each call site
+	-- keeps it impossible to add an overlay and forget.
+	for key, frame in pairs(overlays) do
+		frame.Name = "Overlay_" .. key
+	end
+
 	screenGui.Parent = playerGui
 
 	local self: V7MenuController = setmetatable({
@@ -465,6 +681,7 @@ function V7MenuPanel.new(): V7MenuController
 		questRefresh = refreshQuests,
 		vaultRefresh = refreshVault,
 		slotsRefresh = refreshSlots,
+		settingsRefresh = refreshSettings,
 		lastState = nil,
 	}, V7MenuPanel) :: any
 
@@ -485,7 +702,8 @@ function V7MenuPanel:applyState(state: any)
 		return
 	end
 	self.lastState = state
-	for _, fn in ipairs({ self.shapeRefresh, self.questRefresh, self.vaultRefresh, self.slotsRefresh }) do
+	for _, fn in ipairs({ self.shapeRefresh, self.questRefresh, self.vaultRefresh,
+		self.slotsRefresh, self.settingsRefresh }) do
 		if type(fn) == "function" then
 			local ok, err = pcall(fn, state)
 			if not ok then

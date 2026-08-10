@@ -29,7 +29,10 @@ local BASE_COST_PER_MASS_UNIT = 5.0
 local REFERENCE_BUDGET = 60.0
 local SCALE_EXPONENT = 2.0
 local ELEMENT_SET_COST = 50.0
-local SHAPE_CHANGE_DIAMOND_COST = 5
+-- Read from the shared catalog, not restated here. The client has to render this
+-- price on the USE button and the server has to charge it; two copies of one
+-- number is how a button ends up quoting a cost the server does not take.
+local SHAPE_CHANGE_DIAMOND_COST = DiceCatalog.SHAPE_CHANGE_DIAMOND_COST
 
 ForgeService.BASE_COST_PER_MASS_UNIT = BASE_COST_PER_MASS_UNIT
 ForgeService.REFERENCE_BUDGET = REFERENCE_BUDGET

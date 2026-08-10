@@ -190,6 +190,10 @@ function UITheme.neumorphicPod(size: UDim2, position: UDim2): (Frame, Frame)
 	shadowLight.Parent = container
 
 	local body = Instance.new("Frame")
+	-- NAMED so a child's instance path does not pass through an anonymous rung.
+	-- A path is only addressable if EVERY level of it is, and one unnamed frame
+	-- in the middle makes the whole chain ambiguous.
+	body.Name = "Body"
 	body.Size = UDim2.fromScale(1, 1)
 	body.Position = UDim2.fromScale(0, 0)
 	body.BackgroundColor3 = UITheme.Colors.BaseCream
@@ -291,6 +295,7 @@ function UITheme.overlay(title: string): (Frame, Frame, TextButton)
 	fullOverlay.ZIndex = UITheme.Layer.Overlay
 
 	local container = Instance.new("Frame")
+	container.Name = "Panel"
 	container.Size = UDim2.fromScale(0.85, 0.85)
 	container.AnchorPoint = Vector2.new(0.5, 0.5)
 	container.Position = UDim2.fromScale(0.5, 0.5)
@@ -309,6 +314,7 @@ function UITheme.overlay(title: string): (Frame, Frame, TextButton)
 	stroke.Parent = container
 
 	local header = Instance.new("Frame")
+	header.Name = "Header"
 	header.Size = UDim2.fromScale(1, 0.08)
 	header.BackgroundTransparency = 1
 	header.ZIndex = UITheme.Layer.Overlay + 2
@@ -350,6 +356,7 @@ function UITheme.overlay(title: string): (Frame, Frame, TextButton)
 	-- height; adding a row to any overlay just works. Any UIGridLayout or
 	-- UIListLayout inside contributes to the canvas automatically.
 	local body = Instance.new("ScrollingFrame")
+	body.Name = "Body"
 	body.Size = UDim2.fromScale(0.96, 0.88)
 	body.Position = UDim2.fromScale(0.02, 0.1)
 	body.BackgroundTransparency = 1
@@ -482,6 +489,94 @@ function UITheme.setEnabled(button: TextButton, enabled: boolean): ()
 	if stroke then
 		stroke.Color = if enabled then UITheme.Colors.ShadowDark else UITheme.Colors.BaseCream
 	end
+end
+
+-- A PILL SWITCH. Returns the container, the clickable button, and a setter.
+--
+-- WHY A SWITCH AND NOT A BUTTON READING "ON"/"OFF". A caption is ambiguous in
+-- exactly the place it matters: a button labelled "OFF" reads either as the
+-- current state or as what pressing it will do, and players guess wrong roughly
+-- half the time. A knob that physically sits on one side has no such reading --
+-- left is off, right is on, and the colour reinforces it.
+--
+-- THE SETTER IS RETURNED RATHER THAN THE STATE BEING OWNED HERE, deliberately.
+-- A settings toggle must never flip on its own click: the server owns the value,
+-- and the switch shows what the last snapshot said. Optimistically flipping and
+-- then correcting on the next snapshot is what makes a refused write look like a
+-- toggle that "sometimes doesn't stick".
+function UITheme.toggle(size: UDim2, position: UDim2): (Frame, TextButton, (boolean) -> ())
+	local container = Instance.new("Frame")
+	container.Name = "Toggle"
+	container.Size = size
+	container.Position = position
+	container.BackgroundTransparency = 1
+
+	local track = Instance.new("TextButton")
+	track.Name = "Track"
+	track.Size = UDim2.fromScale(1, 1)
+	track.BackgroundColor3 = UITheme.Colors.ShadowDark
+	track.BorderSizePixel = 0
+	track.Text = ""
+	track.AutoButtonColor = false
+	track.ZIndex = 4
+	track.Parent = container
+
+	local trackCorner = Instance.new("UICorner")
+	trackCorner.CornerRadius = UDim.new(1, 0)
+	trackCorner.Parent = track
+
+	local knob = Instance.new("Frame")
+	knob.Name = "Knob"
+	knob.Size = UDim2.fromScale(0.46, 0.84)
+	knob.Position = UDim2.fromScale(0.04, 0.08)
+	-- A LIGHT knob, fixed in both states. It was `BaseCream` (26,22,20), which in
+	-- this dark palette is very nearly the same colour as `ShadowDark` (14,12,10)
+	-- -- so an OFF switch was a near-black knob on a near-black track inside a
+	-- near-black row, and the control simply disappeared. Only the ON state was
+	-- legible, which is the worst way round: a player cannot see the setting they
+	-- just turned off.
+	knob.BackgroundColor3 = UITheme.Colors.TextPrimary
+	knob.BorderSizePixel = 0
+	knob.ZIndex = 5
+	knob.Parent = track
+
+	local knobCorner = Instance.new("UICorner")
+	knobCorner.CornerRadius = UDim.new(1, 0)
+	knobCorner.Parent = knob
+
+	local function setState(on: boolean): ()
+		-- OFF is `ShadowLight`, not `ShadowDark`: the track has to stay visible
+		-- against the row behind it, so that "off" reads as a switch in the off
+		-- position rather than as an empty patch of panel.
+		track.BackgroundColor3 = if on then UITheme.Colors.Positive else UITheme.Colors.ShadowLight
+		local target = UDim2.fromScale(if on then 0.50 else 0.04, 0.08)
+
+		-- SNAP WHEN NOT YET RENDERED, tween when it is.
+		--
+		-- `TweenPosition` RAISES -- "Can only tween objects in the workspace" --
+		-- for a GuiObject that is not under a rendered tree, and the very first
+		-- call is always in that state: the builder sets the initial position
+		-- before the caller has parented anything. That error propagated out of
+		-- `V7MenuPanel.new()` and destroyed the ENTIRE menu layer: shop, shapes,
+		-- boards, ascend, quests, vault, settings and slots, all eight overlays,
+		-- gone because a switch tried to animate a frame too early.
+		--
+		-- The suite did not catch it and could not have: it requires the module,
+		-- which resolves every symbol, but `new()` needs a LocalPlayer and the
+		-- suite runs server-side. Module scope was safe; construction was not.
+		if knob:IsDescendantOf(game) then
+			-- The movement is what tells the player the press registered, which
+			-- matters because the value is confirmed a round trip later and a
+			-- motionless switch reads as a dead control in between.
+			knob:TweenPosition(target, Enum.EasingDirection.Out,
+				Enum.EasingStyle.Quad, 0.12, true)
+		else
+			knob.Position = target
+		end
+	end
+
+	setState(false)
+	return container, track, setState
 end
 
 function UITheme.elementColor(elementId: string): Color3
