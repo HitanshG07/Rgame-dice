@@ -230,10 +230,13 @@ RemoteGateway.register("BuyDiamondNode", announcing(function(player: Player, nod
 		end
 
 		local shapeCost = DiceCatalog.getUnlockCost(nodeId) :: number
-		if not EconomyService.canAfford(player, "Diamonds", shapeCost) then
+		-- Priced in Cash, not Diamonds. The currency is read from the catalog so
+		-- this cannot drift from what the shop displays.
+		local currency = DiceCatalog.UNLOCK_CURRENCY
+		if not EconomyService.canAfford(player, currency, shapeCost) then
 			return false, Remotes.Notice.InsufficientFunds
 		end
-		if not EconomyService.spend(player, "Diamonds", shapeCost, "unlock_shape") then
+		if not EconomyService.spend(player, currency, shapeCost, "unlock_shape") then
 			return false, Remotes.Notice.InsufficientFunds
 		end
 		-- Re-checked INSIDE the mutation. `canAfford`/`spend` are separate calls

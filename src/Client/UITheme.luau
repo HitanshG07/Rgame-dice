@@ -334,11 +334,26 @@ function UITheme.overlay(title: string): (Frame, Frame, TextButton)
 		fullOverlay.Visible = false
 	end)
 
-	local body = Instance.new("Frame")
+	-- THE BODY SCROLLS. It was a plain Frame, and every overlay whose content was
+	-- taller than the panel simply CLIPPED -- the shop rendered eleven purchasable
+	-- items into six rows of a grid and the player could reach two of them, with
+	-- no indication the rest existed.
+	--
+	-- AutomaticCanvasSize means callers do not have to compute their own content
+	-- height; adding a row to any overlay just works. Any UIGridLayout or
+	-- UIListLayout inside contributes to the canvas automatically.
+	local body = Instance.new("ScrollingFrame")
 	body.Size = UDim2.fromScale(0.96, 0.88)
 	body.Position = UDim2.fromScale(0.02, 0.1)
 	body.BackgroundTransparency = 1
+	body.BorderSizePixel = 0
 	body.ZIndex = UITheme.Layer.Overlay + 2
+	body.AutomaticCanvasSize = Enum.AutomaticSize.Y
+	body.CanvasSize = UDim2.fromScale(0, 0)
+	body.ScrollBarThickness = 8
+	body.ScrollBarImageColor3 = UITheme.Colors.ShadowLight
+	body.ScrollingDirection = Enum.ScrollingDirection.Y
+	body.ElasticBehavior = Enum.ElasticBehavior.WhenScrollable
 	body.Parent = container
 
 	return fullOverlay, body, closeBtn

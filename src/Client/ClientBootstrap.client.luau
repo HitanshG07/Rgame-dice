@@ -129,6 +129,12 @@ end
 -- V7 Seams & Event Wiring
 --------------------------------------------------------------------------------
 
+-- Hoisted so the single StateSync subscription below can reach them. They were
+-- previously locals nested three `if` blocks deep, which is why no snapshot
+-- could ever be routed to them.
+local forgeController: any = nil
+local menuController: any = nil
+
 local V7HUDModule = loaded["V7HUD"]
 local V7ForgeModule = loaded["V7ForgePanel"]
 local V7MenuModule = loaded["V7MenuPanel"]
@@ -138,9 +144,11 @@ if type(V7HUDModule) == "table" and type(V7HUDModule.new) == "function" then
 
 	if type(V7ForgeModule) == "table" and type(V7ForgeModule.new) == "function" then
 		local forgeCtrl = V7ForgeModule.new()
+		forgeController = forgeCtrl
 
 		if type(V7MenuModule) == "table" and type(V7MenuModule.new) == "function" then
 			local menuCtrl = V7MenuModule.new()
+			menuController = menuCtrl
 
 			hudCtrl:onMenuClicked(function(menuId: string)
 				if menuId == "forge" then
@@ -163,8 +171,20 @@ if type(V7HUDModule) == "table" and type(V7HUDModule.new) == "function" then
 	end)
 
 	NetClient.onStateSync(function(state: any)
-		if type(state) == "table" then
-			hudCtrl:updateBalances(state.cash or 0, state.gems or 0, state.diamonds or 0)
+		if type(state) ~= "table" then
+			return
+		end
+		hudCtrl:updateBalances(state.cash or 0, state.gems or 0, state.diamonds or 0)
+
+		-- THE SEAM THAT WAS MISSING. `updateBalances` was the ONLY thing any
+		-- snapshot reached: the forge never learned what dice existed, and every
+		-- menu overlay opened onto content nothing had filled in. The panels were
+		-- complete, and completely disconnected.
+		if menuController ~= nil then
+			menuController:applyState(state)
+		end
+		if forgeController ~= nil then
+			forgeController:applyState(state)
 		end
 	end)
 end

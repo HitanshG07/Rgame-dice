@@ -199,18 +199,33 @@ local UNLOCK_ORDER: { string } = { "D2", "D3", "D4", "D6", "D8", "D10", "D12", "
 
 DiceCatalog.STARTING_SHAPE = "D2"
 
--- Diamond cost to unlock each shape. Rises with position on the ladder, not with
--- face count, so the curve is a progression cost rather than a power price.
+-- CASH cost to unlock each shape (operator-directed 2026-08-11: "as the user
+-- unlocks more dice with money").
+--
+-- WHY CASH AND NOT DIAMONDS. Diamonds are the PRESTIGE currency -- they arrive
+-- only after an ascension, so a Diamond-priced ladder would be invisible to a
+-- player during their entire first run. That is the run where the ladder has to
+-- do its work: it is the new player's first goal. Cash is what they are already
+-- earning every roll, so each rung reads as something to save toward.
+--
+-- The curve is roughly 4x per rung. Steep enough that a rung is an event, flat
+-- enough that the next one is always visible from the current one. These are a
+-- FIRST PASS and unvalidated against real earn rates -- the honest place to tune
+-- them is a playtest, not this table.
 local UNLOCK_COST: { [string]: number } = {
-	D2 = 0,      -- owned from the start; listed so every shape has an entry
-	D3 = 5,
-	D4 = 15,
-	D6 = 40,
-	D8 = 90,
-	D10 = 180,
-	D12 = 320,
-	D20 = 600,
+	D2 = 0,        -- owned from the start; listed so every shape has an entry
+	D3 = 500,
+	D4 = 2500,
+	D6 = 12000,
+	D8 = 55000,
+	D10 = 240000,
+	D12 = 1000000,
+	D20 = 4200000,
 }
+
+-- Which currency the ladder is priced in. Named here rather than assumed at each
+-- call site so the server, the shop UI and the tests cannot disagree.
+DiceCatalog.UNLOCK_CURRENCY = "Cash" 
 
 function DiceCatalog.getUnlockOrder(): { string }
 	return table.clone(UNLOCK_ORDER)
