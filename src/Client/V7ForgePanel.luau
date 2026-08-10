@@ -33,6 +33,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local DiceCatalog = require(Shared:WaitForChild("DiceCatalog"))
 local ForgeMath = require(Shared:WaitForChild("ForgeMath"))
+local ElementCatalog = require(Shared:WaitForChild("ElementCatalog"))
 local Format = require(Shared:WaitForChild("Format"))
 local UITheme = require(script.Parent:WaitForChild("UITheme"))
 local NetClient = require(script.Parent:WaitForChild("NetClient"))
@@ -82,12 +83,52 @@ function V7ForgePanel.new(): V7ForgeController
 	local draft: { number } = {}
 	local faceRows: { any } = {}
 
-	local header = UITheme.label("", UDim2.fromScale(0.6, 0.06), UDim2.fromScale(0.02, 0.01),
+	-- WHICH DIE IS BEING EDITED. The forge could only ever reach die 1, so a
+	-- player who bought slots owned dice they could not build.
+	local activeDie = 1
+	local dieCount = 1
+	local dieShapes: { string } = {}
+	local faceElements: { string } = {}
+	local unlockedElements: { [string]: boolean } = { None = true }
+	local dieTabs: { any } = {}
+
+	-- The element order is fixed so the cycle is predictable: pressing the same
+	-- face repeatedly walks the same list every time.
+	local ELEMENT_ORDER = { "None", "Fire", "Freeze", "Gold", "Multiplier" }
+
+	-- DIE TABS (operator-directed). One row across the top; a tab per owned slot.
+	local tabRow = Instance.new("Frame")
+	tabRow.Size = UDim2.fromScale(0.96, 0.055)
+	tabRow.Position = UDim2.fromScale(0.02, 0.005)
+	tabRow.BackgroundTransparency = 1
+	tabRow.Parent = bodyFrame
+
+	local tabLayout = Instance.new("UIListLayout")
+	tabLayout.FillDirection = Enum.FillDirection.Horizontal
+	tabLayout.Padding = UDim.new(0, 6)
+	tabLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	tabLayout.Parent = tabRow
+
+	local selectDie: (number) -> ()
+
+	for i = 1, 7 do
+		local tc, tb = UITheme.neumorphicButton("D" .. tostring(i), UITheme.Colors.TextGold,
+			UDim2.fromScale(0.12, 1), UDim2.fromScale(0, 0))
+		tc.LayoutOrder = i
+		tc.Visible = false
+		tc.Parent = tabRow
+		tb.Activated:Connect(function()
+			selectDie(i)
+		end)
+		table.insert(dieTabs, { container = tc, button = tb })
+	end
+
+	local header = UITheme.label("", UDim2.fromScale(0.6, 0.055), UDim2.fromScale(0.02, 0.065),
 		UITheme.Colors.TextGold)
 	header.TextScaled = true
 	header.Parent = bodyFrame
 
-	local readout = UITheme.label("", UDim2.fromScale(0.96, 0.05), UDim2.fromScale(0.02, 0.075),
+	local readout = UITheme.label("", UDim2.fromScale(0.96, 0.045), UDim2.fromScale(0.02, 0.125),
 		UITheme.Colors.TextDim)
 	readout.TextScaled = true
 	readout.Parent = bodyFrame
@@ -95,8 +136,8 @@ function V7ForgePanel.new(): V7ForgeController
 	-- The face list. Rows are created up to the largest shape and hidden when the
 	-- current die has fewer, so switching shape never rebuilds Instances.
 	local listHolder = Instance.new("Frame")
-	listHolder.Size = UDim2.fromScale(0.96, 0.72)
-	listHolder.Position = UDim2.fromScale(0.02, 0.14)
+	listHolder.Size = UDim2.fromScale(0.96, 0.66)
+	listHolder.Position = UDim2.fromScale(0.02, 0.18)
 	listHolder.BackgroundTransparency = 1
 	listHolder.Parent = bodyFrame
 
@@ -107,6 +148,8 @@ function V7ForgePanel.new(): V7ForgeController
 
 	local MAX_FACES = 20
 	local refresh: () -> ()
+	local lastSnapshot: any = nil
+	local applySnapshot: (any) -> ()
 
 	-- Moves `amount` onto face `index`, taking it from the other faces.
 	--
@@ -184,10 +227,35 @@ function V7ForgePanel.new(): V7ForgeController
 		probLbl.TextScaled = true
 		probLbl.Parent = row
 
-		local payLbl = UITheme.label("", UDim2.fromScale(0.18, 0.6), UDim2.fromScale(0.49, 0.2),
+		local payLbl = UITheme.label("", UDim2.fromScale(0.14, 0.6), UDim2.fromScale(0.40, 0.2),
 			UITheme.Colors.Cash)
 		payLbl.TextScaled = true
 		payLbl.Parent = row
+
+		-- ELEMENT CHIP (FR-4.1). Cycles through the elements the player has
+		-- unlocked. A CYCLE rather than a dropdown because there are five options
+		-- and a dropdown inside a scrolling list is a layering problem nobody
+		-- needs; one tap advances, and the current element is always visible.
+		local elemC, elemB = UITheme.neumorphicButton("-", UITheme.Colors.Multiplier,
+			UDim2.fromScale(0.17, 0.66), UDim2.fromScale(0.50, 0.17))
+		elemC.Parent = row
+		elemB.Activated:Connect(function()
+			local current = faceElements[i] or "None"
+			-- Advance to the next UNLOCKED element, wrapping. If nothing else is
+			-- unlocked the press is a no-op rather than a request the server will
+			-- refuse.
+			local startIdx = 1
+			for k, id in ipairs(ELEMENT_ORDER) do
+				if id == current then startIdx = k break end
+			end
+			for step = 1, #ELEMENT_ORDER do
+				local nextId = ELEMENT_ORDER[((startIdx - 1 + step) % #ELEMENT_ORDER) + 1]
+				if unlockedElements[nextId] then
+					NetClient.setElement(activeDie, i, nextId)
+					return
+				end
+			end
+		end)
 
 		local minusC, minusB = UITheme.neumorphicButton("-", UITheme.Colors.Negative,
 			UDim2.fromScale(0.10, 0.66), UDim2.fromScale(0.70, 0.17))
@@ -205,7 +273,7 @@ function V7ForgePanel.new(): V7ForgeController
 
 		table.insert(faceRows, {
 			row = row, face = faceLbl, mass = massLbl,
-			prob = probLbl, pay = payLbl,
+			prob = probLbl, pay = payLbl, elem = elemB,
 		})
 	end
 
@@ -214,12 +282,35 @@ function V7ForgePanel.new(): V7ForgeController
 	costLbl.TextScaled = true
 	costLbl.Parent = bodyFrame
 
+	-- EVEN (operator-requested). Spreads the budget equally across every face.
+	--
+	-- DISTINCT FROM RESET, and the difference matters: RESET discards unsaved
+	-- edits and returns to what the server currently holds, costing nothing.
+	-- EVEN proposes a NEW distribution -- the flat one -- which still has to be
+	-- forged and still costs Cash. It is the "start over from neutral" button,
+	-- useful because rebuilding a flat spread by hand from a concentrated die is
+	-- a lot of taps.
+	local evenC, evenBtn = UITheme.neumorphicButton("EVEN", UITheme.Colors.Gems,
+		UDim2.fromScale(0.17, 0.07), UDim2.fromScale(0.30, 0.875))
+	evenC.Parent = bodyFrame
+	evenBtn.Activated:Connect(function()
+		local count = #draft
+		if count == 0 then
+			return
+		end
+		local share = budget / count
+		for i = 1, count do
+			draft[i] = share
+		end
+		refresh()
+	end)
+
 	local resetC, resetBtn = UITheme.neumorphicButton("RESET", UITheme.Colors.TextDim,
-		UDim2.fromScale(0.2, 0.07), UDim2.fromScale(0.48, 0.875))
+		UDim2.fromScale(0.17, 0.07), UDim2.fromScale(0.49, 0.875))
 	resetC.Parent = bodyFrame
 
 	local commitC, commitBtn = UITheme.neumorphicButton("FORGE", UITheme.Colors.Cash,
-		UDim2.fromScale(0.26, 0.07), UDim2.fromScale(0.71, 0.875))
+		UDim2.fromScale(0.24, 0.07), UDim2.fromScale(0.70, 0.875))
 	commitC.Parent = bodyFrame
 
 	----------------------------------------------------------------------------
@@ -260,6 +351,33 @@ function V7ForgePanel.new(): V7ForgeController
 				end
 
 				ui.face.Text = "F" .. tostring(i)
+				-- The element chip shows what the face carries. "-" means Plain.
+				local elemId = faceElements[i] or "None"
+				-- "+ELEM" invites the press; the element's own name replaces it once
+				-- set. It used to render "-" for None, directly beside the minus
+				-- button, so every row appeared to have two minus controls.
+				-- HONEST ABOUT BEING UNAVAILABLE. Elements are unlocked through the
+				-- Diamond tree, and a new player has only "None". The chip used to
+				-- render "+ELEM" regardless and simply do nothing when pressed --
+				-- inert with no explanation, which reads as broken rather than as
+				-- locked. Count what is actually unlocked and say so.
+				local choices = 0
+				for _, id in ipairs(ELEMENT_ORDER) do
+					if unlockedElements[id] and id ~= "None" then
+						choices += 1
+					end
+				end
+				if elemId ~= "None" then
+					UITheme.setButtonText(ui.elem, string.upper(elemId))
+					UITheme.setEnabled(ui.elem, choices > 0)
+				elseif choices > 0 then
+					UITheme.setButtonText(ui.elem, "+ELEM")
+					UITheme.setEnabled(ui.elem, true)
+				else
+					UITheme.setButtonText(ui.elem, "LOCKED")
+					UITheme.setEnabled(ui.elem, false)
+				end
+				ui.elem.Visible = true
 				ui.mass.Text = string.format("%.0f", m)
 				ui.prob.Text = string.format("%.1f%%", p * 100)
 				ui.pay.Text = Format.formatNumber(value)
@@ -271,7 +389,20 @@ function V7ForgePanel.new(): V7ForgeController
 			end
 		end
 
-		header.Text = string.format("%s  -  %d faces  -  %d mass", shapeId, count, math.floor(total + 0.5))
+		header.Text = string.format("DIE %d   %s  -  %d faces  -  %d mass",
+			activeDie, shapeId, count, math.floor(total + 0.5))
+
+		-- Tabs: one per owned slot, the active one held down.
+		for i, tab in ipairs(dieTabs) do
+			tab.container.Visible = i <= dieCount
+			if i <= dieCount then
+				-- NUMBERED, not shape-named. Labelling tabs by shape made six slots
+				-- read "D6 D6 D6 D6 D6 D6" -- identical and unusable -- and an
+				-- empty slot fell back to "D5", which looks like a die type.
+				UITheme.setButtonText(tab.button, tostring(i))
+				UITheme.setEnabled(tab.button, i ~= activeDie)
+			end
+		end
 		readout.Text = string.format(
 			"Projected: %s per roll   |   Void risk %.1f%%   -   heavier faces land LESS often",
 			Format.formatNumber(ev), voidP * 100)
@@ -310,6 +441,21 @@ function V7ForgePanel.new(): V7ForgeController
 			costLbl.TextColor3 = UITheme.Colors.TextDim
 			UITheme.setEnabled(commitBtn, false)
 			UITheme.setEnabled(resetBtn, false)
+		end
+	end
+
+	-- Defined after `refresh` exists, and assigned to the forward local the tab
+	-- buttons already captured.
+	selectDie = function(index: number)
+		if index < 1 or index > dieCount then
+			return
+		end
+		activeDie = index
+		-- Re-read from the last snapshot so switching tabs shows that die's real
+		-- state rather than the previous die's draft.
+		local st = lastSnapshot
+		if st ~= nil then
+			applySnapshot(st)
 		end
 	end
 
@@ -370,10 +516,28 @@ function V7ForgePanel.new(): V7ForgeController
 	-- The data path
 	----------------------------------------------------------------------------
 
-	local self: V7ForgeController = setmetatable({
-		overlay = overlayFrame,
-		_apply = function(state: any)
-			local die = state.dice and state.dice[1]
+	applySnapshot = function(state: any)
+			lastSnapshot = state
+			dieCount = math.clamp(tonumber(state.dieSlots) or 1, 1, 7)
+			if activeDie > dieCount then
+				activeDie = 1
+			end
+			dieShapes = {}
+			if type(state.dice) == "table" then
+				for i, d in ipairs(state.dice) do
+					dieShapes[i] = tostring(d.Shape)
+				end
+			end
+			unlockedElements = {}
+			local el = state.diamondTree and state.diamondTree.Elements
+			if type(el) == "table" then
+				for id, on in pairs(el) do
+					unlockedElements[id] = on == true
+				end
+			end
+			unlockedElements.None = true
+
+			local die = state.dice and state.dice[activeDie]
 			if type(die) ~= "table" or type(die.Faces) ~= "table" then
 				return
 			end
@@ -382,8 +546,10 @@ function V7ForgePanel.new(): V7ForgeController
 			cash = tonumber(state.cash) or 0
 
 			committed = {}
+			faceElements = {}
 			for i, face in ipairs(die.Faces) do
 				committed[i] = tonumber(face.Mass) or 0
+				faceElements[i] = tostring(face.Element or "None")
 			end
 			-- The draft follows the server unless the player is mid-edit; a
 			-- snapshot arriving during a roll must not silently discard changes
@@ -401,7 +567,11 @@ function V7ForgePanel.new(): V7ForgeController
 				draft = table.clone(committed)
 			end
 			refresh()
-		end,
+	end
+
+	local self: V7ForgeController = setmetatable({
+		overlay = overlayFrame,
+		_apply = applySnapshot,
 	}, V7ForgePanel) :: any
 
 	return self
