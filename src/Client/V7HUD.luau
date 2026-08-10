@@ -5,6 +5,7 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UITheme = require(script.Parent:WaitForChild("UITheme"))
+local Format = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Format"))
 
 local V7HUD = {}
 V7HUD.__index = V7HUD
@@ -306,9 +307,17 @@ function V7HUD.new(): V7HUDController
 end
 
 function V7HUD:updateBalances(cash: number, gems: number, diamonds: number)
-	self.cashLabel.Text = string.format("$%.2e", cash)
-	self.gemsLabel.Text = tostring(gems)
-	self.diamondsLabel.Text = tostring(diamonds)
+	-- NFR-4, THE SUFFIX LADDER. This was `string.format("$%.2e", cash)`, which
+	-- showed players "$2.06e+04" instead of "$20.6K" -- scientific notation is a
+	-- programmer's format, and an idle game whose central number is unreadable
+	-- has broken its own core feedback loop.
+	--
+	-- `Format.formatNumber` is the shared implementation, already precision-safe
+	-- to 1e300 and already handling NaN and infinity. It existed the whole time;
+	-- this module simply never required it.
+	self.cashLabel.Text = "$" .. Format.formatNumber(cash)
+	self.gemsLabel.Text = Format.formatNumber(gems)
+	self.diamondsLabel.Text = Format.formatNumber(diamonds)
 end
 
 function V7HUD:onMenuClicked(callback: (menuId: string) -> ())
