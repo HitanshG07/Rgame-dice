@@ -327,18 +327,20 @@ RemoteGateway.register("AddDieSlot", announcing(function(player: Player)
 	if not spent then
 		return false, Remotes.Notice.InsufficientFunds
 	end
+	-- THE NEW DIE IS THE STARTING SHAPE, from the shared factory.
+	--
+	-- This hardcoded a D6 with six 10-mass faces. Once the Cash ladder landed and
+	-- the starting shape became D2, buying a slot handed the player a D6 -- three
+	-- rungs up a ladder they were meant to climb, and a shape they very likely did
+	-- not own. Nothing refused it, because a die written straight into the profile
+	-- never passes through `SetShape`'s ownership check.
+	local fresh = DiceCatalog.newStartingDie()
+	if fresh == nil then
+		return false, Remotes.Notice.ServerError
+	end
 	PlayerProfile.mutate(player, function(d)
 		d.DieSlots = math.min(7, d.DieSlots + 1)
-		table.insert(d.Dice, {
-			Shape = "D6",
-			MassBudget = 60,
-			PurchasedBudget = 60,
-			Faces = {
-				{ Mass = 10, Element = "None" }, { Mass = 10, Element = "None" },
-				{ Mass = 10, Element = "None" }, { Mass = 10, Element = "None" },
-				{ Mass = 10, Element = "None" }, { Mass = 10, Element = "None" },
-			},
-		})
+		table.insert(d.Dice, fresh :: any)
 	end)
 	return true, nil
 end))

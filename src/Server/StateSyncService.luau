@@ -97,6 +97,14 @@ function StateSyncService.buildSnapshot(data: PlayerProfile.Profile, streak: num
 	for id, unlocked in pairs(data.Diamond.Shapes) do
 		shapes[id] = unlocked
 	end
+	-- Which shapes have been worn before. The client needs it to label the USE
+	-- button honestly: the first equip of a shape is free, every later switch
+	-- costs Diamonds (FR-6.1). This is a FLAG, not a price -- the client reads the
+	-- cost from the shared catalog and never receives one over the wire (NFR-5).
+	local shapesEquipped = {}
+	for id, worn in pairs(data.Diamond.ShapesEquipped) do
+		shapesEquipped[id] = worn
+	end
 
 	local settings = {}
 	for key, enabled in pairs(data.Settings) do
@@ -157,6 +165,7 @@ function StateSyncService.buildSnapshot(data: PlayerProfile.Profile, streak: num
 			SlotNodes = data.Diamond.SlotNodes,
 			Elements = elements,
 			Shapes = shapes,
+			ShapesEquipped = shapesEquipped,
 		},
 		settings = settings,
 		streak = streak,

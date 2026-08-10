@@ -59,6 +59,7 @@ export type Profile = {
 	Diamond: {
 		StreakStrength: number, MassCeiling: number, SlotNodes: number,
 		Elements: { [string]: boolean }, Shapes: { [string]: boolean },
+		ShapesEquipped: { [string]: boolean },
 	},
 	Upgrades: { [string]: number },
 	Vault: { LastSeen: number, AccrualId: number, AvgIncomePerSec: number },
@@ -111,6 +112,18 @@ local TEMPLATE: Profile = {
 		Elements = { None = true },
 		-- The first rung, and the only one owned at the start.
 		Shapes = { D2 = true },
+		-- SHAPES THE PLAYER HAS EVER EQUIPPED (operator decision, 2026-08-11).
+		--
+		-- The FIRST time a shape goes onto a die it is free; every switch after
+		-- that costs Diamonds per FR-6.1. Without this, a Cash-bought shape was
+		-- unusable for a whole first run -- Diamonds only arrive at ascension, so
+		-- a player could buy D3, D4 and D6 and still be rolling D2.
+		--
+		-- It lives beside `Shapes` in the Diamond tree because it is permanent in
+		-- the same way ownership is: ascension must not make a shape free to
+		-- equip again, or a cheap re-ascend becomes a way to dodge the cost.
+		-- Seeded with the starting shape, which is already on the starting die.
+		ShapesEquipped = { D2 = true },
 	},
 	-- BadRollShield is a GAMEPASS entitlement, not a Cash upgrade. It is
 	-- declared here with a 0 default so no read path can hit nil, and so the
@@ -232,6 +245,27 @@ function PlayerProfile._reconcile(raw: any): Profile
 	if type(data.Diamond.Shapes) ~= "table" then
 		data.Diamond.Shapes = deepCopy(TEMPLATE.Diamond.Shapes)
 	end
+	if type(data.Diamond.ShapesEquipped) ~= "table" then
+		data.Diamond.ShapesEquipped = deepCopy(TEMPLATE.Diamond.ShapesEquipped)
+	end
+
+	-- A SHAPE ON A DIE HAS, BY DEFINITION, BEEN EQUIPPED.
+	--
+	-- `ShapesEquipped` drives the first-equip-free rule, and the plain template
+	-- backfill seeds it with the STARTING shape only. Every profile that predates
+	-- the field is therefore wearing something the record says was never worn --
+	-- so a player on a D6 could switch away and back for free once, and worse,
+	-- the state is simply untrue.
+	--
+	-- Seeding from the dice themselves is both the correct migration and the
+	-- honest one: it records what actually happened rather than guessing. It is
+	-- also idempotent, so running it on every load costs nothing after the first.
+	for _, die in ipairs(data.Dice) do
+		if type(die) == "table" and type(die.Shape) == "string" then
+			data.Diamond.ShapesEquipped[die.Shape] = true
+		end
+	end
+
 	return (data :: any) :: Profile
 end
 

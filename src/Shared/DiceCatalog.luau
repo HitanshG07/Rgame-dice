@@ -240,6 +240,50 @@ DiceCatalog.UNLOCK_CURRENCY = "Cash"
 -- this to render a label and grey a button, and never sends a price (NFR-5).
 DiceCatalog.SHAPE_CHANGE_DIAMOND_COST = 5
 
+-- A FRESH DIE AT ITS SHAPE'S DEFAULT BUDGET, evenly spread.
+--
+-- WHY THIS EXISTS. Three places built a starting die by hand and all three
+-- hardcoded `Shape = "D6"` with six 10-mass faces: the profile template, the
+-- AddDieSlot handler, and the ascension reset. The starting shape became D2 on
+-- 2026-08-11 and only the template was updated, so buying a die slot or
+-- ascending handed the player a D6 -- a shape they may not own and cannot
+-- legally switch away from for free, several rungs up a ladder they were
+-- supposed to climb. Nothing errored: `SetShape` reads ownership, and a die
+-- placed directly into the profile never passes through it.
+--
+-- The even split is the neutral layout and matches what `performSetShape` does
+-- for the same reason: mass placement is the player's decision, and a reset
+-- should not make it for them.
+function DiceCatalog.newDie(shapeId: string): { Shape: string, MassBudget: number, PurchasedBudget: number, Faces: { { Mass: number, Element: string } } }?
+	local shape = SHAPES[shapeId]
+	if shape == nil then
+		return nil
+	end
+	-- snapDown for the same reason performSetShape does it: rounding each share
+	-- to nearest rounds up half the time, and the faces would then sum to more
+	-- than the budget the player owns.
+	local per = math.floor((shape.defaultBudget / shape.faceCount) * 1000 + 1e-9) / 1000
+	if per < shape.massFloor then
+		per = shape.massFloor
+	end
+	local faces = {}
+	for i = 1, shape.faceCount do
+		faces[i] = { Mass = per, Element = "None" }
+	end
+	local budget = per * shape.faceCount
+	return {
+		Shape = shapeId,
+		MassBudget = budget,
+		PurchasedBudget = budget,
+		Faces = faces,
+	}
+end
+
+-- The die a new player starts with, and the die an ascension resets to.
+function DiceCatalog.newStartingDie()
+	return DiceCatalog.newDie(DiceCatalog.STARTING_SHAPE)
+end
+
 function DiceCatalog.getUnlockOrder(): { string }
 	return table.clone(UNLOCK_ORDER)
 end

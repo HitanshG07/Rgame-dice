@@ -92,6 +92,11 @@ local function run(): (boolean, string?, number)
 		},
 	}
 	data.Diamond.Shapes.D6 = true
+	-- Worn, because the die above is wearing it. `_reconcile` derives this from
+	-- the dice, but it ran before this fixture replaced them -- and a profile
+	-- claiming its own equipped shape has never been equipped would hand the
+	-- fixture a free switch that no real player gets.
+	data.Diamond.ShapesEquipped.D6 = true
 
 	PlayerProfile._injectProfileForTesting(player, Fakes.createFakeProfile(data))
 
@@ -291,13 +296,39 @@ local function run(): (boolean, string?, number)
 
 	data.Diamond.Shapes.D20 = true
 
-	-- Insufficient Diamonds: refused, and nothing changes.
+	-- THE FIRST EQUIP OF A SHAPE IS FREE (operator decision, 2026-08-11), so an
+	-- unaffordable FIRST equip is not a refusal -- it is the discount working.
+	--
+	-- WHY THE RULE EXISTS. The unlock ladder is priced in Cash and Diamonds only
+	-- arrive at ascension, so charging Diamonds to wear a shape for the first
+	-- time meant a player could buy the D3 for $500 and be unable to put it on
+	-- for their entire first run. Cash buys the shape; Diamonds buy the swapping.
 	e = e or check((data.Diamonds :: number) == 0, "Diamonds should start at 0")
-	local brokeOk = ForgeService.performSetShape(player, 1, "D20")
-	e = e or check(not brokeOk, "a shape change the player cannot afford must be refused")
-	e = e or check(data.Dice[1].Shape == "D6", "an unaffordable shape change altered the die")
+	local freeFirstOk, freeFirstReason = ForgeService.performSetShape(player, 1, "D20")
+	e = e or check(freeFirstOk, string.format(
+		"the FIRST equip of an owned shape must be free, got '%s'", tostring(freeFirstReason)))
+	e = e or check(data.Dice[1].Shape == "D20", "the free first equip did not apply")
+	e = e or check((EconomyService.balance(player, "Diamonds") :: number) == 0,
+		"a first equip must not charge Diamonds")
+	e = e or check(data.Diamond.ShapesEquipped.D20 == true,
+		"equipping a shape must latch it as worn, or the discount repeats forever")
+
+	-- Back to D6, which the starting die already wore, so this one IS chargeable
+	-- -- and with no Diamonds it must be refused, leaving the die untouched.
+	local brokeOk = ForgeService.performSetShape(player, 1, "D6")
+	e = e or check(not brokeOk,
+		"a SECOND equip the player cannot afford must be refused")
+	e = e or check(data.Dice[1].Shape == "D20", "an unaffordable shape change altered the die")
 
 	EconomyService.credit(player, "Diamonds", 20, "test_setup")
+
+	-- Now affordable: the charge really happens on a repeat equip.
+	local paidBefore = EconomyService.balance(player, "Diamonds") :: number
+	local paidOk = ForgeService.performSetShape(player, 1, "D6")
+	e = e or check(paidOk, "an affordable repeat equip must apply")
+	e = e or check(paidBefore - (EconomyService.balance(player, "Diamonds") :: number)
+		== DiceCatalog.SHAPE_CHANGE_DIAMOND_COST,
+		"a repeat equip must charge exactly the catalog's switch cost")
 
 	-- Changing to the shape already equipped is a no-op and must not be charged.
 	local diamondsBefore = EconomyService.balance(player, "Diamonds") :: number

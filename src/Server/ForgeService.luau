@@ -659,13 +659,29 @@ function ForgeService.performSetShape(player: Player, dieIndex: number, shapeId:
 		return false, Remotes.Notice.InvalidRequest
 	end
 
-	if not EconomyService.canAfford(player, "Diamonds", SHAPE_CHANGE_DIAMOND_COST) then
-		return false, Remotes.Notice.InsufficientFunds
-	end
+	-- THE FIRST EQUIP IS FREE (operator decision, 2026-08-11).
+	--
+	-- FR-6.1 charges Diamonds for a shape change, and that is right for the thing
+	-- it is pricing: the freedom to keep changing your mind. It was wrong for the
+	-- FIRST time a shape is worn, because the ladder is bought with Cash and
+	-- Diamonds do not exist before a player's first ascension -- so a player could
+	-- pay $500 for the D3 and be unable to put it on for the rest of the run. Cash
+	-- buys the shape; Diamonds buy the swapping.
+	--
+	-- `ShapesEquipped` is only ever added to, and ascension does not clear it, so
+	-- this discount cannot be farmed by re-ascending.
+	local firstEquip = not data.Diamond.ShapesEquipped[shapeId]
+	local switchCost = if firstEquip then 0 else SHAPE_CHANGE_DIAMOND_COST
 
-	local spent, spendReason = EconomyService.spend(player, "Diamonds", SHAPE_CHANGE_DIAMOND_COST, "set_shape")
-	if not spent then
-		return false, spendReason
+	if switchCost > 0 then
+		if not EconomyService.canAfford(player, "Diamonds", switchCost) then
+			return false, Remotes.Notice.InsufficientFunds
+		end
+
+		local spent, spendReason = EconomyService.spend(player, "Diamonds", switchCost, "set_shape")
+		if not spent then
+			return false, spendReason
+		end
 	end
 
 	local applied, applyReason = PlayerProfile.mutate(player, function(d)
@@ -681,9 +697,15 @@ function ForgeService.performSetShape(player: Player, dieIndex: number, shapeId:
 			PurchasedBudget = purchased,
 			Faces = faces,
 		}
+		-- Latched INSIDE the same mutation that equips it, so the free equip and
+		-- the record of it cannot come apart -- a write that half-applied would
+		-- otherwise leave the discount available forever.
+		d.Diamond.ShapesEquipped[shapeId] = true
 	end)
 	if not applied then
-		EconomyService.credit(player, "Diamonds", SHAPE_CHANGE_DIAMOND_COST, "set_shape_refund")
+		if switchCost > 0 then
+			EconomyService.credit(player, "Diamonds", switchCost, "set_shape_refund")
+		end
 		warn(string.format("[ForgeService] shape write refused for UserId=%d: %s",
 			player.UserId, tostring(applyReason)))
 		return false, Remotes.Notice.ProfileUnavailable

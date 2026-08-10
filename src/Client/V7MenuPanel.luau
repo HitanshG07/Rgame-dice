@@ -241,6 +241,7 @@ function V7MenuPanel.new(): V7MenuController
 			return
 		end
 		local ownedMap = (state.diamondTree and state.diamondTree.Shapes) or {}
+		local wornMap = (state.diamondTree and state.diamondTree.ShapesEquipped) or {}
 		local currentShape = state.dice and state.dice[1] and state.dice[1].Shape
 		local cash = tonumber(state.cash) or 0
 		local diamonds = tonumber(state.diamonds) or 0
@@ -265,15 +266,28 @@ function V7MenuPanel.new(): V7MenuController
 				-- had no Diamonds pressed USE and watched nothing happen -- the
 				-- server refused, correctly, and the panel had never said there was
 				-- a price to refuse over.
-				local affordable = diamonds >= switchCost
-				entry.status.Text = if affordable
-					then "OWNED"
-					else string.format("OWNED - needs %d\u{2666}", switchCost)
-				entry.status.TextColor3 = if affordable
-					then UITheme.Colors.Positive else UITheme.Colors.TextDim
-				UITheme.setButtonText(entry.button,
-					string.format("USE %d\u{2666}", switchCost))
-				UITheme.setEnabled(entry.button, affordable)
+				--
+				-- FIRST EQUIP IS FREE, so the label has to distinguish the two
+				-- cases. `ShapesEquipped` comes from the snapshot rather than being
+				-- inferred from ownership, because "bought" and "has been worn" are
+				-- genuinely different facts and only the server knows the second.
+				local firstEquip = wornMap[shapeId] ~= true
+				if firstEquip then
+					entry.status.Text = "OWNED - free to equip"
+					entry.status.TextColor3 = UITheme.Colors.Positive
+					UITheme.setButtonText(entry.button, "USE")
+					UITheme.setEnabled(entry.button, true)
+				else
+					local affordable = diamonds >= switchCost
+					entry.status.Text = if affordable
+						then "OWNED"
+						else string.format("OWNED - needs %d\u{2666}", switchCost)
+					entry.status.TextColor3 = if affordable
+						then UITheme.Colors.Positive else UITheme.Colors.TextDim
+					UITheme.setButtonText(entry.button,
+						string.format("USE %d\u{2666}", switchCost))
+					UITheme.setEnabled(entry.button, affordable)
+				end
 			elseif allowed then
 				-- The next rung. Affordability decides whether it is pressable,
 				-- but the price is shown either way so the goal is visible.

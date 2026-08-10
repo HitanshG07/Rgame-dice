@@ -66,10 +66,37 @@ local function run(): (boolean, string?, number)
 		
 		e = e or check(postData.Upgrades.AutoRollSpeed == 0, "Upgrades MUST be wiped")
 		e = e or check(postData.Vault.AccrualId == 0, "Vault MUST be wiped")
-		e = e or check(postData.CodesRedeemed["BETA2026"] == nil, "Codes MUST be wiped")
-		e = e or check(postData.LoginStreak.Count == 0, "LoginStreak MUST be wiped")
 
 		-- 2. Asserts PRESERVED state
+		--
+		-- CORRECTED 2026-08-11. This block used to assert the OPPOSITE for the two
+		-- checks below -- "Codes MUST be wiped" and "LoginStreak MUST be wiped" --
+		-- citing no requirement for either. They were written from what the code
+		-- did, not from what the specification says, so they locked in two defects
+		-- and reported green while doing it. A test that mirrors the
+		-- implementation cannot disagree with it, which is the entire point of
+		-- having one.
+		--
+		-- FR-9.1 enumerates the reset exhaustively: "Ascending resets Cash, face
+		-- layouts, mass budgets, and Cash-purchased upgrades." Neither of these is
+		-- on that list.
+		--
+		-- CODES. Wiping `CodesRedeemed` made every promo code redeemable once per
+		-- ASCENSION instead of once per player. FR-10.6 specifies an
+		-- "already-redeemed" response, and this table is the only thing that can
+		-- produce one -- clearing it turned each ascension into a repeatable +100
+		-- Gems and +10 Diamonds, minting the premium prestige currency.
+		e = e or check(postData.CodesRedeemed["BETA2026"] == true,
+			"a redeemed code MUST survive ascension, or every code becomes"
+			.. " once-per-ascension and mints Gems and Diamonds on repeat")
+
+		-- LOGIN STREAK. Days attended is an ACCOUNT-level record. Ascending is
+		-- something a player does inside a single run and says nothing about
+		-- whether they logged in yesterday; zeroing it punished the player for
+		-- engaging with the core prestige loop.
+		e = e or check(postData.LoginStreak.Count == 7,
+			"the login streak MUST survive ascension -- it counts days attended,"
+			.. " not progress within a run")
 		e = e or check(postData.Diamonds > 10, "Diamonds MUST be preserved and granted")
 		e = e or check(postData.Ascensions == 2, "Ascensions MUST be incremented (was 1, now 2)")
 		e = e or check(postData.LifetimeCash == 50000000000, "LifetimeCash MUST be preserved")

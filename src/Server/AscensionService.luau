@@ -6,6 +6,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local ForgeMath = require(Shared:WaitForChild("ForgeMath"))
+local DiceCatalog = require(Shared:WaitForChild("DiceCatalog"))
 
 local PlayerProfile = require(script.Parent:WaitForChild("PlayerProfile"))
 local EconomyService = require(script.Parent:WaitForChild("EconomyService"))
@@ -55,26 +56,41 @@ function AscensionService.ascend(player: Player): (boolean, string?, number)
 		-- Reset volatile progression
 		d.Vault.AccrualId = 0
 		d.Vault.AvgIncomePerSec = 0
-		table.clear(d.CodesRedeemed)
-		d.Quests.Slots = {}
-		d.Quests.RolledOn = 0
-		d.LoginStreak.Count = 0
-		d.LoginStreak.ForgivenessLeft = 1
 
-		-- Reset Dice to default initial state
-		d.Dice = {
-			{
-				Shape = "D6",
-				MassBudget = 60,
-				PurchasedBudget = 60,
-				Faces = {
-					{ Mass = 10, Element = "None" }, { Mass = 10, Element = "None" },
-					{ Mass = 10, Element = "None" }, { Mass = 10, Element = "None" },
-					{ Mass = 10, Element = "None" }, { Mass = 10, Element = "None" },
-				},
-			},
-		}
-		d.DieSlots = 1
+		-- WHAT ASCENSION RESETS IS AN ENUMERATED LIST, AND IT IS SHORT.
+		--
+		-- FR-9.1: "Ascending resets Cash, face layouts, mass budgets, and
+		-- Cash-purchased upgrades." Everything above is on that list. Three
+		-- things that WERE reset here are not, and each was a real defect:
+		--
+		--   `CodesRedeemed` was cleared, which made every promo code redeemable
+		--   ONCE PER ASCENSION rather than once per player. FR-10.6 specifies an
+		--   "already-redeemed" response, and a table named CodesRedeemed exists to
+		--   produce it; wiping it defeated the only mechanism enforcing it and
+		--   turned each ascension into a repeatable +100 Gems and +10 Diamonds.
+		--   Diamonds are the premium prestige currency, so this was a mint.
+		--
+		--   `LoginStreak` was zeroed. A login streak is an ACCOUNT-level record of
+		--   days attended; ascending is a thing the player does inside one run and
+		--   has nothing to do with whether they showed up yesterday. Resetting it
+		--   punished the player for engaging with the core prestige loop.
+		--
+		--   `Quests` were cleared and the roll date zeroed, which let a player
+		--   re-roll the day's quests by ascending, and claim them again.
+		--
+		-- Anything added to this reset in future belongs in FR-9.1 first. The list
+		-- there is the specification; this block is only allowed to implement it.
+
+		-- Face layouts and mass budgets, per FR-9.1 -- via the shared factory, so
+		-- the die a player restarts with is the STARTING shape and cannot drift
+		-- from what a new profile gets. This used to hardcode a D6 with six
+		-- 10-mass faces, which after the ladder landed handed the ascending player
+		-- a shape three rungs up that they may not even own.
+		local fresh = DiceCatalog.newStartingDie()
+		if fresh ~= nil then
+			d.Dice = { fresh :: any }
+			d.DieSlots = 1
+		end
 	end)
 
 	if not ok then
