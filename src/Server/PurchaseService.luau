@@ -135,6 +135,12 @@ local function applyGrant(player: Player, entry: Catalog.Entry): (boolean, strin
 			if entry.amount ~= nil and entry.amount > 0 then
 				data.DieSlots = math.min(7, data.DieSlots + entry.amount)
 			end
+			-- FR-12.5: buying it closes the offer permanently. Latched true and
+			-- never cleared -- StateSync reads this to stop advertising it, and
+			-- nothing anywhere sets it back to false.
+			if entry.key == "StarterBundle" then
+				data.BundleOffered = true
+			end
 		end)
 		return ok, reason
 

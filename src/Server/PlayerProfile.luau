@@ -65,6 +65,10 @@ export type Profile = {
 	PurchaseIds: { [string]: number },
 	PurchaseOrder: { string },
 	BundleOffered: boolean,
+	-- FR-12.5. Absolute server timestamp when the starter offer closes, stamped
+	-- ONCE on the player's first session. Zero means "not yet stamped"; there is
+	-- no code path that raises it after the fact.
+	BundleExpiry: number,
 	CodesRedeemed: { [string]: boolean },
 	Quests: { Slots: { any }, RolledOn: number },
 	LoginStreak: { Count: number, LastDay: number, ForgivenessLeft: number },
@@ -114,6 +118,7 @@ local TEMPLATE: Profile = {
 	PurchaseIds = {},
 	PurchaseOrder = {},
 	BundleOffered = false,
+	BundleExpiry = 0,
 	CodesRedeemed = {},
 	Quests = { Slots = {}, RolledOn = 0 },
 	LoginStreak = { Count = 0, LastDay = 0, ForgivenessLeft = 1 },
@@ -216,6 +221,9 @@ function PlayerProfile._reconcile(raw: any): Profile
 	-- Sub-tables inside Diamond are dereferenced unguarded by ForgeService.
 	if type(data.Diamond.Elements) ~= "table" then
 		data.Diamond.Elements = deepCopy(TEMPLATE.Diamond.Elements)
+	end
+	if type(data.BundleExpiry) ~= "number" or data.BundleExpiry ~= data.BundleExpiry then
+		data.BundleExpiry = 0
 	end
 	if type(data.Diamond.Shapes) ~= "table" then
 		data.Diamond.Shapes = deepCopy(TEMPLATE.Diamond.Shapes)

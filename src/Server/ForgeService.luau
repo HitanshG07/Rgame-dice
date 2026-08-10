@@ -49,6 +49,16 @@ end
 
 local emitForgeResult: (Player, any) -> () = defaultEmit
 
+-- Notified after every SUCCESSFUL forge. Set by ServerBootstrap so quests can
+-- observe forging without this module depending on ProgressionService -- the
+-- forge should not know what watches it, and the indirection keeps the module
+-- graph acyclic (ledger L-035).
+local forgeObserver: ((Player) -> ())? = nil
+
+function ForgeService.setForgeObserver(fn: ((Player) -> ())?): ()
+	forgeObserver = fn
+end
+
 function ForgeService._setResultEmitterForTesting(fn: ((Player, any) -> ())?): ()
 	if not RunService:IsStudio() then
 		error("[ForgeService] the result-emitter seam is Studio-only", 2)
@@ -464,6 +474,16 @@ function ForgeService.performForge(player: Player, dieIndex: number, distributio
 		cost = cost,
 		ok = true,
 	})
+
+	-- Wrapped: an observer defect must not fail a forge whose mass and Cash have
+	-- already moved.
+	local observe = forgeObserver
+	if observe ~= nil then
+		local okObs, obsErr = pcall(observe, player)
+		if not okObs then
+			warn("[ForgeService] forge observer failed: " .. tostring(obsErr))
+		end
+	end
 
 	return true, nil
 end

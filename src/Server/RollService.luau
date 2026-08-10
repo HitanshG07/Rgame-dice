@@ -346,6 +346,15 @@ type Session = {
 
 local sessions: { [Player]: Session } = {}
 
+-- Notified after every credited roll, with the resulting streak. Set by
+-- ServerBootstrap; nil until then, and nil is a valid state -- the roll loop
+-- works with nothing watching it.
+local rollObserver: ((Player, number) -> ())? = nil
+
+function RollService.setRollObserver(fn: ((Player, number) -> ())?): ()
+	rollObserver = fn
+end
+
 --------------------------------------------------------------------------------
 -- Result-emission seam.
 --
@@ -460,6 +469,28 @@ function RollService.performRoll(player: Player): (boolean, string?)
 	session.frozenDie = result.frozenDie
 	session.rollsThisSession += 1
 	session.earnedThisSession += result.payout
+
+	-- QUEST PROGRESS (FR-10.1).
+	--
+	-- Reported through an injected observer rather than a direct require of
+	-- ProgressionService. Two reasons, and the second is the real one:
+	--
+	--   a require here would put RollService -> ProgressionService into a graph
+	--   that already carries RollService <- OfflineService, and the module cycle
+	--   that produces is the failure ledger L-035 records;
+	--
+	--   more importantly, the roll loop should not KNOW what watches it. Quests
+	--   observe rolls; rolls do not serve quests.
+	--
+	-- Wrapped because a defect in an observer must never fail a roll that has
+	-- already been credited (FR-2.6).
+	local observe = rollObserver
+	if observe ~= nil then
+		local okObs, obsErr = pcall(observe, player, result.streak)
+		if not okObs then
+			warn("[RollService] roll observer failed: " .. tostring(obsErr))
+		end
+	end
 
 	-- Cash is credited BEFORE the event fires. If the client never receives
 	-- RollResult -- disconnect, lag, tab-out -- the player still has the money

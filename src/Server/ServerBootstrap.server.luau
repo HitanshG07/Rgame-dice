@@ -110,6 +110,29 @@ do
 	end
 end
 
+-- QUEST PROGRESS, wired at the composition root.
+--
+-- RollService and ForgeService do not require ProgressionService: quests OBSERVE
+-- play, and the systems being observed should not know about the observer. This
+-- is also what keeps the module graph acyclic (ledger L-035).
+RollService.setRollObserver(function(player: Player, streak: number)
+	ProgressionService.advanceQuests(player, "rolls", 1, false)
+	-- bestStreak is a GAUGE, not a counter: the quest wants the highest streak
+	-- reached, so it takes a maximum rather than a sum.
+	ProgressionService.advanceQuests(player, "bestStreak", streak, true)
+end)
+
+ForgeService.setForgeObserver(function(player: Player)
+	ProgressionService.advanceQuests(player, "forges", 1, false)
+end)
+
+-- How long a new player's starter offer stays open. 48 hours: long enough to
+-- span a weekend and see the game properly, short enough to mean something.
+--
+-- FR-12.5 -- this is a REAL deadline. It is stamped once per player and never
+-- moved, and there is deliberately no code anywhere that can extend it.
+local STARTER_BUNDLE_WINDOW_SEC = 48 * 3600
+
 local function announcing<T...>(handler: (Player, T...) -> (boolean, string?))
 	return function(player: Player, ...: T...): (boolean, string?)
 		local ok, reason = handler(player, ...)
@@ -397,6 +420,23 @@ admitPlayer = function(player: Player)
 	-- Quests, chests and the login streak are all session- or day-scoped and
 	-- must start their clocks at admission, not at first use.
 	ProgressionService.beginSession(player)
+
+	-- FR-12.5, THE ONCE-ONLY STARTER OFFER, stamped here and nowhere else.
+	--
+	-- Written only when it is still zero, so this runs exactly once in a player's
+	-- lifetime. There is no path that extends, resets, or re-opens it -- which is
+	-- the entire requirement: "once it expires the offer is permanently gone for
+	-- that player and never reappears under any name."
+	--
+	-- If this ever needs changing, changing it is the violation.
+	do
+		local d = PlayerProfile.get(player)
+		if d ~= nil and d.BundleExpiry == 0 then
+			PlayerProfile.mutate(player, function(profile)
+				profile.BundleExpiry = os.time() + STARTER_BUNDLE_WINDOW_SEC
+			end)
+		end
+	end
 
 	-- The client displays NOTHING until this lands: no balances, no die shapes,
 	-- no entitlements, no settings. Pushed after beginSession so the snapshot

@@ -285,6 +285,14 @@ function ProgressionService.advanceQuests(player: Player, metric: string, value:
 	end)
 end
 
+-- The target for a quest id, for callers that must draw a progress bar. Exposed
+-- so StateSyncService does not keep a second copy of the quest table -- the copy
+-- nobody executes is the one that drifts (L-026).
+function ProgressionService.getQuestTarget(questId: string): number?
+	local def = questDef(questId)
+	return if def ~= nil then def.target else nil
+end
+
 function ProgressionService.claimQuest(player: Player, questId: string): (boolean, string?)
 	local data = PlayerProfile.get(player)
 	if not data then

@@ -31,6 +31,7 @@ local Remotes = require(Shared:WaitForChild("Remotes"))
 local PlayerProfile = require(script.Parent:WaitForChild("PlayerProfile"))
 local PurchaseService = require(script.Parent:WaitForChild("PurchaseService"))
 local RollService = require(script.Parent:WaitForChild("RollService"))
+local ProgressionService = require(script.Parent:WaitForChild("ProgressionService"))
 
 local StateSyncService = {}
 
@@ -104,6 +105,46 @@ function StateSyncService.buildSnapshot(data: PlayerProfile.Profile, streak: num
 
 	local extraSlots = if player ~= nil then PurchaseService.bonusDieSlots(player) else 0
 
+	-- Active boost expiries, read straight from the profile so this cannot
+	-- disagree with what BoostService charges against. Only boosts still running
+	-- are listed; an expired one is simply absent rather than sent as expired,
+	-- because "absent" is the state the client should render.
+	local now = os.time()
+	local boosts: { [string]: number } = {}
+	for key, value in pairs(data.Upgrades) do
+		local kind = string.match(key, "^Boost_(.+)_Expiry$")
+		if kind ~= nil and type(value) == "number" and value > now then
+			boosts[kind] = value
+		end
+	end
+
+	-- The day's quests. `target` is included so the client can draw a progress
+	-- bar without a second copy of the quest table that could drift (L-026).
+	local quests: { any } = {}
+	for _, slot in ipairs(data.Quests.Slots) do
+		local target = ProgressionService.getQuestTarget(slot.Id)
+		table.insert(quests, {
+			id = slot.Id,
+			progress = slot.Progress,
+			target = target,
+			claimed = slot.Claimed,
+			ready = target ~= nil and not slot.Claimed and slot.Progress >= target,
+		})
+	end
+
+	-- FR-12.5, THE ONCE-ONLY OFFER. The window opens on first sight and closes
+	-- permanently; `BundleOffered` latching true is what makes it unrepeatable.
+	-- `BundleExpiry` is stamped ONCE, on the player's first session, and never
+	-- rewritten. That single write is the whole guarantee: there is no code path
+	-- anywhere that extends it, resets it, or re-opens the offer, and
+	-- `BundleOffered` latching true on purchase closes it early.
+	local starterBundle = {
+		offered = (not data.BundleOffered)
+			and data.BundleExpiry > 0
+			and now < data.BundleExpiry,
+		expiresAt = data.BundleExpiry,
+	}
+
 	return {
 		cash = data.Cash,
 		gems = data.Gems,
@@ -119,7 +160,31 @@ function StateSyncService.buildSnapshot(data: PlayerProfile.Profile, streak: num
 		},
 		settings = settings,
 		streak = streak,
-		boosts = {},          -- Block 5 populates this; an empty table, never nil
+		-- ACTIVE BOOSTS (FR-12.2). This was a hardcoded `{}` with the comment
+		-- "Block 5 populates this". Block 5 built BoostService and never came
+		-- back, so a purchased boost ticked down server-side while the client was
+		-- told there were none -- the player paid for a timer they could not see.
+		--
+		-- EXPIRY TIMES cross the wire, not multipliers. The client needs to draw a
+		-- countdown; it never needs to know what the boost is WORTH, and a
+		-- multiplier on the wire is a reward figure (NFR-5). The server applies
+		-- the value; the client renders the clock.
+		boosts = boosts,
+		-- DAILY QUESTS (FR-10.1). Progress and target only. The reward amount is
+		-- deliberately absent for the same NFR-5 reason -- the client shows what
+		-- the quest IS and whether it is done, never what it pays.
+		quests = quests,
+		loginStreak = {
+			count = data.LoginStreak.Count,
+			forgivenessLeft = data.LoginStreak.ForgivenessLeft,
+			claimedToday = data.LoginStreak.LastDay == math.floor(os.time() / 86400),
+		},
+		-- THE STARTER BUNDLE OFFER (FR-12.5). `expiresAt` is an absolute server
+		-- timestamp, so the client renders a countdown against `serverTime` rather
+		-- than running its own clock. Once past, it is GONE -- `offered` never
+		-- returns to true for this player, there is no reset anywhere in the code,
+		-- and nothing re-offers it under another name.
+		starterBundle = starterBundle,
 		serverTime = os.time(),
 		-- Stats the HUD and the Statistics panel read. Present here rather than
 		-- in a second event because they change on the same cadence.
