@@ -201,12 +201,88 @@ notation shown to players; three overlays completely empty; no overlay scrolled;
 
 ### 4.3 Known gaps not yet scheduled
 
-- **No way to unlock elements.** The chips correctly read `LOCKED`, but the
-  Diamond tree that grants Fire/Freeze/Gold/Multiplier has no UI anywhere.
 - `src/Client/LegacyUI/` is a dead duplicate of every pre-V7 client module — delete
   once V7 is confirmed stable.
 - Balance *tuning* is unvalidated. UT-14 proves a crossover exists; it does not
   prove it sits at a sensible `b`. Shape ladder prices (500 → 4.2M) are a first pass.
+
+---
+
+## 4A. PROPOSED FUTURE WORK — THE ELEMENT SYSTEM
+
+**Not scheduled. Written down so the next session does not have to rediscover it.**
+
+### The situation
+
+Elements are the feature the design calls the game's main differentiator — the
+thing a competitor with 2.55M visits does not have. Right now:
+
+| Piece | State |
+|---|---|
+| `ElementCatalog` — Fire, Freeze, Gold, Multiplier, with real payoff maths | **built** |
+| Server evaluation across resolved faces | **built** |
+| `SetElement` remote + validation | **built** |
+| UT-5 Elements, 32 assertions | **passing** |
+| Forge chip to assign one to a face | **built this session** |
+| **Anything that UNLOCKS an element** | **does not exist** |
+
+The profile grants `Elements = { None = true }` and nothing anywhere sets another
+to `true`. So the chips read `LOCKED` and will read `LOCKED` forever. This is the
+same shape as the shape-unlock defect fixed this session — **read implemented,
+write absent** (ledger L-027), and it will stay invisible for the same reason.
+
+### Proposed design
+
+**1. Where they unlock — the ASCEND panel.**
+FR-9.3 already lists "element unlocks" as part of the Diamond tree, so the panel
+that panel is already meant to hold them. It is currently a static placeholder,
+so this work folds naturally into building it rather than adding a new surface.
+
+**2. How they unlock — Diamonds, and deliberately NOT the Cash ladder.**
+The shape ladder was moved to Cash because it must be reachable in a first run.
+Elements are the opposite: they are the *second* layer of build depth, and having
+them arrive after an ascension gives prestige something concrete to buy. Suggested
+first-pass costs, unvalidated:
+
+```
+Fire        25 Diamonds    flat bonus on its own face
+Multiplier  40 Diamonds    scales with own mass
+Freeze      70 Diamonds    conditional, re-rolls
+Gold       120 Diamonds    conditional, scales with combined invested mass
+```
+
+**3. Order matters, and Gold should be last.**
+Gold and Freeze are the *conditional* elements — the ones whose payoff depends on
+what other dice rolled (FR-4.3). They are also the ones that only make sense with
+more than one die. Gating them behind the cheaper unconditional pair means a
+player meets the simple version of the mechanic first.
+
+**4. The forge chip already handles it.**
+`V7ForgePanel` reads `state.diamondTree.Elements` and cycles only what is
+unlocked. **Setting one flag to true is the entire client-side change** — the chip
+will start working with no further UI work.
+
+### What this must NOT become
+
+FR-4.3 is explicit: *"Every conditional element's payoff scales with the combined
+invested mass of the participating faces. A flat conditional bonus is
+algebraically inert."* This was **proven in simulation** (ledger L-016) — a flat
+conditional bonus enters as a constant multiplier and cannot shift any optimum,
+so it looks like a feature and does nothing.
+
+If a future session simplifies Gold or Freeze to a flat bonus "to make the maths
+easier", that is a defect, not a simplification.
+
+### Rough size
+
+Half a day. The server is done; this is a purchase path, four rows in the ascend
+panel, and a test that a purchased element actually appears in the snapshot.
+
+### Sequencing note
+
+Worth doing **with or straight after ASCEND**, not before. Elements are only
+interesting with several dice in play, and a player reaching their first
+ascension has usually bought slots by then.
 
 ---
 
@@ -245,3 +321,6 @@ Six remain.
 
 Nothing on the remaining list is hard. It is breadth, and it needs the same
 treatment the forge got: one at a time, every control clicked, no assumptions.
+
+The one piece of genuinely NEW design still owed is the element unlock path
+(§4A) — everything else is connecting things that already exist.
