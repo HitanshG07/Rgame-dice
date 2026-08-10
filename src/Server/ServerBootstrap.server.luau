@@ -65,6 +65,7 @@ local Remotes = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("R
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local UpgradeCatalog = require(Shared:WaitForChild("UpgradeCatalog"))
+local DiceCatalog = require(Shared:WaitForChild("DiceCatalog"))
 
 local Server = ServerScriptService:WaitForChild("Server")
 local PlayerProfile = require(Server:WaitForChild("PlayerProfile"))
@@ -133,9 +134,13 @@ RemoteGateway.register("SetAutoRoll", announcing(function(player: Player, enable
 		return false, reason
 	end
 	if enabled and not PurchaseService.hasAutoRoll(player) then
-		return false, Remotes.Notice.InvalidRequest
+		return false, Remotes.Notice.NotUnlocked
 	end
-	return true, nil
+	-- WAS `return true, nil` after the ownership check: the preference was
+	-- validated and then DISCARDED, so toggling auto-roll changed nothing and
+	-- the server never learned the player wanted it. RollService owns the
+	-- interval enforcement (FR-7.2); this records the intent it acts on.
+	return RollService.setAutoRoll(player, enabled)
 end))
 
 RemoteGateway.register("BuyUpgrade", announcing(function(player: Player, upgradeId: string)
@@ -174,13 +179,55 @@ RemoteGateway.register("BuyDiamondNode", announcing(function(player: Player, nod
 	if not ok then
 		return false, reason
 	end
-	local def = UpgradeCatalog.getDiamondNode(nodeId)
-	if not def then
-		return false, Remotes.Notice.InvalidRequest
-	end
 	local data = PlayerProfile.get(player)
 	if not data then
 		return false, Remotes.Notice.ProfileUnavailable
+	end
+
+	-- SHAPE UNLOCKS (FR-9.3, and the ladder added 2026-08-11).
+	--
+	-- Shapes live in the Diamond tree as a BOOLEAN table, not a level counter, so
+	-- they cannot go through the numeric path below -- it would write
+	-- `Diamond.Shapes = 1` and destroy the table.
+	--
+	-- THIS PATH DID NOT EXIST BEFORE. `SetShape` has always checked
+	-- `data.Diamond.Shapes[shapeId]`, and nothing anywhere set it to true beyond
+	-- the one shape granted in the profile template. Every other shape was
+	-- therefore permanently unreachable: the requirement was specified (FR-9.3),
+	-- the READ was implemented, and the WRITE was missing -- ledger L-027 exactly.
+	if DiceCatalog.getUnlockCost(nodeId) ~= nil then
+		-- The ladder rule is asked of DiceCatalog rather than restated here, so
+		-- the server, the client's button state and the tests cannot disagree
+		-- about what is unlockable (L-025).
+		local allowed, why = DiceCatalog.canUnlock(nodeId, data.Diamond.Shapes)
+		if not allowed then
+			return false, if why == "prerequisite_locked"
+				then Remotes.Notice.NotUnlocked
+				else Remotes.Notice.InvalidRequest
+		end
+
+		local shapeCost = DiceCatalog.getUnlockCost(nodeId) :: number
+		if not EconomyService.canAfford(player, "Diamonds", shapeCost) then
+			return false, Remotes.Notice.InsufficientFunds
+		end
+		if not EconomyService.spend(player, "Diamonds", shapeCost, "unlock_shape") then
+			return false, Remotes.Notice.InsufficientFunds
+		end
+		-- Re-checked INSIDE the mutation. `canAfford`/`spend` are separate calls
+		-- and the ladder must not be satisfiable by two requests racing between
+		-- them (T-26's shape: verify synchronously with the write).
+		local wrote = PlayerProfile.mutate(player, function(d)
+			local stillAllowed = DiceCatalog.canUnlock(nodeId, d.Diamond.Shapes)
+			if stillAllowed then
+				d.Diamond.Shapes[nodeId] = true
+			end
+		end)
+		return wrote, if wrote then nil else Remotes.Notice.ProfileUnavailable
+	end
+
+	local def = UpgradeCatalog.getDiamondNode(nodeId)
+	if not def then
+		return false, Remotes.Notice.InvalidRequest
 	end
 	local currentLvl = data.Diamond[nodeId] or 0
 	if currentLvl >= def.maxLevel then
@@ -264,11 +311,23 @@ RemoteGateway.register("ClaimGroupReward", announcing(function(player: Player)
 end))
 
 RemoteGateway.register("ClaimQuest", announcing(function(player: Player, questId: string)
-	return true, nil
+	-- WAS `return true, nil`: it granted nothing and reported SUCCESS, so the
+	-- client showed a claimed quest and the player received no reward. A handler
+	-- that lies about delivering is worse than one that is missing.
+	local okStr, reason = RemoteGateway.V.boundedString(questId, RemoteGateway.MAX_STRING_ID)
+	if not okStr then
+		return false, reason
+	end
+	return ProgressionService.claimQuest(player, questId)
 end))
 
 RemoteGateway.register("ClaimChest", announcing(function(player: Player, tierId: string)
-	return true, nil
+	-- WAS `return true, nil`, same defect as ClaimQuest.
+	local okStr, reason = RemoteGateway.V.boundedString(tierId, RemoteGateway.MAX_STRING_ID)
+	if not okStr then
+		return false, reason
+	end
+	return ProgressionService.claimChest(player, tierId)
 end))
 
 RemoteGateway.register("GetLeaderboard", function(player: Player, boardId: string)
@@ -335,6 +394,9 @@ admitPlayer = function(player: Player)
 	end)
 
 	RollService.beginSession(player)
+	-- Quests, chests and the login streak are all session- or day-scoped and
+	-- must start their clocks at admission, not at first use.
+	ProgressionService.beginSession(player)
 
 	-- The client displays NOTHING until this lands: no balances, no die shapes,
 	-- no entitlements, no settings. Pushed after beginSession so the snapshot
@@ -345,8 +407,32 @@ admitPlayer = function(player: Player)
 		if repaired > 0 then string.format(" (%d die/dice repaired)", repaired) else ""))
 end
 
+--------------------------------------------------------------------------------
+-- THE AUTO-ROLL HEARTBEAT (FR-7.1, FR-7.2)
+--
+-- One server-side loop drives every auto-rolling session. The tick rate here is
+-- only how often intervals are CHECKED; the interval each player actually gets
+-- is decided inside RollService from their upgrades and entitlements, so a fast
+-- tick cannot make anyone roll faster than they are entitled to.
+--
+-- 0.25 s is comfortably below the 0.4 s Ultra floor, so the fastest entitled
+-- player is not throttled by the checking cadence itself.
+--------------------------------------------------------------------------------
+task.spawn(function()
+	while true do
+		task.wait(0.25)
+		-- The whole sweep is wrapped: an error in one tick must never kill the
+		-- loop and silently strand every auto-rolling player on the server.
+		local ok, err = pcall(RollService.stepAutoRoll)
+		if not ok then
+			warn("[Bootstrap] auto-roll tick failed: " .. tostring(err))
+		end
+	end
+end)
+
 local function onPlayerRemoving(player: Player)
 	RollService.endSession(player)
+	ProgressionService.endSession(player)
 	-- Released BEFORE the profile: the entitlement cache is keyed by Player and
 	-- would otherwise hold a reference to a departed one.
 	PurchaseService.onPlayerRemoving(player)

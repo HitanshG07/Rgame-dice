@@ -10,9 +10,11 @@
 -- dereferences unguarded. An earlier draft of this suite tested it while
 -- production never called it, which proves nothing about production.
 
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 local Server = ServerScriptService:WaitForChild("Server")
 local PlayerProfile = require(Server:WaitForChild("PlayerProfile"))
+local DiceCatalog = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("DiceCatalog"))
 
 local n = 0
 local function check(cond: boolean, msg: string): string?
@@ -68,10 +70,20 @@ local function run(): (boolean, string?, number)
 
 	e = e or check(type(reconciled.Dice) == "table" and #reconciled.Dice == 1,
 		"a default profile should have exactly 1 starting die")
-	e = e or check(reconciled.Dice[1].Shape == "D6", "the starting die should be a D6")
-	e = e or check(#reconciled.Dice[1].Faces == 6, "the starting D6 should have 6 faces")
-	e = e or check(reconciled.Dice[1].MassBudget == 60, "the starting D6 budget should be 60")
-	e = e or check(reconciled.Dice[1].PurchasedBudget == 60,
+	-- THE STARTING SHAPE IS THE FIRST RUNG OF THE LADDER, asked of DiceCatalog
+	-- rather than restated. A literal here would be a second copy of a product
+	-- decision, and the copy nobody executes is the one that drifts (L-026).
+	local startShape = DiceCatalog.STARTING_SHAPE
+	local startDef = DiceCatalog.getShape(startShape)
+	e = e or check(startDef ~= nil, "the starting shape must exist in the catalog")
+	e = e or check(reconciled.Dice[1].Shape == startShape,
+		string.format("the starting die should be a %s, got %s", startShape,
+			tostring(reconciled.Dice[1].Shape)))
+	e = e or check(#reconciled.Dice[1].Faces == (startDef :: any).faceCount,
+		"the starting die's face count must match its shape definition")
+	e = e or check(reconciled.Dice[1].MassBudget == (startDef :: any).defaultBudget,
+		"the starting die's budget must match its shape's default")
+	e = e or check(reconciled.Dice[1].PurchasedBudget == (startDef :: any).defaultBudget,
 		"the starting die must declare PurchasedBudget, or a shape change reads nil")
 
 	local faceSum = 0
@@ -90,7 +102,39 @@ local function run(): (boolean, string?, number)
 	e = e or check(reconciled.Upgrades.AutoRollSpeed == 0, "AutoRollSpeed should default to 0")
 	e = e or check(reconciled.Diamond.StreakStrength == 0, "StreakStrength should default to 0")
 	e = e or check(reconciled.Diamond.Elements.None == true, "the None element should be unlocked by default")
-	e = e or check(reconciled.Diamond.Shapes.D6 == true, "the D6 shape should be unlocked by default")
+	e = e or check(reconciled.Diamond.Shapes[DiceCatalog.STARTING_SHAPE] == true,
+		"the starting shape should be unlocked by default")
+
+	-- THE LADDER IS CLOSED AT THE BOTTOM. Exactly one shape may be owned at the
+	-- start, and it must be the first rung -- otherwise a new player either has
+	-- nothing to roll or skips the progression entirely.
+	local unlockedCount = 0
+	for _, owned in pairs(reconciled.Diamond.Shapes) do
+		if owned then
+			unlockedCount += 1
+		end
+	end
+	e = e or check(unlockedCount == 1,
+		string.format("exactly one shape unlocked at start, found %d", unlockedCount))
+	e = e or check(DiceCatalog.getUnlockOrder()[1] == DiceCatalog.STARTING_SHAPE,
+		"the starting shape must be the first rung of the unlock ladder")
+	e = e or check(DiceCatalog.getPrerequisite(DiceCatalog.STARTING_SHAPE) == nil,
+		"the first rung must have no prerequisite, or it can never be unlocked")
+
+	-- Every later rung must be REACHABLE: a prerequisite that names a shape not
+	-- on the ladder would strand everything above it.
+	local order = DiceCatalog.getUnlockOrder()
+	local ladderOk = true
+	for i = 2, #order do
+		local prereq = DiceCatalog.getPrerequisite(order[i])
+		if prereq ~= order[i - 1] then
+			ladderOk = false
+		end
+		if DiceCatalog.getUnlockCost(order[i]) == nil then
+			ladderOk = false
+		end
+	end
+	e = e or check(ladderOk, "every rung must name the previous rung and carry a cost")
 	e = e or check(reconciled.Vault.AvgIncomePerSec == 0, "AvgIncomePerSec should default to 0")
 
 	-- A profile that has the key but a WRONG type is repaired, not trusted.

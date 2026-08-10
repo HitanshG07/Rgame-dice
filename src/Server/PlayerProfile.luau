@@ -79,14 +79,20 @@ local TEMPLATE: Profile = {
 	SchemaVersion = 2,
 	Cash = 0, Gems = 0, Diamonds = 0,
 	LifetimeCash = 0, HighestRoll = 0, Ascensions = 0, TotalRolls = 0,
+	-- A NEW PLAYER STARTS ON THE D2 (operator-directed 2026-08-11). Shapes unlock
+	-- along the ladder in `DiceCatalog.UNLOCK_ORDER`; see that file's header for
+	-- why an ordered unlock does not make shapes a power tier.
+	--
+	-- Two faces at the D2's default budget of 20, split evenly. Even is the
+	-- honest starting distribution: it is the ONLY one that expresses no opinion,
+	-- and the first thing the game teaches is that moving mass off a face is what
+	-- makes that face pay.
 	Dice = {
 		{
-			Shape = "D6",
-			MassBudget = 60,
-			PurchasedBudget = 60,
+			Shape = "D2",
+			MassBudget = 20,
+			PurchasedBudget = 20,
 			Faces = {
-				{ Mass = 10, Element = "None" }, { Mass = 10, Element = "None" },
-				{ Mass = 10, Element = "None" }, { Mass = 10, Element = "None" },
 				{ Mass = 10, Element = "None" }, { Mass = 10, Element = "None" },
 			},
 		},
@@ -95,7 +101,8 @@ local TEMPLATE: Profile = {
 	Diamond = {
 		StreakStrength = 0, MassCeiling = 0, SlotNodes = 0,
 		Elements = { None = true },
-		Shapes = { D6 = true },
+		-- The first rung, and the only one owned at the start.
+		Shapes = { D2 = true },
 	},
 	-- BadRollShield is a GAMEPASS entitlement, not a Cash upgrade. It is
 	-- declared here with a 0 default so no read path can hit nil, and so the

@@ -337,6 +337,11 @@ type Session = {
 	rollsThisSession: number,
 	earnedThisSession: number,
 	sessionStart: number,
+	-- AUTO-ROLL (FR-7). Session-scoped, like the streak: a preference that
+	-- survived a rejoin would have the server rolling for a player who has not
+	-- yet loaded, and the toggle costs one tap to restore.
+	autoRoll: boolean,
+	lastAutoRoll: number,
 }
 
 local sessions: { [Player]: Session } = {}
@@ -378,6 +383,8 @@ function RollService.beginSession(player: Player): ()
 		rollsThisSession = 0,
 		earnedThisSession = 0,
 		sessionStart = os.clock(),
+		autoRoll = false,
+		lastAutoRoll = 0,
 	}
 end
 
@@ -484,6 +491,95 @@ function RollService.performRoll(player: Player): (boolean, string?)
 	})
 
 	return true, nil
+end
+
+--------------------------------------------------------------------------------
+-- AUTO-ROLL (SRS FR-7)
+--
+-- FR-7.1 the player toggles it; FR-7.2 the interval is ENFORCED SERVER-SIDE and
+-- the client cannot request a faster rate; FR-7.3 Ultra Auto-Roll lowers the
+-- floor, derived from server-held entitlements only.
+--
+-- NONE OF THIS EXISTED. `SetAutoRoll` validated the boolean, checked pass
+-- ownership, and then returned `true` while discarding the value -- so the
+-- toggle was inert and the server never rolled for anyone. The Auto-Roll
+-- gamepass was sellable against a feature with no implementation at all.
+--
+-- WHY THE SERVER DRIVES THE LOOP RATHER THAN THE CLIENT CALLING ON A TIMER.
+-- A client-driven loop makes the roll RATE a client-supplied value, and the
+-- only thing standing between that and unlimited income is the rate limiter --
+-- a blunt instrument that cannot tell "auto-roll running fast" from "player
+-- tapping quickly". Driving it here makes the interval a server fact.
+--------------------------------------------------------------------------------
+
+-- Seconds between automatic rolls at each upgrade level, and the floors.
+RollService.AUTO_BASE_INTERVAL = 3.0
+RollService.AUTO_INTERVAL_PER_LEVEL = 0.2
+RollService.AUTO_FLOOR = 1.0        -- FR-7.2, with Cash upgrades alone
+RollService.AUTO_FLOOR_ULTRA = 0.4  -- FR-7.3, with the Ultra gamepass
+
+-- The interval this player is entitled to, from server-held state only.
+function RollService.autoInterval(player: Player): number
+	local data = PlayerProfile.get(player)
+	local level = 0
+	if data ~= nil then
+		level = data.Upgrades.AutoRollSpeed or 0
+	end
+	if not ForgeMath.isFinite(level) or level < 0 then
+		level = 0
+	end
+
+	local floor = RollService.AUTO_FLOOR
+	if PurchaseService.ownsPass(player, "UltraAutoRoll") then
+		floor = RollService.AUTO_FLOOR_ULTRA
+	end
+
+	local interval = RollService.AUTO_BASE_INTERVAL - (level * RollService.AUTO_INTERVAL_PER_LEVEL)
+	return math.max(floor, interval)
+end
+
+-- Records the player's intent. Ownership is checked by the caller (the remote
+-- handler); this is the state change.
+function RollService.setAutoRoll(player: Player, enabled: boolean): (boolean, string?)
+	local session = sessions[player]
+	if session == nil then
+		return false, "no_session"
+	end
+	session.autoRoll = enabled == true
+	-- Cleared so enabling does not immediately fire a roll off a stale stamp.
+	session.lastAutoRoll = os.clock()
+	return true, nil
+end
+
+function RollService.isAutoRolling(player: Player): boolean
+	local session = sessions[player]
+	return session ~= nil and session.autoRoll
+end
+
+-- Drives one tick of auto-roll for every session that has it enabled. Called by
+-- ServerBootstrap on a heartbeat; kept here so the interval rule and the roll
+-- itself live in the same module and cannot drift apart.
+--
+-- Each player is stepped inside its own pcall: one player's failure -- a
+-- released profile mid-roll, most likely -- must not stop the loop for everyone
+-- else on the server.
+function RollService.stepAutoRoll(): ()
+	local now = os.clock()
+	for player, session in pairs(sessions) do
+		if session.autoRoll and player.Parent ~= nil then
+			if (now - session.lastAutoRoll) >= RollService.autoInterval(player) then
+				session.lastAutoRoll = now
+				-- Ownership is RE-CHECKED every tick, not trusted from the toggle.
+				-- A pass can be refunded mid-session, and an entitlement checked
+				-- once at enable time would keep paying out afterwards.
+				if PurchaseService.hasAutoRoll(player) then
+					pcall(RollService.performRoll, player)
+				else
+					session.autoRoll = false
+				end
+			end
+		end
+	end
 end
 
 return RollService

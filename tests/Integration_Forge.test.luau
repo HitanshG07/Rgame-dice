@@ -31,7 +31,23 @@ local function run(): (boolean, string?, number)
 
 	local fakePlayer = Fakes.createFakePlayer(1002, "ForgePlayer")
 	local fakeData = PlayerProfile._reconcile({})
-	
+
+	-- An explicit D6 fixture. This suite hardcodes six-element distributions, so
+	-- it must own the shape it tests rather than inherit whatever a new profile
+	-- starts with -- the starting shape became a D2 on 2026-08-11 and every
+	-- proposal here silently became the wrong length.
+	fakeData.Dice[1] = {
+		Shape = "D6",
+		MassBudget = 60,
+		PurchasedBudget = 60,
+		Faces = {
+			{ Mass = 10, Element = "None" }, { Mass = 10, Element = "None" },
+			{ Mass = 10, Element = "None" }, { Mass = 10, Element = "None" },
+			{ Mass = 10, Element = "None" }, { Mass = 10, Element = "None" },
+		},
+	}
+	fakeData.Diamond.Shapes.D6 = true
+
 	PlayerProfile._injectProfileForTesting(fakePlayer, Fakes.createFakeProfile(fakeData))
 	ForgeService._setResultEmitterForTesting(function() end)
 	
@@ -56,7 +72,9 @@ local function run(): (boolean, string?, number)
 	e = e or check(budgetAfterInvalid == initialBudget, "Budget MUST remain byte-identical after invalid proposal")
 
 	local distUnchanged = true
-	for i=1, 6 do
+	-- Driven by the die's actual face count. A literal 6 here indexed past the
+	-- end of a shorter die and errored with "attempt to index nil with 'Mass'".
+	for i = 1, #initialDie.Faces do
 		if fakeData.Dice[1].Faces[i].Mass ~= initialDie.Faces[i].Mass then
 			distUnchanged = false
 			break

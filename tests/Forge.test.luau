@@ -69,6 +69,30 @@ local function run(): (boolean, string?, number)
 
 	local player = Fakes.createFakePlayer(5150, "ForgeTestPlayer")
 	local data = PlayerProfile._reconcile({})
+
+	-- THIS SUITE EXERCISES A D6 EXPLICITLY, rather than whatever shape a new
+	-- profile happens to start with.
+	--
+	-- It used to inherit the template's die and hardcode six-element proposals
+	-- against it. When the starting shape became a D2 (operator-directed
+	-- 2026-08-11) every proposal here began failing `bad_length` -- the suite was
+	-- silently coupled to a product decision it has no interest in.
+	--
+	-- Six faces is the right fixture for forge maths: it is large enough that a
+	-- redistribution has somewhere to go, and small enough to state inline. The
+	-- coupling is now explicit and local.
+	data.Dice[1] = {
+		Shape = "D6",
+		MassBudget = 60,
+		PurchasedBudget = 60,
+		Faces = {
+			{ Mass = 10, Element = "None" }, { Mass = 10, Element = "None" },
+			{ Mass = 10, Element = "None" }, { Mass = 10, Element = "None" },
+			{ Mass = 10, Element = "None" }, { Mass = 10, Element = "None" },
+		},
+	}
+	data.Diamond.Shapes.D6 = true
+
 	PlayerProfile._injectProfileForTesting(player, Fakes.createFakeProfile(data))
 
 	local emitted: { any } = {}
