@@ -4,8 +4,11 @@
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TweenService = game:GetService("TweenService")
 local UITheme = require(script.Parent:WaitForChild("UITheme"))
-local Format = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Format"))
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Format = require(Shared:WaitForChild("Format"))
+local ForgeMath = require(Shared:WaitForChild("ForgeMath"))
 
 local V7HUD = {}
 V7HUD.__index = V7HUD
@@ -15,15 +18,20 @@ export type V7HUDController = {
 	cashLabel: TextLabel,
 	gemsLabel: TextLabel,
 	diamondsLabel: TextLabel,
-	streakArcContainer: Frame,
-	streakMultLabel: TextLabel,
-	streakCountLabel: TextLabel,
-	streakRiskLabel: TextLabel,
+	multValue: TextLabel,
+	streakValue: TextLabel,
+	riskIcon: TextLabel,
+	riskValue: TextLabel,
 	payoutLabel: TextLabel,
 	autoBtn: TextButton,
 	rollBtn: TextButton,
 	menuCallbacks: { (menuId: string) -> () },
 	updateBalances: (self: V7HUDController, cash: number, gems: number, diamonds: number) -> (),
+	-- `voidRiskPct` is the CURRENT die's void probability, computed client-side
+	-- from its own mass distribution -- never sent by the server, which would be
+	-- an outcome-shaped value crossing the wire (NFR-5). nil means "unknown yet".
+	updateStreak: (self: V7HUDController, multiplier: number, streak: number, voidRiskPct: number?) -> (),
+	flashPayout: (self: V7HUDController, payout: number, voidHit: boolean) -> (),
 	onMenuClicked: (self: V7HUDController, callback: (menuId: string) -> ()) -> (),
 	onRollClicked: (self: V7HUDController, callback: () -> ()) -> (),
 	onAutoToggled: (self: V7HUDController, callback: (enabled: boolean) -> ()) -> (),
@@ -201,52 +209,106 @@ function V7HUD.new(): V7HUDController
 	end
 
 	-- ==========================================
-	-- 2. CENTER ARC (Streak Data)
+	-- 2. STREAK STRIP
 	-- ==========================================
-	local centerArea, centerBody = UITheme.neumorphicPod(UDim2.fromScale(0.4, 0.12), UDim2.fromScale(0.3, 0.66))
-	centerArea.Name = "StreakArc"
-	centerArea.Parent = gui
+	--
+	-- WAS a 0.4 x 0.12 pod -- 40% of screen width, a real chunk of the middle of
+	-- the screen -- showing hardcoded mock numbers (`x4.82`, `STREAK: 14`, `SAFE
+	-- (0.0% VOID RISK)`) that NOTHING ever wrote. It never moved no matter what a
+	-- player rolled, which is the worst kind of mock data: specific and plausible
+	-- enough to read as real.
+	--
+	-- FOOTPRINT kept exactly where it was and just as small (operator-directed
+	-- 2026-08-12: "just let it be where it is / make it smaller", confirmed
+	-- "size is good enough" once shrunk). What changed after that is READABILITY
+	-- within the same box: three separate chips instead of one long sentence, so
+	-- the eye can find "is this risky" without parsing the whole string, and the
+	-- risk chip can actually change colour with the number instead of always
+	-- being the same dim grey as everything else.
+	local streakStrip = Instance.new("Frame")
+	streakStrip.Name = "StreakStrip"
+	streakStrip.Size = UDim2.fromScale(0.28, 0.032)
+	streakStrip.Position = UDim2.fromScale(0.36, 0.708)
+	streakStrip.BackgroundTransparency = 1
+	streakStrip.Parent = gui
 
-	local centerLayout = Instance.new("UIListLayout")
-	centerLayout.FillDirection = Enum.FillDirection.Horizontal
-	centerLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
-	centerLayout.VerticalAlignment = Enum.VerticalAlignment.Center
-	centerLayout.Padding = UDim.new(0.04, 0)
-	centerLayout.Parent = centerBody
+	local chipLayout = Instance.new("UIListLayout")
+	chipLayout.FillDirection = Enum.FillDirection.Horizontal
+	chipLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+	chipLayout.VerticalAlignment = Enum.VerticalAlignment.Center
+	chipLayout.Padding = UDim.new(0.03, 0)
+	chipLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	chipLayout.Parent = streakStrip
 
-	local streakMultLabel = UITheme.label("x4.82", UDim2.fromScale(0.25, 0.8), UDim2.fromScale(0, 0), UITheme.Colors.Gems)
-	streakMultLabel.Font = UITheme.FontHeading
-	streakMultLabel.TextXAlignment = Enum.TextXAlignment.Center
-	streakMultLabel.LayoutOrder = 1
-	streakMultLabel.Parent = centerBody
+	-- A chip is an icon glyph plus a value, sized to its content rather than a
+	-- fixed share of the strip -- "STREAK 128" and "STREAK 1" should not claim
+	-- the same width and leave one of them padded with empty space.
+	local function chip(order: number, name: string, glyph: string, glyphColor: Color3): (Frame, TextLabel, TextLabel)
+		local holder = Instance.new("Frame")
+		-- NAMED, not left as the anonymous "Frame" every sibling here would
+		-- otherwise share (L-037) -- three identically-named chips would make
+		-- `StreakStrip.Frame` ambiguous the same way the HUD's menu buttons once
+		-- were.
+		holder.Name = name
+		holder.AutomaticSize = Enum.AutomaticSize.X
+		holder.Size = UDim2.fromScale(0, 1)
+		holder.BackgroundTransparency = 1
+		holder.LayoutOrder = order
+		holder.Parent = streakStrip
 
-	local infoContainer = Instance.new("Frame")
-	infoContainer.Size = UDim2.fromScale(0.4, 0.9)
-	infoContainer.BackgroundTransparency = 1
-	infoContainer.LayoutOrder = 2
-	infoContainer.Parent = centerBody
-	
-	local infoLayout = Instance.new("UIListLayout")
-	infoLayout.FillDirection = Enum.FillDirection.Vertical
-	infoLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
-	infoLayout.VerticalAlignment = Enum.VerticalAlignment.Center
-	infoLayout.Parent = infoContainer
+		local rowLayout = Instance.new("UIListLayout")
+		rowLayout.FillDirection = Enum.FillDirection.Horizontal
+		rowLayout.VerticalAlignment = Enum.VerticalAlignment.Center
+		rowLayout.Padding = UDim.new(0, 3)
+		rowLayout.Parent = holder
 
-	local streakCountLabel = UITheme.label("STREAK: 14", UDim2.fromScale(1, 0.5), UDim2.fromScale(0, 0), UITheme.Colors.TextPrimary)
-	streakCountLabel.TextXAlignment = Enum.TextXAlignment.Center
-	streakCountLabel.Font = UITheme.FontHeading
-	streakCountLabel.Parent = infoContainer
-	
-	local streakRiskLabel = UITheme.label("SAFE (0.0% VOID RISK)", UDim2.fromScale(1, 0.4), UDim2.fromScale(0, 0), UITheme.Colors.Positive)
-	streakRiskLabel.TextXAlignment = Enum.TextXAlignment.Center
-	streakRiskLabel.Parent = infoContainer
+		local icon = Instance.new("TextLabel")
+		icon.Name = "Icon"
+		icon.Size = UDim2.fromScale(0, 1)
+		icon.AutomaticSize = Enum.AutomaticSize.X
+		icon.BackgroundTransparency = 1
+		icon.Font = UITheme.FontHeading
+		icon.Text = glyph
+		icon.TextColor3 = glyphColor
+		icon.TextScaled = true
+		icon.LayoutOrder = 1
+		icon.Parent = holder
 
-	local payoutLabel = UITheme.label("+$14.8M", UDim2.fromScale(0.25, 0.8), UDim2.fromScale(0, 0), UITheme.Colors.Cash)
+		local value = Instance.new("TextLabel")
+		value.Name = "Value"
+		value.Size = UDim2.fromScale(0, 1)
+		value.AutomaticSize = Enum.AutomaticSize.X
+		value.BackgroundTransparency = 1
+		value.Font = UITheme.FontHeading
+		value.Text = ""
+		value.TextColor3 = UITheme.Colors.TextPrimary
+		value.TextScaled = true
+		value.LayoutOrder = 2
+		value.Parent = holder
+
+		return holder, icon, value
+	end
+
+	local _, _, multValue = chip(1, "MultChip", "x", UITheme.Colors.Gems)
+	local _, _, streakValue = chip(2, "StreakChip", "\u{1F525}", UITheme.Colors.Cash) -- fire glyph
+	local _, riskIcon, riskValue = chip(3, "RiskChip", "\u{26A0}", UITheme.Colors.TextDim) -- warning glyph
+
+	-- A one-shot "+$14.8M" that rises and fades on a payout, floating ABOVE the
+	-- chip row rather than replacing it -- the chips are the resting readout and
+	-- must never blank out mid-roll while a flash plays.
+	local payoutLabel = Instance.new("TextLabel")
+	payoutLabel.Name = "PayoutFlash"
+	payoutLabel.Size = UDim2.fromScale(1, 1)
+	payoutLabel.Position = UDim2.fromScale(0, 0)
+	payoutLabel.BackgroundTransparency = 1
 	payoutLabel.Font = UITheme.FontHeading
+	payoutLabel.Text = ""
+	payoutLabel.TextColor3 = UITheme.Colors.Cash
 	payoutLabel.TextXAlignment = Enum.TextXAlignment.Center
-	payoutLabel.LayoutOrder = 3
+	payoutLabel.TextScaled = true
 	payoutLabel.Visible = false
-	payoutLabel.Parent = centerBody
+	payoutLabel.ZIndex = 5
+	payoutLabel.Parent = streakStrip
 
 	-- ==========================================
 	-- 3. LEFT & RIGHT NEUMORPHIC PANELS
@@ -340,10 +402,10 @@ function V7HUD.new(): V7HUDController
 		cashLabel = cashLabel,
 		gemsLabel = gemsLabel,
 		diamondsLabel = diamondsLabel,
-		streakArcContainer = centerArea,
-		streakMultLabel = streakMultLabel,
-		streakCountLabel = streakCountLabel,
-		streakRiskLabel = streakRiskLabel,
+		multValue = multValue,
+		streakValue = streakValue,
+		riskIcon = riskIcon,
+		riskValue = riskValue,
 		payoutLabel = payoutLabel,
 		autoBtn = autoBtn,
 		rollBtn = rollBtn,
@@ -365,6 +427,73 @@ function V7HUD:updateBalances(cash: number, gems: number, diamonds: number)
 	self.cashLabel.Text = "$" .. Format.formatNumber(cash)
 	self.gemsLabel.Text = Format.formatNumber(gems)
 	self.diamondsLabel.Text = Format.formatNumber(diamonds)
+end
+
+-- Redraws the three streak chips from REAL data. Called on every StateSync and
+-- every RollResult, so the strip is correct whether or not a roll just landed.
+--
+-- `voidRiskPct` is nil until the client has computed one from a die's own
+-- distribution -- shown as "--" rather than a guessed 0%, because a die that has
+-- not been examined yet has an unknown risk, not a safe one.
+function V7HUD:updateStreak(multiplier: number, streak: number, voidRiskPct: number?)
+	self.multValue.Text = string.format("%.2f", math.max(1, multiplier))
+
+	local streakN = math.max(0, math.floor(streak))
+	self.streakValue.Text = tostring(streakN)
+	self.streakValue.TextColor3 = if streakN > 0 then UITheme.Colors.TextPrimary else UITheme.Colors.TextDim
+
+	-- RISK IS COLOUR-CODED, which a flat grey number cannot be. Bands chosen to
+	-- match how a player reads "safe / getting risky / about to void" rather
+	-- than an even split of 0-100 -- most of a build's dice sit well under 30%,
+	-- so the boundaries are where the feeling actually changes.
+	if voidRiskPct == nil then
+		self.riskValue.Text = "--"
+		self.riskValue.TextColor3 = UITheme.Colors.TextDim
+		self.riskIcon.TextColor3 = UITheme.Colors.TextDim
+	else
+		local pct = math.clamp(voidRiskPct, 0, 100)
+		self.riskValue.Text = string.format("%.0f%%", pct)
+		local riskColor = if pct < 15 then UITheme.Colors.Positive
+			elseif pct < 40 then UITheme.Colors.TextGold
+			else UITheme.Colors.Negative
+		self.riskValue.TextColor3 = riskColor
+		self.riskIcon.TextColor3 = riskColor
+	end
+end
+
+-- A one-shot payout flash where the mock "+$14.8M" used to sit permanently.
+-- Rises and fades over the streak text, then hides -- so the strip's resting
+-- state is always the live readout, never a stale payout from three rolls ago.
+function V7HUD:flashPayout(payout: number, voidHit: boolean)
+	if not ForgeMath.isFinite(payout) or payout <= 0 or voidHit then
+		return
+	end
+	local lbl = self.payoutLabel
+	lbl.Text = "+$" .. Format.formatNumber(payout)
+	lbl.Visible = true
+	lbl.TextTransparency = 0
+	lbl.Position = UDim2.fromScale(0, 0)
+
+	local token = (lbl:GetAttribute("FlashToken") or 0) + 1
+	lbl:SetAttribute("FlashToken", token)
+
+	local rendered = if lbl:IsDescendantOf(game) then true else false
+	if rendered then
+		local riseTween = TweenService:Create(lbl,
+			TweenInfo.new(0.9, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+			{ Position = UDim2.fromScale(0, -0.6), TextTransparency = 1 })
+		riseTween:Play()
+	end
+
+	task.delay(0.95, function()
+		-- A NEWER flash may have started while this one was animating. The token
+		-- is how this coroutine tells whether it is still the most recent one --
+		-- without it, an early roll's delayed hide could blank a later roll's
+		-- flash mid-animation.
+		if lbl:GetAttribute("FlashToken") == token then
+			lbl.Visible = false
+		end
+	end)
 end
 
 function V7HUD:onMenuClicked(callback: (menuId: string) -> ())
