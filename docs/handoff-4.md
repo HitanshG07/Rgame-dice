@@ -1,7 +1,7 @@
 # HANDOFF 4 — Economy corrections, tuning, and the Gems sink question
 
 **Date:** 2026-08-13
-**Head:** `740d117` · 21 suites, 3,546 assertions, 0 failing · tree clean
+**Head:** `f44af67` · 21 suites, 3,546 assertions, 0 failing · tree clean
 
 **Status:** S3-a / S3-c / S3-d are DONE. The operator's latest defect list is
 done except the Gems vault-storage feature, which needs a design decision.
@@ -88,6 +88,44 @@ upgrades plus Premium could have been entitled to more and been silently cut
 back by buying the pass. Premium is read from `Player.MembershipType`,
 server-side.
 
+### Tier differences are now visible — `f44af67`
+
+> *"make sure to add that vault and every detail which differentiates standard
+> vip and premium users is mentioned in a small font wherever its needed"*
+
+**The vault panel said nothing about tier at all.** It stated capacity in hours
+and never mentioned efficiency, so a player banking 50% of their earning rate
+and one banking 100% saw *identical screens* — with no way to learn the
+difference existed, or that a better tier was available.
+
+New **`VaultCatalog`** (shared) now holds the tier values and the wording. They
+had been server-side locals in `OfflineService`, which is precisely why the
+client could not state them; `OfflineService` reads from the catalog now, so
+there is one declaration instead of two that can drift (L-025).
+
+| Surface | Small print |
+|---|---|
+| **VAULT panel** | `VIP — banks 75% of your earning rate` / `Roblox Premium +15% and +4h` |
+| **SHOP, VIP Vault card** | `Vault: +25% of your earning rate, capacity raised to 24h. Standard is 50% and 4h. Stacks with Roblox Premium.` |
+
+Two deliberate choices worth keeping:
+
+- **States the player's ACTUAL rate first**, from the server's computed value —
+  not a client re-derivation — and only mentions tiers they do **not** already
+  have. Telling a VIP about the VIP bonus is noise, and noise is what makes
+  small print go unread.
+- **`UITheme.smallPrint` is not `TextScaled`.** Every other label in this UI
+  scales to fill its box, which is right for a figure read at a glance and wrong
+  for a footnote: scaled small print shouts on a large monitor and vanishes on a
+  phone. Fixed size keeps it subordinate to the number it annotates.
+
+The old VIP blurb was *"A far higher ceiling on offline earnings"* — not
+something a player can weigh against a Robux price.
+
+The snapshot now carries `efficiency`, `hasVip` and `hasPremium`. Those are
+entitlement **facts the server has already verified**; the client renders them
+and never asserts them.
+
 ### Slot cap — already answered
 The operator asked whether the cap should auto-update per ascension. **It
 already does**, as of `47a3535`: `3 + ascensions`, hard maximum 7. The hard 7 is
@@ -171,6 +209,11 @@ Two properties together defuse it, and both should ship at once:
   so it should be a deliberate choice rather than my default.
 - A new `PurchasedVaultHours` profile field, a Gems spend path (the first one in
   the game), and a VAULT panel control. **None of this is built.**
+
+`VaultCatalog.GEMS_PER_CAPACITY_HOUR = 5` and
+`MAX_PURCHASED_CAPACITY_SEC = 8h` are already declared in the shared catalog
+ready for this, but **nothing reads them yet** — they are the spec, not an
+implementation.
 
 ---
 
