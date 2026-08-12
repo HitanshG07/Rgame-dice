@@ -67,6 +67,7 @@ local ARITY: { [string]: number } = {
 	ClaimGroupReward = 0,
 	GetLeaderboard = 1,
 	SetSetting = 2,
+	SwapDice = 2,
 }
 
 -- Returns the declared arity, or nil if the remote is not declared. A remote

@@ -391,6 +391,53 @@ RemoteGateway.register("DailySpin", announcing(function(player: Player)
 	return ok, reason
 end))
 
+-- SWAP TWO DICE (FR-1.1, operator-requested 2026-08-13: "in forge there has to
+-- be an option for you to select which dice sits on which slot").
+--
+-- Position in `d.Dice` IS the board slot -- `BoardView.getAnchor` is indexed by
+-- it -- so reordering the array is the whole feature. The data model already
+-- supported this; nothing exposed it.
+--
+-- CARRIES NO ECONOMIC VALUE. The same dice end up in the player's profile, in a
+-- different order: no mass is created, destroyed or moved between dice, and no
+-- currency changes hands. That is what makes it safe to allow freely.
+--
+-- Both indices are validated against the player's ACTUAL die count rather than
+-- the slot entitlement, because those can differ and only the array is real.
+RemoteGateway.register("SwapDice", announcing(function(player: Player, a: number, b: number)
+	local data = PlayerProfile.get(player)
+	if not data then
+		return false, Remotes.Notice.ProfileUnavailable
+	end
+
+	local count = #data.Dice
+	local okA, reasonA = RemoteGateway.V.integerInRange(a, 1, count)
+	if not okA then
+		return false, reasonA
+	end
+	local okB, reasonB = RemoteGateway.V.integerInRange(b, 1, count)
+	if not okB then
+		return false, reasonB
+	end
+	-- Swapping a die with itself is a no-op, not an error, but it must not cost a
+	-- profile write or a snapshot push.
+	if a == b then
+		return false, Remotes.Notice.InvalidRequest
+	end
+
+	-- Re-read the bounds INSIDE the mutation. `#data.Dice` was measured before
+	-- this write was queued, and an ascension resolving in between would shrink
+	-- the array under us -- writing to a stale index would then create a hole.
+	local wrote = PlayerProfile.mutate(player, function(d)
+		local n = #d.Dice
+		if a < 1 or a > n or b < 1 or b > n then
+			return
+		end
+		d.Dice[a], d.Dice[b] = d.Dice[b], d.Dice[a]
+	end)
+	return wrote, if wrote then nil else Remotes.Notice.ProfileUnavailable
+end))
+
 -- SETTINGS (FR-13.6). The write path that made the panel possible.
 --
 -- WHAT WAS TRUE BEFORE: `PlayerProfile` declared four settings, StateSyncService

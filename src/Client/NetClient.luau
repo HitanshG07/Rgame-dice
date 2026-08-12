@@ -60,6 +60,7 @@ local MIN_INTERVAL: { [string]: number } = {
 	ClaimGroupReward = 1.0,
 	GetLeaderboard = 2.0,
 	SetSetting = 0.15,
+	SwapDice = 0.2,
 }
 local DEFAULT_INTERVAL = 0.25
 
@@ -195,6 +196,12 @@ end
 -- writing into the saved profile.
 function NetClient.setSetting(key: string, enabled: boolean): Result
 	return call("SetSetting", key, enabled == true)
+end
+
+-- Two die indices to exchange (FR-1.1). Position in the profile's die array IS
+-- the board slot, so this is how a player chooses which die sits where.
+function NetClient.swapDice(a: number, b: number): Result
+	return call("SwapDice", a, b)
 end
 
 -- Reads the server's cache; never triggers a fetch (threat T-22). Returns the

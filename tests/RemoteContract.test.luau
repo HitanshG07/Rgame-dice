@@ -26,9 +26,11 @@
 -- nothing about whether it RUNS. This suite calls the module surface each
 -- handler depends on and fails if any piece is missing.
 
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 local Server = ServerScriptService:WaitForChild("Server")
 local RemoteGateway = require(Server:WaitForChild("RemoteGateway"))
+local Remotes = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Remotes"))
 
 local n = 0
 local function check(cond: boolean, msg: string): string?
@@ -90,6 +92,31 @@ local function run(): (boolean, string?, number)
 	----------------------------------------------------------------------------
 	-- Registration surface
 	----------------------------------------------------------------------------
+
+	----------------------------------------------------------------------------
+	-- Arity is declared for EVERY remote in the registry
+	----------------------------------------------------------------------------
+	--
+	-- `bind()` errors at startup for a remote with no declared arity, which fails
+	-- closed correctly -- but it fails at SERVER BOOT, which in Studio means a
+	-- play-test that dies before the suite runs. Checking here reports the
+	-- specific missing name instead.
+	--
+	-- Written when `SwapDice` was added (2026-08-13): three files have to agree
+	-- for a new remote to work (Remotes, ARITY, RateLimiter) and nothing pinned
+	-- the middle one.
+	local missingArity: { string } = {}
+	for _, name in pairs(Remotes.Fn) do
+		if RemoteGateway.arityFor(name) == nil then
+			table.insert(missingArity, name)
+		end
+	end
+	e = e or check(#missingArity == 0, string.format(
+		"remotes with no declared arity (bind() will error at boot): %s",
+		table.concat(missingArity, ", ")))
+
+	e = e or check(RemoteGateway.arityFor("SwapDice") == 2,
+		"SwapDice takes two die indices")
 
 	e = e or check(type(RemoteGateway.register) == "function",
 		"RemoteGateway.register must exist")

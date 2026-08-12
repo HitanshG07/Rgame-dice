@@ -121,9 +121,16 @@ function V7ForgePanel.new(): V7ForgeController
 
 	local selectDie: (number) -> ()
 
-	for i = 1, 7 do
+	-- Tab count comes from the CATALOG, not a literal 7. The slot ceiling is a
+	-- balance/progression value that the operator intends to raise (up to 20 as
+	-- ascensions accumulate), and a hardcoded loop here would silently cap the
+	-- forge at seven tabs while the player owned more dice -- the same class of
+	-- drift as the hand-listed dice models (L-041).
+	local MAX_TABS = DiceCatalog.MAX_DIE_SLOTS
+	for i = 1, MAX_TABS do
 		local tc, tb = UITheme.neumorphicButton("D" .. tostring(i), UITheme.Colors.TextGold,
 			UDim2.fromScale(0.12, 1), UDim2.fromScale(0, 0))
+		tc.Name = "DieTab" .. tostring(i)
 		tc.LayoutOrder = i
 		tc.Visible = false
 		tc.Parent = tabRow
@@ -145,6 +152,33 @@ function V7ForgePanel.new(): V7ForgeController
 	header.TextScaled = true
 	header.Parent = bodyFrame
 
+	-- MOVE THIS DIE (operator-requested 2026-08-13: "in forge there has to be an
+	-- option for you to select which dice sits on which slot").
+	--
+	-- Position in the profile's die array IS the board slot -- `BoardView`
+	-- anchors by index -- so moving a die left or right in the array is exactly
+	-- "which die sits where". The data model already supported this and nothing
+	-- exposed it.
+	--
+	-- TWO ARROWS RATHER THAN DRAG-AND-DROP. Dragging inside a ScrollingFrame
+	-- fights the scroll gesture, and on touch it is close to unusable. Arrows are
+	-- unambiguous, work identically on every input device, and the tab strip
+	-- above gives immediate feedback about where the die landed.
+	local moveLeftC, moveLeftBtn = UITheme.neumorphicButton("<", UITheme.Colors.Gems,
+		UDim2.fromScale(0.075, 0.05), UDim2.fromScale(0.655, 0.068))
+	moveLeftC.Name = "MoveLeft"
+	moveLeftC.Parent = bodyFrame
+
+	local moveRightC, moveRightBtn = UITheme.neumorphicButton(">", UITheme.Colors.Gems,
+		UDim2.fromScale(0.075, 0.05), UDim2.fromScale(0.74, 0.068))
+	moveRightC.Name = "MoveRight"
+	moveRightC.Parent = bodyFrame
+
+	local moveHint = UITheme.label("move", UDim2.fromScale(0.09, 0.04),
+		UDim2.fromScale(0.83, 0.073), UITheme.Colors.TextDim)
+	moveHint.TextScaled = true
+	moveHint.Parent = bodyFrame
+
 	local readout = UITheme.label("", UDim2.fromScale(0.96, 0.045), UDim2.fromScale(0.02, 0.125),
 		UITheme.Colors.TextDim)
 	readout.TextScaled = true
@@ -153,6 +187,11 @@ function V7ForgePanel.new(): V7ForgeController
 	-- The face list. Rows are created up to the largest shape and hidden when the
 	-- current die has fewer, so switching shape never rebuilds Instances.
 	local listHolder = Instance.new("Frame")
+	-- Named so the face rows beneath it are reachable by path. An anonymous rung
+	-- anywhere in a chain makes the whole chain ambiguous (L-037) -- the rows and
+	-- their buttons were named, but this frame between them and the body was not,
+	-- so a driven click still could not find them.
+	listHolder.Name = "FaceList"
 	listHolder.Size = UDim2.fromScale(0.96, 0.66)
 	listHolder.Position = UDim2.fromScale(0.02, 0.18)
 	listHolder.BackgroundTransparency = 1
@@ -223,6 +262,7 @@ function V7ForgePanel.new(): V7ForgeController
 
 	for i = 1, MAX_FACES do
 		local row = UITheme.panel(UDim2.fromScale(1, 0), UDim2.fromScale(0, 0))
+		row.Name = "FaceRow" .. tostring(i)
 		row.Size = UDim2.new(1, 0, 0, 46)
 		row.LayoutOrder = i
 		row.Visible = false
@@ -256,6 +296,10 @@ function V7ForgePanel.new(): V7ForgeController
 		-- needs; one tap advances, and the current element is always visible.
 		local elemC, elemB = UITheme.neumorphicButton("-", UITheme.Colors.Multiplier,
 			UDim2.fromScale(0.17, 0.66), UDim2.fromScale(0.50, 0.17))
+		-- NAMED, like every other control (L-037). These were anonymous, so all
+		-- three buttons on all twenty face rows shared one instance path and none
+		-- of them could be addressed by a test or a click driver.
+		elemC.Name = "Element"
 		elemC.Parent = row
 		UITheme.onPressed(elemB, function()
 			local current = faceElements[i] or "None"
@@ -277,9 +321,11 @@ function V7ForgePanel.new(): V7ForgeController
 
 		local minusC, minusB = UITheme.neumorphicButton("-", UITheme.Colors.Negative,
 			UDim2.fromScale(0.10, 0.66), UDim2.fromScale(0.70, 0.17))
+		minusC.Name = "Minus"
 		minusC.Parent = row
 		local plusC, plusB = UITheme.neumorphicButton("+", UITheme.Colors.Positive,
 			UDim2.fromScale(0.10, 0.66), UDim2.fromScale(0.83, 0.17))
+		plusC.Name = "Plus"
 		plusC.Parent = row
 
 		UITheme.onPressed(minusB, function()
@@ -444,6 +490,19 @@ function V7ForgePanel.new(): V7ForgeController
 				UITheme.setEnabled(tab.button, i ~= activeDie)
 			end
 		end
+
+		-- The move arrows are only meaningful with somewhere to move TO. Hidden
+		-- rather than greyed for a single die: with one die there is no ordering
+		-- to speak of, and an always-visible dead control invites the press that
+		-- does nothing.
+		local canReorder = dieCount > 1
+		moveLeftC.Visible = canReorder
+		moveRightC.Visible = canReorder
+		moveHint.Visible = canReorder
+		if canReorder then
+			UITheme.setEnabled(moveLeftBtn, activeDie > 1)
+			UITheme.setEnabled(moveRightBtn, activeDie < dieCount)
+		end
 		-- Owning a slot with no die in it is a real state and the player should
 		-- be told, not left wondering why the tab count does not match what they
 		-- bought.
@@ -504,6 +563,51 @@ function V7ForgePanel.new(): V7ForgeController
 			applySnapshot(st)
 		end
 	end
+
+	-- MOVES THE ACTIVE DIE one slot along the board order.
+	--
+	-- REFUSES WHILE THERE ARE UNSAVED EDITS. A pending draft belongs to a die
+	-- INDEX, and swapping the array under it would silently apply the player's
+	-- half-finished mass layout to a different die -- which is the exact
+	-- data-loss shape as the die-index bug fixed earlier (forging die 2 wrote
+	-- onto die 1). Saying so is better than quietly discarding the edit.
+	local function moveActiveDie(delta: number)
+		local target = activeDie + delta
+		if target < 1 or target > dieCount or dieCount < 2 then
+			return
+		end
+		if dirty then
+			costLbl.Text = "Save or reset your changes before moving this die"
+			costLbl.TextColor3 = UITheme.Colors.Negative
+			return
+		end
+
+		UITheme.setEnabled(moveLeftBtn, false)
+		UITheme.setEnabled(moveRightBtn, false)
+		task.spawn(function()
+			local result = NetClient.swapDice(activeDie, target)
+			if result.ok then
+				-- Follow the die to its new slot, so the panel keeps showing the
+				-- one the player was working on rather than whatever swapped in.
+				activeDie = target
+				costLbl.Text = string.format("Moved to slot %d", target)
+				costLbl.TextColor3 = UITheme.Colors.Positive
+			else
+				costLbl.Text = "Could not move that die"
+				costLbl.TextColor3 = UITheme.Colors.Negative
+			end
+			-- The snapshot that follows repaints everything; this only re-enables
+			-- the arrows for the case where no snapshot arrives.
+			refresh()
+		end)
+	end
+
+	UITheme.onPressed(moveLeftBtn, function()
+		moveActiveDie(-1)
+	end)
+	UITheme.onPressed(moveRightBtn, function()
+		moveActiveDie(1)
+	end)
 
 	UITheme.onPressed(resetBtn, function()
 		draft = table.clone(committed)

@@ -23,7 +23,7 @@ export type FunctionName =
 	"Roll" | "Forge" | "SetElement" | "SetShape" | "BuyUpgrade" | "AddDieSlot"
 	| "Ascend" | "BuyDiamondNode" | "SetAutoRoll" | "ClaimVault" | "ClaimQuest"
 	| "ClaimChest" | "DailySpin" | "RedeemCode" | "ClaimGroupReward" | "GetLeaderboard"
-	| "SetSetting"
+	| "SetSetting" | "SwapDice"
 
 -- Outbound: server fires, client listens. RemoteEvent. Display only.
 export type EventName =
@@ -51,6 +51,9 @@ local FN: { [string]: FunctionName } = {
 	-- FR-13.6. Presentation preferences only -- see SettingsCatalog for why no
 	-- setting may carry an economic consequence.
 	SetSetting = "SetSetting",
+	-- FR-1.1. Reorders two of the player's own dice. Carries no economic value:
+	-- the same dice, in a different order.
+	SwapDice = "SwapDice",
 }
 Remotes.Fn = FN
 

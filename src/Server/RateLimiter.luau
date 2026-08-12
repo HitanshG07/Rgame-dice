@@ -35,6 +35,10 @@ local LIMITS: { [string]: Limit } = {
 	-- ordinary behaviour, so the burst is generous. The sustained rate still
 	-- stops a loop from hammering the profile.
 	SetSetting = { sustained = 3, burst = 8 },
+	-- Dragging dice around is a fiddly, repeated action, so the burst is
+	-- generous. It moves no value -- the same dice in a different order -- so a
+	-- high rate costs nothing but a profile write.
+	SwapDice = { sustained = 4, burst = 8 },
 }
 
 local DEFAULT_LIMIT: Limit = { sustained = 2, burst = 5 }
