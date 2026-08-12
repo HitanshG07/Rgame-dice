@@ -121,6 +121,57 @@ local function run(): (boolean, string?, number)
 	e = e or check(DiceCatalog.getPrerequisite(DiceCatalog.STARTING_SHAPE) == nil,
 		"the first rung must have no prerequisite, or it can never be unlocked")
 
+	----------------------------------------------------------------------------
+	-- THE STARTING SHAPE IS D2, LITERALLY (operator-directed, 2026-08-12)
+	----------------------------------------------------------------------------
+	--
+	-- Every assertion above reads `STARTING_SHAPE` symbolically, which is the
+	-- right way to test the STRUCTURE -- but it means changing the constant to
+	-- "D6" would keep the entire suite green while silently reversing a product
+	-- decision. The operator has now asked for a D2 start twice, so the value
+	-- gets pinned once, here, where a change has to be deliberate.
+	--
+	-- Two faces is the specific thing that matters: the whole inverted-mass
+	-- mechanic is most legible on a coin, and the ladder is built to climb from
+	-- it. A start at any wider shape skips the lesson.
+	e = e or check(DiceCatalog.STARTING_SHAPE == "D2", string.format(
+		"the starting shape must be D2, got %s -- FR-6.1's ladder and the"
+		.. " operator's direction both begin at the two-faced die",
+		tostring(DiceCatalog.STARTING_SHAPE)))
+	e = e or check((startDef :: any).faceCount == 2, string.format(
+		"the starting die must have exactly 2 faces, got %s",
+		tostring((startDef :: any).faceCount)))
+
+	-- THE TEMPLATE AND THE FACTORY MUST AGREE.
+	--
+	-- `PlayerProfile`'s template writes the starting die as a hand-written
+	-- literal; `DiceCatalog.newStartingDie` builds it from the catalog, and is
+	-- what AddDieSlot and the ascension reset call. Two sources for one object:
+	-- if they drift, a player's first die and their post-ascension die differ
+	-- with nothing to report it. This is the same class of defect as the three
+	-- hardcoded D6 literals removed on 2026-08-11.
+	local factoryDie = DiceCatalog.newStartingDie()
+	e = e or check(factoryDie ~= nil, "newStartingDie must build the starting shape")
+	if factoryDie ~= nil then
+		local made = factoryDie :: any
+		e = e or check(made.Shape == reconciled.Dice[1].Shape, string.format(
+			"factory shape %s does not match the template's %s",
+			tostring(made.Shape), tostring(reconciled.Dice[1].Shape)))
+		e = e or check(#made.Faces == #reconciled.Dice[1].Faces, string.format(
+			"factory face count %d does not match the template's %d",
+			#made.Faces, #reconciled.Dice[1].Faces))
+		e = e or check(made.MassBudget == reconciled.Dice[1].MassBudget, string.format(
+			"factory budget %s does not match the template's %s",
+			tostring(made.MassBudget), tostring(reconciled.Dice[1].MassBudget)))
+		e = e or check(made.PurchasedBudget == reconciled.Dice[1].PurchasedBudget,
+			"factory PurchasedBudget does not match the template's")
+		for i, face in ipairs(made.Faces) do
+			e = e or check(face.Mass == reconciled.Dice[1].Faces[i].Mass, string.format(
+				"factory face %d mass %s does not match the template's %s",
+				i, tostring(face.Mass), tostring(reconciled.Dice[1].Faces[i].Mass)))
+		end
+	end
+
 	-- Every later rung must be REACHABLE: a prerequisite that names a shape not
 	-- on the ladder would strand everything above it.
 	local order = DiceCatalog.getUnlockOrder()

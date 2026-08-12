@@ -25,6 +25,7 @@ export type V7MenuController = {
 	-- Its absence was the whole reason the menus were empty: the panels could be
 	-- opened but had no method by which state could ever reach them.
 	applyState: (self: V7MenuController, state: any) -> (),
+	shopRefresh: ((any) -> ())?,
 	shapeRefresh: ((any) -> ())?,
 	questRefresh: ((any) -> ())?,
 	vaultRefresh: ((any) -> ())?,
@@ -77,8 +78,15 @@ function V7MenuPanel.new(): V7MenuController
 		return a.key < b.key
 	end)
 
+	-- Cards that represent a PASS, keyed so a snapshot can mark them owned. A
+	-- developer product is consumable and is deliberately absent from this map:
+	-- buying gems twice is a legitimate repeat purchase, owning Auto-Roll twice
+	-- is not.
+	local passCards: { [string]: any } = {}
+
 	for _, entry in ipairs(sellableItems) do
 		local card = UITheme.panel(UDim2.fromScale(1, 1), UDim2.fromScale(0, 0))
+		card.Name = "Item_" .. entry.key
 		card.Parent = shopBody
 
 		local titleLbl = Instance.new("TextLabel")
@@ -102,23 +110,68 @@ function V7MenuPanel.new(): V7MenuController
 		blurbLbl.Parent = card
 
 		local buyContainer, buyBtn = UITheme.neumorphicButton("BUY", UITheme.Colors.Gems, UDim2.fromScale(0.8, 0.25), UDim2.fromScale(0.1, 0.7))
+		buyContainer.Name = "BuyButton"
 		buyContainer.Parent = card
 
 		local assetId = entry.assetId
 		local isPass = MonetisationCatalog.Passes[entry.key] ~= nil
 
+		-- THE PROMPT CAN FAIL, and silently. `PromptGamePassPurchase` throws if
+		-- the id does not exist or the place is not configured for it, and an
+		-- unhandled throw inside a click handler leaves the player pressing a
+		-- button that does nothing with no clue why. pcall + an on-card message.
 		local function promptPurchase()
-			if assetId ~= nil then
-				if isPass then
-					MarketplaceService:PromptGamePassPurchase(player, assetId)
-				else
-					MarketplaceService:PromptProductPurchase(player, assetId)
-				end
+			if assetId == nil then
+				-- FR-12.6 fail-closed: an unresolved entry is not purchasable.
+				blurbLbl.Text = "Not available yet."
+				return
+			end
+			local ok, err
+			if isPass then
+				ok, err = pcall(MarketplaceService.PromptGamePassPurchase,
+					MarketplaceService, player, assetId)
+			else
+				ok, err = pcall(MarketplaceService.PromptProductPurchase,
+					MarketplaceService, player, assetId)
+			end
+			if not ok then
+				warn(string.format("[V7MenuPanel] purchase prompt failed for %s: %s",
+					entry.key, tostring(err)))
+				blurbLbl.Text = "Could not open the purchase window."
+				blurbLbl.TextColor3 = UITheme.Colors.Negative
 			end
 		end
 
 		buyBtn.MouseButton1Click:Connect(promptPurchase)
 		buyBtn.Activated:Connect(promptPurchase)
+
+		if isPass then
+			passCards[entry.key] = { button = buyBtn, blurb = blurbLbl, baseBlurb = entry.blurb }
+		end
+	end
+
+	-- Marks owned passes so the shop stops offering what the player already has.
+	--
+	-- Without this every card showed an identical BUY regardless of ownership,
+	-- and the only way to find out you already owned a pass was to press BUY and
+	-- have Roblox tell you. Products are intentionally untouched -- they are
+	-- consumable and repeat purchases are legitimate.
+	local function refreshShop(state: any)
+		local owned = if type(state) == "table" and type(state.ownedPasses) == "table"
+			then state.ownedPasses else {}
+		for key, ui in pairs(passCards) do
+			if owned[key] == true then
+				UITheme.setButtonText(ui.button, "OWNED")
+				UITheme.setEnabled(ui.button, false)
+				ui.blurb.Text = ui.baseBlurb .. "  (active)"
+				ui.blurb.TextColor3 = UITheme.Colors.Positive
+			else
+				UITheme.setButtonText(ui.button, "BUY")
+				UITheme.setEnabled(ui.button, true)
+				ui.blurb.Text = ui.baseBlurb
+				ui.blurb.TextColor3 = UITheme.Colors.TextPrimary
+			end
+		end
 	end
 
 	-- 2. SHAPES OVERLAY
@@ -362,6 +415,10 @@ function V7MenuPanel.new(): V7MenuController
 	-- panel never rebuilds Instances mid-session.
 	for i = 1, 3 do
 		local row = UITheme.panel(UDim2.fromScale(1, 0), UDim2.fromScale(0, 0))
+		-- Named by SLOT, not by quest id: the id changes daily but the row is a
+		-- fixed position in the list, and a path that changes every UTC midnight
+		-- is not an addressable path (L-037).
+		row.Name = "QuestRow" .. tostring(i)
 		row.Size = UDim2.new(1, 0, 0, 78)
 		row.LayoutOrder = i
 		row.Visible = false
@@ -398,14 +455,32 @@ function V7MenuPanel.new(): V7MenuController
 
 		local claimContainer, claimBtn = UITheme.neumorphicButton("CLAIM", UITheme.Colors.Positive,
 			UDim2.fromScale(0.24, 0.5), UDim2.fromScale(0.72, 0.25))
+		claimContainer.Name = "ClaimButton"
 		claimContainer.Parent = row
 
 		local rowState = { id = nil :: string? }
 		claimBtn.Activated:Connect(function()
 			local id = rowState.id
-			if id ~= nil then
-				NetClient.claimQuest(id)
+			if id == nil then
+				return
 			end
+			UITheme.setEnabled(claimBtn, false)
+			task.spawn(function()
+				local result = NetClient.claimQuest(id)
+				if result.ok then
+					-- The snapshot that follows repaints this row as DONE, so the
+					-- button text here is only the acknowledgement in between.
+					UITheme.setButtonText(claimBtn, "PAID")
+				else
+					-- A refusal used to be completely silent: the reward is credited
+					-- server-side and the button simply never changed, so a failed
+					-- claim and a successful one looked identical.
+					UITheme.setButtonText(claimBtn, "FAILED")
+					task.wait(1.2)
+					UITheme.setButtonText(claimBtn, "CLAIM")
+					UITheme.setEnabled(claimBtn, true)
+				end
+			end)
 		end)
 
 		table.insert(questRows, {
@@ -453,34 +528,153 @@ function V7MenuPanel.new(): V7MenuController
 	vaultOverlay.Parent = screenGui
 	overlays["vault"] = vaultOverlay
 
-	-- Was a single static label. The vault is a real server-clocked accrual
-	-- (FR-8) and the player has to be able to see and claim it.
-	local vaultInfo = UITheme.label("", UDim2.fromScale(0.94, 0.34), UDim2.fromScale(0.03, 0.06),
+	-- THE ACCRUED AMOUNT, in the size it deserves. This is the number the player
+	-- opened the panel to see.
+	local vaultAmount = UITheme.label("--", UDim2.fromScale(0.94, 0.16), UDim2.fromScale(0.03, 0.04),
+		UITheme.Colors.Cash)
+	vaultAmount.Name = "VaultAmount"
+	vaultAmount.Font = UITheme.FontHeading
+	vaultAmount.TextScaled = true
+	vaultAmount.Parent = vaultBody
+
+	-- A fill bar for how much of the vault's capacity is used. Time is easier to
+	-- read as a bar than as two numbers the player has to divide.
+	local vaultBarBack = Instance.new("Frame")
+	vaultBarBack.Name = "CapacityBar"
+	vaultBarBack.Size = UDim2.fromScale(0.94, 0.035)
+	vaultBarBack.Position = UDim2.fromScale(0.03, 0.22)
+	vaultBarBack.BackgroundColor3 = UITheme.Colors.ShadowDark
+	vaultBarBack.BorderSizePixel = 0
+	vaultBarBack.Parent = vaultBody
+	local vbCorner = Instance.new("UICorner")
+	vbCorner.CornerRadius = UDim.new(1, 0)
+	vbCorner.Parent = vaultBarBack
+
+	local vaultBarFill = Instance.new("Frame")
+	vaultBarFill.Name = "Fill"
+	vaultBarFill.Size = UDim2.fromScale(0, 1)
+	vaultBarFill.BackgroundColor3 = UITheme.Colors.Cash
+	vaultBarFill.BorderSizePixel = 0
+	vaultBarFill.Parent = vaultBarBack
+	local vfCorner = Instance.new("UICorner")
+	vfCorner.CornerRadius = UDim.new(1, 0)
+	vfCorner.Parent = vaultBarFill
+
+	local vaultInfo = UITheme.label("", UDim2.fromScale(0.94, 0.22), UDim2.fromScale(0.03, 0.28),
 		UITheme.Colors.TextPrimary)
+	vaultInfo.Name = "VaultInfo"
 	vaultInfo.TextScaled = true
 	vaultInfo.TextWrapped = true
 	vaultInfo.Parent = vaultBody
 
 	local claimVaultContainer, claimVaultBtn = UITheme.neumorphicButton("CLAIM",
-		UITheme.Colors.Cash, UDim2.fromScale(0.44, 0.16), UDim2.fromScale(0.03, 0.46))
+		UITheme.Colors.Cash, UDim2.fromScale(0.44, 0.16), UDim2.fromScale(0.03, 0.54))
+	claimVaultContainer.Name = "ClaimButton"
 	claimVaultContainer.Parent = vaultBody
+
+	local vaultStatus = UITheme.label("", UDim2.fromScale(0.94, 0.1), UDim2.fromScale(0.03, 0.73),
+		UITheme.Colors.TextDim)
+	vaultStatus.Name = "ClaimStatus"
+	vaultStatus.TextScaled = true
+	vaultStatus.Parent = vaultBody
+
+	-- Server refusal codes as sentences. The server sends a code, never prose.
+	local VAULT_REFUSAL: { [string]: string } = {
+		vault_empty = "Nothing has built up yet -- come back later.",
+		no_profile = "Still loading -- try again in a moment.",
+		profile_unavailable = "Still loading -- try again in a moment.",
+		mutate_failed = "Could not save that. Try again.",
+		rate_limited = "Slow down a moment, then try again.",
+		throttled = "Slow down a moment, then try again.",
+	}
+
 	claimVaultBtn.Activated:Connect(function()
-		NetClient.claimVault(false)
+		UITheme.setEnabled(claimVaultBtn, false)
+		task.spawn(function()
+			local result = NetClient.claimVault(false)
+			if result.ok then
+				vaultStatus.Text = "Collected. Added to your Cash."
+				vaultStatus.TextColor3 = UITheme.Colors.Positive
+			else
+				local reason = tostring(result.reason or "vault_empty")
+				vaultStatus.Text = VAULT_REFUSAL[reason] or "Could not collect right now."
+				vaultStatus.TextColor3 = UITheme.Colors.Negative
+			end
+			-- Re-enabled by the next snapshot's refresh, which also decides whether
+			-- there is anything left to claim.
+			UITheme.setEnabled(claimVaultBtn, true)
+		end)
 	end)
 
+	-- Seconds -> "3h 20m", because a vault measured in seconds is unreadable.
+	local function formatDuration(seconds: number): string
+		local s = math.max(0, math.floor(seconds))
+		local h = math.floor(s / 3600)
+		local m = math.floor((s % 3600) / 60)
+		if h > 0 then
+			return string.format("%dh %dm", h, m)
+		end
+		if m > 0 then
+			return string.format("%dm", m)
+		end
+		return string.format("%ds", s)
+	end
+
 	local function refreshVault(state: any)
-		-- The snapshot does not carry vault earnings; the server owns that figure
-		-- and reports it through the ClaimVault result. Until a claim happens the
-		-- honest display is the capacity the player has EARNED, not a guess at
-		-- what has accrued.
-		local caps = if type(state) == "table" and type(state.upgrades) == "table"
-			then state.upgrades else {}
-		local lvl = tonumber(caps.VaultCapacity) or 0
-		local hours = 4 + (lvl * 0.8)
-		vaultInfo.Text = string.format(
-			"Earnings accrue while you are away, at your recent average rate.\n\n"
-			.. "Your capacity: %.1f hours.\n"
-			.. "Press CLAIM to collect whatever has built up.", hours)
+		-- THE REAL FIGURES, from the snapshot's `vault` block.
+		--
+		-- This used to recompute capacity on the client as `4 + level * 0.8` --
+		-- a second copy of a server formula, which is precisely the drift L-025
+		-- exists to prevent -- and it could not show the accrued amount AT ALL,
+		-- because the snapshot did not carry one. The player learned what their
+		-- vault held by claiming it.
+		--
+		-- `vault` is ABSENT rather than zeroed when the server has not reported,
+		-- so "unknown" and "empty" stay distinguishable.
+		local v = if type(state) == "table" then state.vault else nil
+		if type(v) ~= "table" then
+			vaultAmount.Text = "--"
+			vaultAmount.TextColor3 = UITheme.Colors.TextDim
+			vaultBarFill.Size = UDim2.fromScale(0, 1)
+			vaultInfo.Text = "Waiting for your vault figures..."
+			UITheme.setEnabled(claimVaultBtn, false)
+			return
+		end
+
+		local unclaimed = tonumber(v.unclaimed) or 0
+		local claimable = tonumber(v.claimableSeconds) or 0
+		local capacity = tonumber(v.capacitySeconds) or 0
+		local rate = tonumber(v.ratePerSec) or 0
+
+		vaultAmount.Text = "$" .. Format.formatNumber(unclaimed)
+		vaultAmount.TextColor3 = if unclaimed > 0
+			then UITheme.Colors.Cash else UITheme.Colors.TextDim
+
+		local frac = if capacity > 0 then math.clamp(claimable / capacity, 0, 1) else 0
+		vaultBarFill.Size = UDim2.fromScale(frac, 1)
+		vaultBarFill.BackgroundColor3 = if v.atCapacity == true
+			then UITheme.Colors.Negative else UITheme.Colors.Cash
+
+		if rate <= 0 then
+			-- An honest empty state. The vault pays at the player's RECENT
+			-- average rate, so a player who has not rolled yet has no rate and
+			-- would otherwise stare at $0 with no explanation.
+			vaultInfo.Text = string.format(
+				"Roll a few times to set an earning rate -- your vault fills at your"
+				.. " recent average.\n\nHolds up to %s.", formatDuration(capacity))
+		elseif v.atCapacity == true then
+			vaultInfo.Text = string.format(
+				"FULL -- %s of %s stored, and it has stopped earning.\n\n"
+				.. "Collect it to start filling again.",
+				formatDuration(claimable), formatDuration(capacity))
+		else
+			vaultInfo.Text = string.format(
+				"%s of %s stored, still filling.",
+				formatDuration(claimable), formatDuration(capacity))
+		end
+
+		UITheme.setEnabled(claimVaultBtn, unclaimed > 0)
+		UITheme.setButtonText(claimVaultBtn, if unclaimed > 0 then "CLAIM" else "EMPTY")
 	end
 
 	-- 7. SETTINGS OVERLAY
@@ -695,19 +889,71 @@ function V7MenuPanel.new(): V7MenuController
 
 	local addSlotContainer, addSlotBtn = UITheme.neumorphicButton("ADD SLOT",
 		UITheme.Colors.Cash, UDim2.fromScale(0.44, 0.16), UDim2.fromScale(0.03, 0.42))
+	addSlotContainer.Name = "AddSlotButton"
 	addSlotContainer.Parent = slotsBody
+
+	local slotsStatus = UITheme.label("", UDim2.fromScale(0.94, 0.1), UDim2.fromScale(0.03, 0.62),
+		UITheme.Colors.TextDim)
+	slotsStatus.Name = "SlotsStatus"
+	slotsStatus.TextScaled = true
+	slotsStatus.Parent = slotsBody
+
+	local SLOT_REFUSAL: { [string]: string } = {
+		insufficient_funds = "Not enough Cash for the next slot.",
+		invalid_request = "You already have the maximum number of dice.",
+		profile_unavailable = "Still loading -- try again in a moment.",
+		rate_limited = "Slow down a moment, then try again.",
+		throttled = "Slow down a moment, then try again.",
+	}
+
 	addSlotBtn.Activated:Connect(function()
-		NetClient.addDieSlot()
+		UITheme.setEnabled(addSlotBtn, false)
+		task.spawn(function()
+			local result = NetClient.addDieSlot()
+			if result.ok then
+				slotsStatus.Text = "Slot added -- a new die is on the board."
+				slotsStatus.TextColor3 = UITheme.Colors.Positive
+			else
+				local reason = tostring(result.reason or "invalid_request")
+				slotsStatus.Text = SLOT_REFUSAL[reason] or "Could not add a slot right now."
+				slotsStatus.TextColor3 = UITheme.Colors.Negative
+			end
+			-- The next snapshot re-enables it if another slot is actually buyable.
+			UITheme.setEnabled(addSlotBtn, true)
+		end)
 	end)
 
 	local function refreshSlots(state: any)
 		local slots = if type(state) == "table" then tonumber(state.dieSlots) or 1 else 1
+		local cash = if type(state) == "table" then tonumber(state.cash) or 0 else 0
 		slotsInfo.Text = string.format(
 			"You roll %d %s per throw.\n\nMore dice means more faces resolving at "
 			.. "once, and elements that read across dice have more to work with.",
 			slots, if slots == 1 then "die" else "dice")
-		UITheme.setEnabled(addSlotBtn, slots < 7)
-		UITheme.setButtonText(addSlotBtn, if slots < 7 then "ADD SLOT" else "MAX (7)")
+
+		-- THE PRICE, ON THE BUTTON.
+		--
+		-- This read a bare "ADD SLOT" with no cost anywhere on the panel. The
+		-- server charges 1000 * 2^(owned-1) and refuses when the player cannot
+		-- pay -- correctly -- but the panel had never mentioned a price, so the
+		-- refusal looked like a dead button. Same defect the SHAPE panel had.
+		--
+		-- The cost comes from the shared catalog, the same call the server makes.
+		local cost = DiceCatalog.dieSlotCost(slots)
+		if cost == nil then
+			UITheme.setButtonText(addSlotBtn, "MAX (7)")
+			UITheme.setEnabled(addSlotBtn, false)
+			slotsStatus.Text = "You have every die slot."
+			slotsStatus.TextColor3 = UITheme.Colors.TextDim
+		else
+			UITheme.setButtonText(addSlotBtn, "ADD SLOT  $" .. Format.formatNumber(cost))
+			UITheme.setEnabled(addSlotBtn, cash >= cost)
+			if cash < cost then
+				slotsStatus.Text = string.format("Next slot costs $%s.",
+					Format.formatNumber(cost))
+				slotsStatus.TextColor3 = UITheme.Colors.TextDim
+			end
+		end
 	end
 
 	-- NAME EVERY OVERLAY BY ITS KEY.
@@ -727,6 +973,7 @@ function V7MenuPanel.new(): V7MenuController
 		overlays = overlays,
 		-- The refresh functions are stored on the controller so `applyState` can
 		-- fan a single snapshot out to every panel that needs it.
+		shopRefresh = refreshShop,
 		shapeRefresh = refreshShapes,
 		questRefresh = refreshQuests,
 		vaultRefresh = refreshVault,
@@ -753,8 +1000,8 @@ function V7MenuPanel:applyState(state: any)
 		return
 	end
 	self.lastState = state
-	for _, fn in ipairs({ self.shapeRefresh, self.questRefresh, self.vaultRefresh,
-		self.slotsRefresh, self.settingsRefresh }) do
+	for _, fn in ipairs({ self.shopRefresh, self.shapeRefresh, self.questRefresh,
+		self.vaultRefresh, self.slotsRefresh, self.settingsRefresh }) do
 		if type(fn) == "function" then
 			local ok, err = pcall(fn, state)
 			if not ok then

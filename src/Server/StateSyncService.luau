@@ -27,6 +27,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Remotes = require(Shared:WaitForChild("Remotes"))
+local MonetisationCatalog = require(Shared:WaitForChild("MonetisationCatalog"))
 
 local PlayerProfile = require(script.Parent:WaitForChild("PlayerProfile"))
 local PurchaseService = require(script.Parent:WaitForChild("PurchaseService"))
@@ -54,6 +55,30 @@ function StateSyncService._setEmitterForTesting(fn: ((Player, any) -> ())?): ()
 		error("[StateSyncService] the emitter seam is Studio-only", 2)
 	end
 	emitState = fn or defaultEmit
+end
+
+--------------------------------------------------------------------------------
+-- VAULT STATUS PROVIDER (FR-8)
+--
+-- The snapshot has never carried the vault's accrued figure, so the panel could
+-- only ever show a CAPACITY -- "your vault holds 4 hours" -- and the player
+-- learned what had actually built up only by pressing CLAIM and watching their
+-- balance jump. An idle game whose central offline reward is invisible until
+-- spent has hidden the thing players open the game to see.
+--
+-- INJECTED rather than required. `OfflineService` does not import this module
+-- today, so a direct require would not cycle right now -- but StateSync is
+-- imported by nearly everything, and every hard edge added here is a future
+-- cycle waiting for one more import (ledger L-035). The bootstrap wires this,
+-- exactly as it wires RollService's roll observer.
+--
+-- nil is a VALID state and means "no vault figures in the snapshot", which the
+-- client renders as unknown rather than as zero. A provider that has not been
+-- installed must never look like an empty vault.
+local vaultProvider: ((Player) -> any)? = nil
+
+function StateSyncService.setVaultProvider(fn: ((Player) -> any)?): ()
+	vaultProvider = fn
 end
 
 --------------------------------------------------------------------------------
@@ -113,6 +138,54 @@ function StateSyncService.buildSnapshot(data: PlayerProfile.Profile, streak: num
 
 	local extraSlots = if player ~= nil then PurchaseService.bonusDieSlots(player) else 0
 
+	-- WHICH GAMEPASSES THE PLAYER OWNS (FR-12).
+	--
+	-- The shop rendered every card with an identical BUY button whether or not
+	-- the player already owned the pass, so the only way to discover you had
+	-- bought something was to buy it again and watch Roblox say "you already own
+	-- this item". Ownership is a FLAG, not a price -- the client reads names and
+	-- blurbs from the shared catalog and Roblox itself renders the actual cost in
+	-- the purchase prompt, so no Robux figure crosses this boundary.
+	local ownedPasses: { [string]: boolean } = {}
+	if player ~= nil then
+		for key in pairs(MonetisationCatalog.Passes) do
+			if PurchaseService.ownsPass(player, key) then
+				ownedPasses[key] = true
+			end
+		end
+	end
+
+	-- THE VAULT'S REAL FIGURES (FR-8). Absent entirely when there is no provider
+	-- or no player, so the client can tell "not known" from "nothing accrued".
+	--
+	-- `unclaimed` IS an earned amount crossing the wire, and that is correct here
+	-- rather than an NFR-5 violation: NFR-5 forbids the CLIENT naming an economic
+	-- value the server then trusts. This is the reverse direction -- the server
+	-- stating a figure it has already computed and will itself honour on claim.
+	-- The client cannot alter it; ClaimVault recomputes from scratch and never
+	-- reads anything the client sends.
+	local vault: any = nil
+	if player ~= nil and vaultProvider ~= nil then
+		local okVault, status = pcall(vaultProvider :: any, player)
+		if okVault and type(status) == "table" then
+			vault = {
+				unclaimed = status.unclaimedEarnings,
+				claimableSeconds = status.claimableSeconds,
+				capacitySeconds = status.capacitySeconds,
+				elapsedSeconds = status.elapsedSeconds,
+				ratePerSec = status.ratePerSec,
+				-- Whether the vault is FULL, so the panel can say "stopped
+				-- earning" rather than leaving the player to compare two numbers.
+				atCapacity = status.claimableSeconds >= status.capacitySeconds,
+			}
+		elseif not okVault then
+			-- A failing provider must not take the whole snapshot down with it --
+			-- the balances and dice in this payload are unrelated to the vault.
+			warn(string.format("[StateSyncService] vault provider failed for UserId=%d: %s",
+				player.UserId, tostring(status)))
+		end
+	end
+
 	-- Active boost expiries, read straight from the profile so this cannot
 	-- disagree with what BoostService charges against. Only boosts still running
 	-- are listed; an expired one is simply absent rather than sent as expired,
@@ -168,6 +241,9 @@ function StateSyncService.buildSnapshot(data: PlayerProfile.Profile, streak: num
 			ShapesEquipped = shapesEquipped,
 		},
 		settings = settings,
+		-- nil when unknown, never a fabricated zero -- see the block above.
+		vault = vault,
+		ownedPasses = ownedPasses,
 		streak = streak,
 		-- ACTIVE BOOSTS (FR-12.2). This was a hardcoded `{}` with the comment
 		-- "Block 5 populates this". Block 5 built BoostService and never came

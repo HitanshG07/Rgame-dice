@@ -284,6 +284,31 @@ function DiceCatalog.newStartingDie()
 	return DiceCatalog.newDie(DiceCatalog.STARTING_SHAPE)
 end
 
+-- DIE SLOTS (FR-1.1: one to seven dice).
+DiceCatalog.MAX_DIE_SLOTS = 7
+DiceCatalog.SLOT_BASE_COST = 1000
+
+-- Cash cost of buying the NEXT slot, given how many the player owns now.
+--
+-- MOVED HERE FROM the AddDieSlot handler (2026-08-12) so the panel can show the
+-- price. It was a server-side expression with no shared name, so the SLOTS
+-- panel rendered a bare "ADD SLOT" button with no cost on it -- a player pressed
+-- it, could not afford it, and the server's refusal produced no visible change
+-- at all. Same defect the SHAPE panel had with its Diamond switch cost.
+--
+-- Doubling per slot: the second die is a cheap, obvious upgrade and the seventh
+-- is a genuine goal. Value unchanged in the move -- 1000 * 2^(owned-1).
+function DiceCatalog.dieSlotCost(ownedSlots: number): number?
+	if type(ownedSlots) ~= "number" or ownedSlots ~= ownedSlots then
+		return nil
+	end
+	local owned = math.floor(ownedSlots)
+	if owned < 1 or owned >= DiceCatalog.MAX_DIE_SLOTS then
+		return nil -- already at the cap; there is no next slot to price
+	end
+	return DiceCatalog.SLOT_BASE_COST * (2 ^ (owned - 1))
+end
+
 function DiceCatalog.getUnlockOrder(): { string }
 	return table.clone(UNLOCK_ORDER)
 end

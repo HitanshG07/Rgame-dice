@@ -100,6 +100,16 @@ Remotes.createAll()
 PurchaseService.setAnnouncer(StateSyncService.push)
 PurchaseService.init()
 
+-- THE VAULT'S FIGURES IN THE SNAPSHOT (FR-8), injected at the composition root
+-- for the same reason the announcer above is: StateSyncService is imported by
+-- nearly everything, so it must import as little as possible itself (L-035).
+--
+-- Before this, the snapshot carried nothing about the vault at all. The panel
+-- could only state a CAPACITY in hours and the player discovered what had
+-- actually accrued by pressing CLAIM -- the offline reward, which is the reason
+-- an idle player opens the game, was invisible until the moment it was spent.
+StateSyncService.setVaultProvider(OfflineService.getStatus)
+
 -- THE DICE SOLIDS. Generated ONCE, on the server, into ReplicatedStorage.
 do
 	local ok, err = pcall(function()
@@ -316,10 +326,16 @@ RemoteGateway.register("AddDieSlot", announcing(function(player: Player)
 	if not data then
 		return false, Remotes.Notice.ProfileUnavailable
 	end
-	if data.DieSlots >= 7 then
+	if data.DieSlots >= DiceCatalog.MAX_DIE_SLOTS then
 		return false, Remotes.Notice.InvalidRequest
 	end
-	local cost = 1000 * (2 ^ (data.DieSlots - 1))
+	-- Priced by the shared catalog, which is also what the SLOTS panel reads to
+	-- print the number on the button -- so the quoted price and the charged price
+	-- are the same expression, not two copies of it (L-025).
+	local cost = DiceCatalog.dieSlotCost(data.DieSlots)
+	if cost == nil then
+		return false, Remotes.Notice.InvalidRequest
+	end
 	if not EconomyService.canAfford(player, "Cash", cost) then
 		return false, Remotes.Notice.InsufficientFunds
 	end
@@ -570,6 +586,22 @@ end)
 local function onPlayerRemoving(player: Player)
 	RollService.endSession(player)
 	ProgressionService.endSession(player)
+
+	-- STAMP THE VAULT CLOCK (FR-8). This call did not exist, and its absence
+	-- disabled the entire offline-earnings feature: `Vault.LastSeen` is what
+	-- `getStatus` measures elapsed time from, nothing else ever writes it on
+	-- exit, and a LastSeen that never advances means `elapsed` is computed from
+	-- a stale or zero timestamp forever.
+	--
+	-- It stayed invisible because the snapshot carried no vault figures until
+	-- today -- the panel showed a capacity in hours and no accrual, so there was
+	-- nothing on screen that could have looked wrong. Wiring the display is what
+	-- surfaced it: the vault read 0s after a real 90-second absence.
+	--
+	-- MUST run before `PlayerProfile.release`, because it MUTATES the profile and
+	-- a released profile refuses writes.
+	OfflineService.onPlayerRemoving(player)
+
 	-- Released BEFORE the profile: the entitlement cache is keyed by Player and
 	-- would otherwise hold a reference to a departed one.
 	PurchaseService.onPlayerRemoving(player)
