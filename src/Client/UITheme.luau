@@ -11,7 +11,7 @@ local UITheme = {}
 
 UITheme.Colors = {
 	BaseCream      = Color3.fromRGB(26, 22, 20),
-	ShadowLight    = Color3.fromRGB(65, 54, 49),
+	ShadowLight    = Color3.fromRGB(48, 40, 36),
 	ShadowDark     = Color3.fromRGB(14, 12, 10),
 	TextPrimary    = Color3.fromRGB(245, 239, 230),
 	TextDim        = Color3.fromRGB(160, 148, 140),
@@ -29,10 +29,10 @@ UITheme.Colors = {
 	
 	-- Legacy
 	PanelDark      = Color3.fromRGB(26, 22, 20),
-	PanelMaroon    = Color3.fromRGB(48, 40, 36),
+	PanelMaroon    = Color3.fromRGB(36, 30, 26),
 	PanelDeep      = Color3.fromRGB(20, 16, 14),
 	BorderGold     = Color3.fromRGB(234, 179, 8),
-	BorderDim      = Color3.fromRGB(65, 54, 49),
+	BorderDim      = Color3.fromRGB(28, 22, 18),
 	PrimaryCyan    = Color3.fromRGB(249, 115, 22),
 }
 
@@ -69,8 +69,8 @@ function UITheme.neumorphicButton(text: string, accentColor: Color3?, size: UDim
 	container.BackgroundTransparency = 1
 	container.ZIndex = 1
 
-	-- Shadow Offsets must use PIXELS so they don't stretch based on aspect ratio!
-	local offset = 6
+	-- Shadow Offsets use a subtle, compact 3px pixel offset
+	local offset = 3
 
 	local shadowDark = Instance.new("Frame")
 	shadowDark.Size = UDim2.fromScale(1, 1)
@@ -87,6 +87,8 @@ function UITheme.neumorphicButton(text: string, accentColor: Color3?, size: UDim
 	shadowLight.Size = UDim2.fromScale(1, 1)
 	shadowLight.Position = UDim2.new(0, -offset, 0, -offset)
 	shadowLight.BackgroundColor3 = UITheme.Colors.ShadowLight
+	shadowLight.BackgroundTransparency = 0
+	shadowLight.Visible = true
 	shadowLight.BorderSizePixel = 0
 	shadowLight.ZIndex = 1
 	local c2 = Instance.new("UICorner")
@@ -165,7 +167,8 @@ function UITheme.neumorphicPod(size: UDim2, position: UDim2): (Frame, Frame)
 	container.BackgroundTransparency = 1
 	container.ZIndex = 1
 
-	local offset = 8
+	-- Subtle, compact 3px shadow offset
+	local offset = 3
 
 	local shadowDark = Instance.new("Frame")
 	shadowDark.Size = UDim2.fromScale(1, 1)
@@ -182,6 +185,8 @@ function UITheme.neumorphicPod(size: UDim2, position: UDim2): (Frame, Frame)
 	shadowLight.Size = UDim2.fromScale(1, 1)
 	shadowLight.Position = UDim2.new(0, -offset, 0, -offset)
 	shadowLight.BackgroundColor3 = UITheme.Colors.ShadowLight
+	shadowLight.BackgroundTransparency = 0
+	shadowLight.Visible = true
 	shadowLight.BorderSizePixel = 0
 	shadowLight.ZIndex = 1
 	local c2 = Instance.new("UICorner")

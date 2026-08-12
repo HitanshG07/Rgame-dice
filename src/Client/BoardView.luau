@@ -78,10 +78,10 @@ local BoardView = {}
 -- the outer 14% of each edge; centring on the screen leaves the board looking
 -- shoved left, because the eye centres it against the gap it sits in rather
 -- than against the window.
-local TRAY_X = 0.205
-local TRAY_Y = 0.145
-local TRAY_W = 0.590
-local TRAY_H = 0.500
+local TRAY_X = 0.165
+local TRAY_Y = 0.135
+local TRAY_W = 0.670
+local TRAY_H = 0.660
 
 -- The playable interior, as a fraction of the tray, inset from the tray's own
 -- border so a die never touches the frame. This is the 2D equivalent of the
@@ -238,20 +238,18 @@ local function build(): (ScreenGui, Frame, Frame)
 	frame.BackgroundTransparency = 1
 	frame.Parent = gui
 
-	-- A second, inset border marking the playable interior. This is not
-	-- decoration: it is the FR-1.4 containment boundary made visible, so a die
-	-- resting against it can be seen to be inside it.
+	-- The playable interior container with a slim, equal border on all sides.
 	local interior = Instance.new("Frame")
 	interior.Name = "Interior"
-	interior.Size = UDim2.fromScale(1 - INNER_INSET * 2, 1 - INNER_INSET * 2)
-	interior.Position = UDim2.fromScale(INNER_INSET, INNER_INSET)
+	interior.Size = UDim2.fromScale(1, 1)
+	interior.Position = UDim2.fromScale(0, 0)
 	interior.BackgroundTransparency = 1
 	interior.BorderSizePixel = 0
 	interior.Parent = frame
 
 	local stroke = Instance.new("UIStroke")
-	stroke.Color = UITheme.Colors.BorderDim
-	stroke.Thickness = UITheme.BorderThickness
+	stroke.Color = Color3.fromRGB(56, 44, 36)
+	stroke.Thickness = 1.5
 	stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
 	stroke.Parent = interior
 
@@ -263,6 +261,32 @@ local function build(): (ScreenGui, Frame, Frame)
 	dice.BackgroundTransparency = 1
 	dice.ZIndex = 2
 	dice.Parent = interior
+
+	-- Embedded Result Summary Bar at the bottom edge of the board container
+	local resultBar = Instance.new("Frame")
+	resultBar.Name = "ResultBar"
+	resultBar.Size = UDim2.fromScale(0.96, 0.065)
+	resultBar.Position = UDim2.fromScale(0.02, 0.915)
+	resultBar.BackgroundColor3 = Color3.fromRGB(24, 19, 16)
+	resultBar.ZIndex = 5
+	resultBar.Parent = interior
+
+	local rbCorner = Instance.new("UICorner")
+	rbCorner.CornerRadius = UDim.new(0.4, 0)
+	rbCorner.Parent = resultBar
+
+	local rbStroke = Instance.new("UIStroke")
+	rbStroke.Color = Color3.fromRGB(52, 42, 36)
+	rbStroke.Thickness = 1
+	rbStroke.Parent = resultBar
+
+	local rbLayout = Instance.new("UIListLayout")
+	rbLayout.Name = "Layout"
+	rbLayout.FillDirection = Enum.FillDirection.Horizontal
+	rbLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+	rbLayout.VerticalAlignment = Enum.VerticalAlignment.Center
+	rbLayout.Padding = UDim.new(0.01, 0)
+	rbLayout.Parent = resultBar
 
 	if player ~= nil then
 		gui.Parent = player:WaitForChild("PlayerGui")
@@ -495,6 +519,86 @@ function BoardView.init(_net: any): ()
 	built = true
 
 	claimView()
+end
+
+local diceColorsByShape = {
+	D2 = Color3.fromRGB(240, 180, 50),
+	D3 = Color3.fromRGB(230, 120, 60),
+	D4 = Color3.fromRGB(150, 80, 220),
+	D6 = Color3.fromRGB(50, 160, 220),
+	D8 = Color3.fromRGB(60, 190, 120),
+	D10 = Color3.fromRGB(230, 140, 40),
+	D12 = Color3.fromRGB(220, 70, 150),
+	D20 = Color3.fromRGB(70, 130, 240),
+}
+
+function BoardView.updateResultSummary(rollResults: { { shape: string, value: number } }?): ()
+	if screenGui == nil then return end
+	local interior = screenGui:FindFirstChild("Tray", true) and screenGui.Tray:FindFirstChild("Interior")
+	if interior == nil then return end
+	local resultBar = interior:FindFirstChild("ResultBar")
+	if resultBar == nil then return end
+
+	for _, child in ipairs(resultBar:GetChildren()) do
+		if child:IsA("Frame") then child:Destroy() end
+	end
+
+	if rollResults == nil or #rollResults == 0 then
+		resultBar.Visible = false
+		return
+	end
+
+	resultBar.Visible = true
+
+	-- Group results by shape type
+	local grouped: { [string]: { count: number, sum: number } } = {}
+	local shapeOrder: { string } = {}
+
+	for _, res in ipairs(rollResults) do
+		local s = res.shape or "D6"
+		local v = res.value or 0
+		if not grouped[s] then
+			grouped[s] = { count = 0, sum = 0 }
+			table.insert(shapeOrder, s)
+		end
+		grouped[s].count += 1
+		grouped[s].sum += v
+	end
+
+	local totalItems = #shapeOrder
+	local itemWidth = math.min(0.18, 0.90 / math.max(1, totalItems))
+
+	for i, shapeName in ipairs(shapeOrder) do
+		local info = grouped[shapeName]
+		local item = Instance.new("Frame")
+		item.Size = UDim2.fromScale(itemWidth, 0.76)
+		item.BackgroundColor3 = Color3.fromRGB(16, 13, 11)
+		item.ZIndex = 6
+		item.Parent = resultBar
+
+		local iCorner = Instance.new("UICorner")
+		iCorner.CornerRadius = UDim.new(0.3, 0)
+		iCorner.Parent = item
+
+		local iStroke = Instance.new("UIStroke")
+		iStroke.Color = diceColorsByShape[shapeName] or Color3.fromRGB(200, 200, 200)
+		iStroke.Thickness = 1.2
+		iStroke.Parent = item
+
+		local displayText = if info.count == 1
+			then string.format("%s: %d", shapeName, info.sum)
+			else string.format("%dx %s (SUM: %d)", info.count, shapeName, info.sum)
+
+		local lbl = Instance.new("TextLabel")
+		lbl.Size = UDim2.fromScale(1, 1)
+		lbl.BackgroundTransparency = 1
+		lbl.Font = UITheme.FontHeading
+		lbl.Text = displayText
+		lbl.TextColor3 = UITheme.Colors.TextPrimary
+		lbl.TextScaled = true
+		lbl.ZIndex = 7
+		lbl.Parent = item
+	end
 end
 
 -- Symmetry with every other view module. Without it the board is a permanent

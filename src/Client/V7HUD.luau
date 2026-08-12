@@ -28,6 +28,7 @@ export type V7HUDController = {
 	-- Auto-Roll is a gamepass entitlement the server can refuse.
 	autoEnabled: boolean,
 	rollBtn: TextButton,
+	rollCooldownFill: Frame,
 	menuCallbacks: { (menuId: string) -> () },
 	setAutoState: (self: V7HUDController, enabled: boolean) -> (),
 	updateBalances: (self: V7HUDController, cash: number, gems: number, diamonds: number) -> (),
@@ -258,8 +259,8 @@ function V7HUD.new(): V7HUDController
 	-- being the same dim grey as everything else.
 	local streakStrip = Instance.new("Frame")
 	streakStrip.Name = "StreakStrip"
-	streakStrip.Size = UDim2.fromScale(0.32, 0.05)
-	streakStrip.Position = UDim2.fromScale(0.34, 0.725)
+	streakStrip.Size = UDim2.fromScale(0.28, 0.045)
+	streakStrip.Position = UDim2.fromScale(0.36, 0.812)
 	streakStrip.BackgroundTransparency = 1
 	streakStrip.Parent = gui
 
@@ -397,7 +398,7 @@ function V7HUD.new(): V7HUDController
 	-- ==========================================
 	-- 4. BOTTOM CENTER ROLL STATION
 	-- ==========================================
-	local rollStation, rollStationBody = UITheme.neumorphicPod(UDim2.fromScale(0.35, 0.16), UDim2.fromScale(0.325, 0.8))
+	local rollStation, rollStationBody = UITheme.neumorphicPod(UDim2.fromScale(0.28, 0.11), UDim2.fromScale(0.36, 0.865))
 	rollStation.Name = "RollStation"
 	rollStation.Parent = gui
 	
@@ -411,9 +412,34 @@ function V7HUD.new(): V7HUDController
 	rollWrapper.Name = "RollButton"
 	rollWrapper.Parent = rollStationBody
 
+	-- COOLDOWN SWEEP. A bar that fills left-to-right across the button over the
+	-- manual-roll cooldown, so the limit is something the player can SEE rather
+	-- than a press that appears to do nothing.
+	--
+	-- Sits above the button's tint (ZIndex 3) but below its caption (4), so ROLL
+	-- stays readable while the sweep runs underneath it.
+	local rollCooldownFill = Instance.new("Frame")
+	rollCooldownFill.Name = "CooldownFill"
+	rollCooldownFill.Size = UDim2.fromScale(0, 1)
+	rollCooldownFill.Position = UDim2.fromScale(0, 0)
+	rollCooldownFill.BackgroundColor3 = UITheme.Colors.TextGold
+	rollCooldownFill.BackgroundTransparency = 0.78
+	rollCooldownFill.BorderSizePixel = 0
+	rollCooldownFill.Visible = false
+	rollCooldownFill.ZIndex = 3
+	rollCooldownFill.Parent = rollBtn
+
+	local rollFillCorner = Instance.new("UICorner")
+	rollFillCorner.CornerRadius = UDim.new(0.4, 0)
+	rollFillCorner.Parent = rollCooldownFill
+
 	-- The Auto Toggle
+	-- Caption left empty here on purpose: `setAutoState` is called once at the end
+	-- of construction and owns EVERY appearance of this button. Baking "AUTO" in
+	-- at build time is how the button sat reading a third caption that neither
+	-- state ever produces until the player pressed it.
 	local autoWrapper, autoBtn = UITheme.neumorphicButton(
-		"AUTO",
+		"",
 		UITheme.Colors.TextDim,
 		UDim2.fromScale(0.25, 0.5),
 		UDim2.fromScale(0.7, 0.25)
@@ -446,8 +472,19 @@ function V7HUD.new(): V7HUDController
 		autoBtn = autoBtn,
 		autoEnabled = false,
 		rollBtn = rollBtn,
+		rollCooldownFill = rollCooldownFill,
 		menuCallbacks = menuCallbacks,
 	}, V7HUD) :: any
+
+	-- PAINT THE INITIAL AUTO STATE through the same function every later change
+	-- goes through. Without this the button renders with the empty caption it was
+	-- built with -- and with a caption baked in at build time instead, it showed a
+	-- third string ("AUTO") that neither real state ever produces.
+	--
+	-- Auto-roll is session-scoped server-side (it is deliberately not persisted,
+	-- so a rejoin cannot leave the server rolling for an absent player), so OFF is
+	-- the correct and honest starting state on every fresh session.
+	self:setAutoState(false)
 
 	return self
 end
@@ -530,16 +567,59 @@ function V7HUD:onMenuClicked(callback: (menuId: string) -> ())
 	table.insert(self.menuCallbacks, callback)
 end
 
+-- The manual roll cooldown, in seconds. Deliberately a touch LOOSER than the
+-- server's 2.5/sec bucket (0.40s), so a press that clears this gate is one the
+-- server will honour -- a client stricter than the server makes the game feel
+-- broken, and one looser than it produces silent refusals.
+local ROLL_COOLDOWN = 0.42
+
 function V7HUD:onRollClicked(callback: () -> ())
 	local lastTrigger = 0
+	local cooling = false
+
+	-- THE COOLDOWN IS SHOWN, not just enforced.
+	--
+	-- OPERATOR-REPORTED: "the roll option is spammable which makes it like an
+	-- exploit bug". The server bucket is the real defence and now caps manual
+	-- rolling below the auto-roll ceiling -- but a rate limit the player cannot
+	-- see reads as lag or a dropped click, and they respond by pressing harder.
+	-- Sweeping the button back to full over the cooldown makes the limit legible
+	-- as a game rule.
+	local function sweep()
+		if cooling then
+			return
+		end
+		cooling = true
+		local fill = self.rollCooldownFill
+		if fill == nil then
+			task.delay(ROLL_COOLDOWN, function()
+				cooling = false
+			end)
+			return
+		end
+		fill.Size = UDim2.fromScale(0, 1)
+		fill.Visible = true
+		local tween = TweenService:Create(fill,
+			TweenInfo.new(ROLL_COOLDOWN, Enum.EasingStyle.Linear),
+			{ Size = UDim2.fromScale(1, 1) })
+		tween:Play()
+		task.delay(ROLL_COOLDOWN, function()
+			fill.Visible = false
+			cooling = false
+		end)
+	end
+
 	local function trigger()
 		local now = os.clock()
-		if now - lastTrigger < 0.1 then return end
+		if now - lastTrigger < ROLL_COOLDOWN then
+			return
+		end
 		lastTrigger = now
+		sweep()
 		pcall(callback)
 	end
-	self.rollBtn.MouseButton1Click:Connect(trigger)
-	self.rollBtn.Activated:Connect(trigger)
+
+	UITheme.onPressed(self.rollBtn, trigger)
 end
 
 -- Paints the AUTO button to match a KNOWN state. Separate from the toggle so the
@@ -554,7 +634,10 @@ function V7HUD:setAutoState(enabled: boolean)
 	-- SHADOW frames before the body, so that call returned `shadowDark`, which
 	-- has no label. The colour assignment therefore never ran and AUTO looked
 	-- identical on and off, which is exactly what the operator reported.
-	UITheme.setButtonText(self.autoBtn, if enabled then "AUTO ON" else "AUTO")
+	-- "AUTO OFF" rather than a bare "AUTO" (operator-directed 2026-08-13). A
+	-- caption that names only one of the two states leaves the other reading as
+	-- a label rather than a state.
+	UITheme.setButtonText(self.autoBtn, if enabled then "AUTO ON" else "AUTO OFF")
 
 	local lbl = self.autoBtn:FindFirstChild("Label")
 	if lbl ~= nil and lbl:IsA("TextLabel") then

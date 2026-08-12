@@ -147,7 +147,7 @@ local CAMERA_FOV = 50
 -- CORNER reach, which a die only presents briefly mid-tumble, so filling just
 -- under that frames the resting solid generously while leaving the corners room
 -- to swing through.
-local CAMERA_FILL = 1.02
+local CAMERA_FILL = 0.55
 
 -- THE RESTING TILT. A die parked square to the camera shows one face filling the
 -- frame and reads as a flat coloured square -- which is exactly what a
@@ -408,13 +408,35 @@ local function makeVisual(index: number): DieVisual
 	
 	local body = tile
 	
+	tile.ClipsDescendants = false
+	body.ClipsDescendants = false
+
 	local viewport = Instance.new("ViewportFrame")
 	viewport.Name = "Viewport"
 	viewport.Size = UDim2.fromScale(1, 1)
+	viewport.Position = UDim2.fromScale(0, 0)
 	viewport.BackgroundTransparency = 1
-	viewport.Ambient = Color3.fromRGB(80, 80, 80)
-	viewport.LightColor = Color3.fromRGB(220, 220, 220)
-	viewport.LightDirection = Vector3.new(-1, -1, -1)
+	viewport.ClipsDescendants = false
+	-- FLAT, SHADOWLESS LIGHTING (operator-directed 2026-08-13).
+	--
+	-- REPORTED: "some of its face ahve a dark shade on them like shadow -need
+	-- this to be like shadowless for all faces for all dice".
+	--
+	-- The cause was here, not in the geometry. `Ambient` sat at RGB 80 with a
+	-- directional light from (-1,-1,-1), so any face angled away from that one
+	-- corner received only the dim ambient term and rendered noticeably darker
+	-- than its neighbours. On a tumbling die that reads as faces flickering
+	-- between shades, and on the flat D2 lens it made one whole side look muddy.
+	--
+	-- FULL WHITE AMBIENT with the directional contribution set to black gives
+	-- every face the same illumination regardless of orientation -- a flat-shaded
+	-- look that suits the low-poly dice, and one where a numeral is equally
+	-- legible whichever way the die lands. `LightDirection` is left pointing
+	-- somewhere valid rather than at the zero vector, which is not a meaningful
+	-- direction; with LightColor black it contributes nothing either way.
+	viewport.Ambient = Color3.fromRGB(255, 255, 255)
+	viewport.LightColor = Color3.fromRGB(0, 0, 0)
+	viewport.LightDirection = Vector3.new(0, -1, 0)
 	viewport.ZIndex = 2
 	viewport.Parent = body
 	
@@ -704,15 +726,15 @@ local function beginRoll(faces: { any }, payout: number): ()
 		return
 	end
 
-	-- A bigger payout buys a longer, fuller tumble. Carried over from the 3D
-	-- renderer: the reward for a good roll should be a better THROW, never extra
-	-- stillness.
+	-- A bigger payout buys a longer, fuller tumble.
 	local magnitude = 0
 	if type(payout) == "number" and isFinite(payout) and payout > 0 then
 		magnitude = math.clamp(math.log(1 + payout) / math.log(1 + 1e6), 0, 1)
 	end
 	local duration = MIN_DURATION + (MAX_DURATION - MIN_DURATION) * magnitude
 	local bonusTurns = math.floor(SPIN_TURNS_PAYOUT_BONUS * magnitude + 0.5)
+
+	local rollSummaryData: { { shape: string, value: number } } = {}
 
 	for i = 1, count do
 		local slot = slots[i]
@@ -725,9 +747,6 @@ local function beginRoll(faces: { any }, payout: number): ()
 		applyConfig(slot.visual, shapeId, readFaces(config))
 		applyScale(slot.visual, count)
 
-		-- The server's chosen face. A malformed index is substituted, never
-		-- rejected: the payout is already credited and refusing to animate would
-		-- only hide a result the player has been paid for.
 		local target = faces[i]
 		local faceIndex = 1
 		if type(target) == "number" and isFinite(target) and target >= 1 then
@@ -735,6 +754,11 @@ local function beginRoll(faces: { any }, payout: number): ()
 		end
 		faceIndex = math.clamp(faceIndex, 1, math.max(1, slot.visual.faceCount))
 		slot.faceIndex = faceIndex
+
+		table.insert(rollSummaryData, {
+			shape = shapeId or "D6",
+			value = faceIndex,
+		})
 
 		slot.spinTotal = (
 			rng:NextInteger(SPIN_TURNS_MIN, SPIN_TURNS_MAX)
@@ -780,10 +804,12 @@ local function beginRoll(faces: { any }, payout: number): ()
 			slot.heavyLean = 0
 		end
 
-		-- FR-1.4: the resting place comes from BoardView, which is the only
-		-- thing that knows where "inside" is, and is clamped by the die's own
-		-- true extent -- diagonal included -- before it is ever used.
-		slot.endPos = BoardView.getAnchor(i, count, slot.visual.extent)
+		-- Dynamic 100% random un-fixed organic scatter target for every roll
+		local baseAnchor = BoardView.getAnchor(i, count, slot.visual.extent)
+		local randomScatterX = (math.random() - 0.5) * 0.40
+		local randomScatterY = (math.random() - 0.5) * 0.30
+		local rawScatterPos = baseAnchor + UDim2.fromScale(randomScatterX, randomScatterY)
+		slot.endPos = BoardView.clampToBoard(rawScatterPos, slot.visual.extent)
 		slot.startPos = BoardView.getSpawnPoint(i, count)
 
 		slot.elapsed = 0
@@ -795,15 +821,14 @@ local function beginRoll(faces: { any }, payout: number): ()
 			slot.visual.tile.Parent = BoardView.getContainer()
 		end
 
-		-- Place it at the start immediately, so a die that appears this frame
-		-- appears at the top of the board rather than at its slot for one frame.
-		-- This is the a == 0 pose: a full multi-turn rotation AWAY from the
-		-- answer, never the answer itself.
+		-- Place it at the start immediately
 		slot.visual.tile.Visible = true
 		slot.visual.tile.Position = slot.startPos
 		slot.visual.tile.Rotation = math.deg(slot.spinTotal * slot.spinDir)
 		showFace(slot.visual, faceIndex)
 	end
+
+	BoardView.updateResultSummary(rollSummaryData)
 end
 
 --------------------------------------------------------------------------------
@@ -824,28 +849,7 @@ local function step(_delta: number): ()
 		cam.CFrame = CFrame.new(0, 10000, 0) * CFrame.Angles(math.rad(-90), 0, 0)
 	end
 	
-	local bgPart = workspace:FindFirstChild("DiceBackground")
-	if not bgPart then
-		bgPart = Instance.new("Part")
-		bgPart.Name = "DiceBackground"
-		bgPart.Size = Vector3.new(600, 600, 1)
-		bgPart.Anchored = true
-		bgPart.CanCollide = false
-		bgPart.Color = UITheme.Colors.BaseCream
-		bgPart.Material = Enum.Material.SmoothPlastic
-		
-		local light = Instance.new("SurfaceLight")
-		light.Face = Enum.NormalId.Back
-		light.Brightness = 2
-		light.Range = 600
-		light.Color = Color3.fromRGB(255, 255, 255)
-		light.Parent = bgPart
-		
-		bgPart.Parent = workspace
-	end
-	if cam then
-		bgPart.CFrame = cam.CFrame * CFrame.new(0, 0, -200)
-	end
+
 
 	for i = 1, MAX_DICE do
 		local slot = slots[i]
@@ -861,47 +865,50 @@ local function step(_delta: number): ()
 			a = math.clamp(slot.elapsed / math.max(slot.duration, 1e-3), 0, 1)
 		end
 		
-		-- Custom ease out for a snappy landing
+		-- Custom ease out for a snappy landing trajectory
 		local eased = 1 - (1 - a) * (1 - a) * (1 - a)
 
-		-- Dynamic fly-in from the bottom of the screen
-		local startY = 1.5 -- Off-screen bottom
-		local targetY = slot.endPos.Y.Scale
-		local targetX = slot.endPos.X.Scale
-		
-		-- Add a slight arc/bounce to the path
-		local arcY = math.sin(a * math.pi) * 0.3
-		
-		local y = startY + (targetY - startY) * eased - arcY
-		local x = slot.startPos.X.Scale + (targetX - slot.startPos.X.Scale) * eased + slot.drift * (1 - eased)
-
-		slot.visual.tile.Position = UDim2.fromScale(x, y)
-
-		-- Residual spin (tumble) - extremely wild at start, settling to 0
-		local residual = slot.spinTotal * (1 - eased) * 2.0
-		local lean = slot.heavyLean * math.sin(a * math.pi) * eased
+		-- Smooth 2D trajectory path from throw spawn point to landed felt scatter location
+		local currentX = slot.startPos.X.Scale + (slot.endPos.X.Scale - slot.startPos.X.Scale) * eased
+		local currentY = slot.startPos.Y.Scale + (slot.endPos.Y.Scale - slot.startPos.Y.Scale) * eased
+		slot.visual.tile.Position = UDim2.fromScale(currentX, currentY)
 
 		local model = slot.visual.model
 		if model ~= nil then
-			-- Tumble wildly along a random axis, settling on the final face
-			local spin = CFrame.fromAxisAngle(slot.spinAxis, residual * slot.spinDir)
-			local tip = CFrame.fromAxisAngle(Vector3.new(0, 0, 1), lean)
+			-- OPTION 1: 3D Parabolic Gravity Drop & Multi-Bounce Physics
+			-- Height drop calculation with 2 dampening bounces (e = 0.35)
+			local heightOffset = 0
+			if a < 0.5 then
+				local fallT = a / 0.5
+				heightOffset = 3.0 * (1 - fallT^2)
+			elseif a < 0.8 then
+				local b1 = (a - 0.5) / 0.3
+				heightOffset = 0.6 * math.sin(b1 * math.pi)
+			elseif a < 1.0 then
+				local b2 = (a - 0.8) / 0.2
+				heightOffset = 0.15 * math.sin(b2 * math.pi)
+			end
+
+			-- Residual 3D Pitch, Yaw, and Roll spin decay
+			local rotDecay = (1 - eased)^1.8
+			local spin = CFrame.fromAxisAngle(slot.spinAxis, rotDecay * slot.spinTotal * slot.spinDir * 2)
+			local lean = CFrame.fromAxisAngle(Vector3.new(0, 0, 1), slot.heavyLean * math.sin(a * math.pi) * eased)
 			
 			local restTilt = CFrame.Angles(math.rad(-20), math.rad(25), math.rad(10))
-			local finalRot = slot.finalRot * spin * tip * restTilt
+			local finalRot = slot.finalRot * spin * lean * restTilt
 
-			local targetSize = slot.visual.modelRadius * 2 * CAMERA_FILL
-			local distance = targetSize / (2 * math.tan(math.rad(CAMERA_FOV) * 0.5))			
-			local popDist = math.sin(a * math.pi) * (distance * 0.35)
+			local distance = math.max(12, slot.visual.modelRadius * 3.4)	
 			
 			local cam = slot.visual.tile:FindFirstChild("Viewport", true).CurrentCamera
 			if cam then
-				cam.CFrame = finalRot * CFrame.new(0, 0, distance - popDist)
+				-- Camera positions relative to the falling 3D die height offset
+				cam.CFrame = CFrame.new(0, heightOffset * 0.2, distance) * finalRot:Inverse()
 			end
 			
 			slot.visual.tile.Rotation = 0
 		else
-			slot.visual.tile.Rotation = math.deg(residual * slot.spinDir + lean)
+			local residual = slot.spinTotal * (1 - eased) * 2.0
+			slot.visual.tile.Rotation = math.deg(residual * slot.spinDir)
 		end
 
 		if a >= 1 then
@@ -914,8 +921,7 @@ local function step(_delta: number): ()
 			
 			local restTilt = CFrame.Angles(math.rad(-20), math.rad(25), math.rad(10))
 			local finalRot = slot.finalRot * restTilt
-			local targetSize = slot.visual.modelRadius * 2 * CAMERA_FILL
-			local distance = targetSize / (2 * math.tan(math.rad(CAMERA_FOV) * 0.5))
+			local distance = math.max(12, slot.visual.modelRadius * 3.4)
 			
 			local cam = slot.visual.tile:FindFirstChild("Viewport", true).CurrentCamera
 			if cam then

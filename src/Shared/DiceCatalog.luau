@@ -327,8 +327,37 @@ function DiceCatalog.ascensionDiamonds(lifetimeCash: number): number
 end
 
 -- DIE SLOTS (FR-1.1: one to seven dice).
+--
+-- 7 is the ABSOLUTE ceiling and is a hard engineering bound, not a balance
+-- knob: `BoardView` holds precomputed layouts for exactly 1..7 dice and
+-- `DiceRenderer` pools 7 visuals. Raising this without adding layouts produces
+-- dice stacked on top of each other, so the three must move together.
 DiceCatalog.MAX_DIE_SLOTS = 7
 DiceCatalog.SLOT_BASE_COST = 1000
+
+-- Slots available before the first ascension.
+DiceCatalog.BASE_DIE_SLOT_CAP = 3
+
+-- THE CEILING RISES WITH PRESTIGE (operator decision, 2026-08-13).
+--
+-- Cash still buys each individual slot; what ascending raises is how many a
+-- player may own at all. Before this the cap was a flat 7 for everyone, so the
+-- entire slot progression was spent within the first run and prestige had one
+-- less thing to give back.
+--
+--   ascensions 0 -> 3 slots      ascensions 3 -> 6 slots
+--   ascensions 1 -> 4 slots      ascensions 4+ -> 7 slots (hard max)
+--   ascensions 2 -> 5 slots
+--
+-- Clamped at BOTH ends. The lower clamp matters because an existing player may
+-- already own more slots than their ascension count now permits -- see
+-- `AddDieSlot`, which refuses new purchases without ever confiscating.
+function DiceCatalog.dieSlotCapFor(ascensions: number): number
+	local a = if type(ascensions) == "number" and ascensions == ascensions
+		then math.max(0, math.floor(ascensions))
+		else 0
+	return math.clamp(DiceCatalog.BASE_DIE_SLOT_CAP + a, 1, DiceCatalog.MAX_DIE_SLOTS)
+end
 
 -- Cash cost of buying the NEXT slot, given how many the player owns now.
 --
@@ -340,13 +369,19 @@ DiceCatalog.SLOT_BASE_COST = 1000
 --
 -- Doubling per slot: the second die is a cheap, obvious upgrade and the seventh
 -- is a genuine goal. Value unchanged in the move -- 1000 * 2^(owned-1).
-function DiceCatalog.dieSlotCost(ownedSlots: number): number?
+-- `ascensions` gates the CAP. Optional so existing callers that only know the
+-- owned count still price correctly against the absolute maximum; the server
+-- and the SLOTS panel both pass it, so both agree on when to stop.
+function DiceCatalog.dieSlotCost(ownedSlots: number, ascensions: number?): number?
 	if type(ownedSlots) ~= "number" or ownedSlots ~= ownedSlots then
 		return nil
 	end
 	local owned = math.floor(ownedSlots)
-	if owned < 1 or owned >= DiceCatalog.MAX_DIE_SLOTS then
-		return nil -- already at the cap; there is no next slot to price
+	local cap = if ascensions ~= nil
+		then DiceCatalog.dieSlotCapFor(ascensions)
+		else DiceCatalog.MAX_DIE_SLOTS
+	if owned < 1 or owned >= cap then
+		return nil -- at the current cap; there is no next slot to price
 	end
 	return DiceCatalog.SLOT_BASE_COST * (2 ^ (owned - 1))
 end

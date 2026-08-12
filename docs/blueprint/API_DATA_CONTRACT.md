@@ -73,12 +73,24 @@ Every inbound handler runs, in this order: **rate limit → arity → type → f
 
 | Remote | Sustained | Burst |
 |---|---|---|
-| `Roll` | server-known auto-roll tier, max 5/s | 10 |
+| `Roll` (manual, via the remote) | 2.5/s | 5 |
+| `Roll` (server-driven auto-roll) | server-known auto-roll tier, max 5/s | n/a |
 | `Forge`, `SetElement`, `SetShape` | 4/s | 8 |
 | `BuyUpgrade`, `BuyDiamondNode`, `AddDieSlot` | 4/s | 8 |
 | `GetLeaderboard` | 0.5/s | 2 |
 | `RedeemCode` | 0.2/s | 3 |
 | all others | 2/s | 5 |
+
+**Amended 2026-08-13 — manual rolling is slower than auto-roll.** The `Roll`
+bucket was a flat 5/s, identical to the FR-2.4 auto-roll ceiling. Two
+consequences, both reported from play: holding the button spammed the server as
+fast as the input could fire, and the Auto-Roll **gamepass bought nothing** —
+a paying player got the same rate as someone tapping. Manual invocation is now
+capped at 2.5/s so auto-roll retains a real 2x advantage. The auto-roll loop is
+server-driven and does not pass through the remote, so its own ceiling is
+unchanged. The client shows a cooldown sweep on the ROLL button; that is
+**presentation only** and an exploiter's client will not run it — the bucket
+above is the enforcement.
 
 Over-budget requests are dropped and counted. Sustained abuse is logged. **Never auto-kick** — lag produces false positives (threat T-4).
 

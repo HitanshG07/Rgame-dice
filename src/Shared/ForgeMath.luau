@@ -227,23 +227,83 @@ end
 -- restating it, because it already drifted once.
 ForgeMath.VOID_FLOOR_FACTOR = 1.5
 
--- Is this face a Void? Lightest AND at or near the mass floor (SRS FR-5.2).
+-- RELATIVE VOID THRESHOLD (operator decision, 2026-08-13). A face is also a Void
+-- when it holds less than this fraction of the die's AVERAGE face mass.
 --
--- Both halves matter. Without the proximity test an UN-FORGED flat die has its
--- face 1 treated as a Void, so a new player breaks their streak 1-in-n rolls
--- with no way to avoid it. Without the lightest test every face on a heavily
--- stripped die would count.
+-- WHY THIS WAS ADDED. The absolute rule alone made Voids unreachable in normal
+-- play: the floor is 1, so a face had to sit at or under 1.5 mass to count, and
+-- the starting D2 carries 30 on each face. The operator reported never seeing a
+-- Void at all, and they were right -- the mechanic existed, was correct, and was
+-- invisible for the entire early game. The Void is the whole downside half of
+-- the inverted-mass design; a player who never sees one has not been shown the
+-- trade the game is built on.
+--
+-- 0.35 CHOSEN BY MEASUREMENT, not by feel. A flat die sits at exactly 1.0 of its
+-- own average at every face count, so any factor below 1.0 preserves the clause
+-- that an un-forged die can never void. The question was where between 0 and 1
+-- the line belongs, and the cases separate cleanly:
+--
+--   lightest / average     distribution              should void?
+--   ------------------     --------------------      ------------
+--   1.000                  any flat die              NO
+--   0.800                  D6  20 / 8x5              NO  (mild shaping)
+--   0.667                  D2  40 / 20               NO  (mild shaping)
+--   ---------------------- 0.35 threshold ----------------------
+--   0.333                  D2  50 / 10               yes
+--   0.200                  D6  500 / 20x5            yes (big budget!)
+--   0.167                  D2  55 / 5                yes
+--   0.100                  D6  55 / 1x5              yes
+--
+-- Everything that should void is at or under 0.333; everything that should not
+-- is at or above 0.667. 0.35 sits in the empty band between them with room on
+-- both sides, so the rule is not balanced on a knife edge.
+--
+-- A FIRST PASS AT 0.15 WAS TOO TIGHT and is worth recording: it left `D2 55/5`
+-- safe -- a player had starved a face to a fifth of the average and still saw no
+-- Void -- and it called a 20-mass face safe beside a 500-mass sibling. The
+-- relative test only earns its place if it scales with the budget, which is
+-- exactly the case an absolute floor cannot see.
+ForgeMath.VOID_RELATIVE_FACTOR = 0.35
+
+-- Is this face a Void? Lightest AND either near the absolute floor or far below
+-- the die's own average (SRS FR-5.2).
+--
+-- THE LIGHTEST TEST still gates everything: without it, every stripped face on a
+-- heavily concentrated die would count, and a die would void on most throws.
+--
+-- THE TWO THRESHOLDS answer different questions and both are kept. The absolute
+-- one catches a face scraped to the floor on a small budget; the relative one
+-- catches a face that is negligible RELATIVE to where the mass actually went,
+-- which is what a player experiences as "I starved that face". A die with a
+-- large budget can have a face at 20 mass that is still nothing next to a
+-- 500-mass sibling -- absolute alone would call that safe.
 function ForgeMath.isVoidFace(mass: Distribution, faceIndex: number, massFloor: number): boolean
+	local count = #mass
+	if count == 0 then
+		return false
+	end
+
 	local lightest = 1
-	for i = 2, #mass do
-		if mass[i] < mass[lightest] then
+	local total = 0.0
+	for i = 1, count do
+		total += mass[i]
+		if i > 1 and mass[i] < mass[lightest] then
 			lightest = i
 		end
 	end
 	if faceIndex ~= lightest then
 		return false
 	end
-	return mass[lightest] <= massFloor * ForgeMath.VOID_FLOOR_FACTOR
+
+	if mass[lightest] <= massFloor * ForgeMath.VOID_FLOOR_FACTOR then
+		return true
+	end
+
+	local average = total / count
+	if average <= 0 then
+		return false
+	end
+	return mass[lightest] < average * ForgeMath.VOID_RELATIVE_FACTOR
 end
 
 -- P(this die lands a Void this throw).

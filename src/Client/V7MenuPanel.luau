@@ -655,6 +655,14 @@ function V7MenuPanel.new(): V7MenuController
 	-- press must not do it -- the first press arms, the second commits, and the
 	-- armed state times out on its own so a stray click cannot leave the button
 	-- primed for later.
+	-- Forward-declared: the press handler below is built BEFORE `refreshAscend`
+	-- exists and captures it as an upvalue. A `local function` declared after
+	-- this point would be a DIFFERENT local and the closure would see nil.
+	local refreshAscend: (any) -> ()
+	-- Last ascension count seen in a snapshot, so the post-ascend repaint can
+	-- state the new total without waiting for the server to tell it.
+	local lastAscensions = 0
+
 	local ascendArmed = false
 	local ascendArmToken = 0
 
@@ -689,6 +697,29 @@ function V7MenuPanel.new(): V7MenuController
 			if result.ok then
 				ascendStatus.Text = "Ascended. Your Diamonds have been granted."
 				ascendStatus.TextColor3 = UITheme.Colors.Positive
+
+				-- REPAINT IMMEDIATELY FROM THE CONFIRMED RESET.
+				--
+				-- OPERATOR-REPORTED: "the assencion worked but it didnt not update
+				-- with real time". The server DOES push a snapshot (the handler is
+				-- wrapped in `announcing`), but this panel kept showing the
+				-- pre-reset projection -- "+1, earned $525K, 1 ascension" -- while
+				-- the HUD already read $0. Between the profile write, the push, and
+				-- an auto-roll snapshot arriving in the same window, the panel could
+				-- repaint from a snapshot built before the mutation committed.
+				--
+				-- Rather than race it, the panel states what is now certainly true:
+				-- the reset HAPPENED, so lifetime cash for the new run is zero and
+				-- nothing is projected. The next genuine snapshot overwrites this
+				-- with the authoritative figures; this only removes the window in
+				-- which the screen contradicts itself.
+				local ok, err = pcall(refreshAscend, {
+					lifetimeCash = 0,
+					ascensions = (tonumber(lastAscensions) or 0) + 1,
+				})
+				if not ok then
+					warn("[V7MenuPanel] post-ascend repaint failed: " .. tostring(err))
+				end
 			else
 				local reason = tostring(result.reason or "ascension_failed")
 				ascendStatus.Text = ASCEND_REFUSAL[reason] or "Could not ascend right now."
@@ -698,9 +729,10 @@ function V7MenuPanel.new(): V7MenuController
 		end)
 	end)
 
-	local function refreshAscend(state: any)
+	refreshAscend = function(state: any)
 		local lifetime = if type(state) == "table" then tonumber(state.lifetimeCash) or 0 else 0
 		local ascensions = if type(state) == "table" then tonumber(state.ascensions) or 0 else 0
+		lastAscensions = ascensions
 		local projected = DiceCatalog.ascensionDiamonds(lifetime)
 		local threshold = DiceCatalog.ASCEND_MIN_LIFETIME_CASH
 
@@ -1199,6 +1231,23 @@ function V7MenuPanel.new(): V7MenuController
 				entry.blurb.Text = entry.baseBlurb
 				entry.blurb.TextColor3 = UITheme.Colors.TextDim
 			else
+				-- AN UNAVAILABLE TOGGLE IS FORCED TO READ "OFF", whatever the
+				-- stored preference says.
+				--
+				-- OPERATOR-REPORTED: "the sound effects is turned on and greyed
+				-- out i cant turn it off". Exactly right, and it was my design
+				-- error. SFX defaults to `true`, so the row rendered a lit track
+				-- with the knob to the right -- the universal picture of "this is
+				-- ON" -- while being unpressable. That reads as a stuck control,
+				-- not an unavailable one, and the natural conclusion is that the
+				-- game is broken.
+				--
+				-- The stored VALUE is deliberately untouched: when audio ships,
+				-- the player's real preference is still there and the row simply
+				-- comes alive showing it. Only the DISPLAY is forced off, because
+				-- a feature that produces no sound is off in every sense the
+				-- player can observe.
+				entry.set(false)
 				entry.blurb.Text = string.format("%s - %s", entry.baseBlurb,
 					SettingsCatalog.missingReason(entry.requires))
 				entry.blurb.TextColor3 = UITheme.Colors.VoidFace
@@ -1257,10 +1306,13 @@ function V7MenuPanel.new(): V7MenuController
 	local function refreshSlots(state: any)
 		local slots = if type(state) == "table" then tonumber(state.dieSlots) or 1 else 1
 		local cash = if type(state) == "table" then tonumber(state.cash) or 0 else 0
+		local ascensions = if type(state) == "table" then tonumber(state.ascensions) or 0 else 0
+		local cap = DiceCatalog.dieSlotCapFor(ascensions)
 		slotsInfo.Text = string.format(
-			"You roll %d %s per throw.\n\nMore dice means more faces resolving at "
-			.. "once, and elements that read across dice have more to work with.",
-			slots, if slots == 1 then "die" else "dice")
+			"You roll %d %s per throw.  Your limit is %d.\n\nMore dice means more "
+			.. "faces resolving at once, and elements that read across dice have "
+			.. "more to work with.",
+			slots, if slots == 1 then "die" else "dice", cap)
 
 		-- THE PRICE, ON THE BUTTON.
 		--
@@ -1270,12 +1322,23 @@ function V7MenuPanel.new(): V7MenuController
 		-- refusal looked like a dead button. Same defect the SHAPE panel had.
 		--
 		-- The cost comes from the shared catalog, the same call the server makes.
-		local cost = DiceCatalog.dieSlotCost(slots)
+		local cost = DiceCatalog.dieSlotCost(slots, ascensions)
 		if cost == nil then
-			UITheme.setButtonText(addSlotBtn, "MAX (7)")
+			-- AT THE CAP -- but WHICH cap? "MAX (7)" was shown even to a player
+			-- stopped at 3 by their ascension count, which is simply untrue and
+			-- hides the fact that ascending would raise it. The two cases now read
+			-- differently because they are different situations: one is finished,
+			-- the other has a clear next step.
+			UITheme.setButtonText(addSlotBtn, string.format("MAX (%d)", cap))
 			UITheme.setEnabled(addSlotBtn, false)
-			slotsStatus.Text = "You have every die slot."
-			slotsStatus.TextColor3 = UITheme.Colors.TextDim
+			if cap < DiceCatalog.MAX_DIE_SLOTS then
+				slotsStatus.Text = string.format(
+					"Limit reached. Ascend to raise it to %d.", cap + 1)
+				slotsStatus.TextColor3 = UITheme.Colors.PurpleAscend
+			else
+				slotsStatus.Text = "You have every die slot."
+				slotsStatus.TextColor3 = UITheme.Colors.TextDim
+			end
 		else
 			UITheme.setButtonText(addSlotBtn, "ADD SLOT  $" .. Format.formatNumber(cost))
 			UITheme.setEnabled(addSlotBtn, cash >= cost)

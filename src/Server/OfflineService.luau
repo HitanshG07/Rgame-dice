@@ -58,22 +58,76 @@ export type VaultStatus = {
 	accrualId: number,
 }
 
+-- THE FROZEN OFFLINE WINDOW, per player, in seconds. Captured once at join and
+-- never advanced while the session runs -- see `getStatus` for why.
+--
+-- Keyed by Player and cleared on leave, so a departed player holds no reference.
+local sessionElapsed: { [Player]: number } = {}
+
+-- Captures how long the player was away, ONCE, at the moment they join.
+--
+-- Called by the bootstrap immediately after the profile loads and BEFORE the
+-- first snapshot is pushed, so the very first vault figure the client sees is
+-- already the frozen one.
+function OfflineService.beginSession(player: Player): ()
+	local data = PlayerProfile.get(player)
+	if not data then
+		return
+	end
+
+	local lastSeen = data.Vault.LastSeen
+	local elapsed = 0
+	if lastSeen > 0 then
+		elapsed = os.time() - lastSeen
+		if elapsed < 0 then
+			-- Clock skew, or a profile written by a server whose clock ran ahead.
+			-- Zero rather than a negative window; never a windfall.
+			warn(string.format("[OfflineService] negative elapsed time (%d s) for UserId=%d -- clock skew protection",
+				elapsed, player.UserId))
+			elapsed = 0
+		end
+	end
+	sessionElapsed[player] = elapsed
+end
+
 function OfflineService.getStatus(player: Player): VaultStatus?
 	local data = PlayerProfile.get(player)
 	if not data then
 		return nil
 	end
 
-	local now = os.time()
-	local lastSeen = data.Vault.LastSeen
-	local elapsed = 0
-
-	if lastSeen > 0 then
-		elapsed = now - lastSeen
-		if elapsed < 0 then
-			warn(string.format("[OfflineService] negative elapsed time (%d s) for UserId=%d -- clock skew protection",
-				elapsed, player.UserId))
-			elapsed = 0
+	-- THE VAULT IS FROZEN FOR THE DURATION OF THE SESSION.
+	--
+	-- OPERATOR-REPORTED: the vault filled while the player sat in the game. It
+	-- measured `os.time() - LastSeen`, and `LastSeen` was only ever written on
+	-- LEAVE and on CLAIM -- never on join -- so every second spent playing was
+	-- counted as time spent away. Free income that scaled with session length,
+	-- compounded with capacity upgrades, and removed any reason to log off.
+	--
+	-- WHY FREEZE RATHER THAN STAMP `LastSeen` ON JOIN. Stamping on join is the
+	-- obvious fix and it is wrong: it zeroes the accrual the player just came
+	-- back to collect. The offline earnings have to survive until claimed, but
+	-- must not GROW while the player is online.
+	--
+	-- So the elapsed window is captured ONCE, by `beginSession`, and read from
+	-- here for the rest of the session. Absent (never joined through the normal
+	-- path) falls back to the live clock, which preserves the old behaviour for
+	-- the unit suite's direct callers rather than silently reporting zero.
+	local frozen = sessionElapsed[player]
+	local elapsed: number
+	if frozen ~= nil then
+		elapsed = frozen
+	else
+		local now = os.time()
+		local lastSeen = data.Vault.LastSeen
+		elapsed = 0
+		if lastSeen > 0 then
+			elapsed = now - lastSeen
+			if elapsed < 0 then
+				warn(string.format("[OfflineService] negative elapsed time (%d s) for UserId=%d -- clock skew protection",
+					elapsed, player.UserId))
+				elapsed = 0
+			end
 		end
 	end
 
@@ -129,6 +183,14 @@ function OfflineService.claimVault(player: Player, doubled: boolean): (boolean, 
 		return false, reason or "mutate_failed", 0
 	end
 
+	-- THE FROZEN WINDOW IS SPENT. Without this the claim would leave the same
+	-- elapsed time sitting in `sessionElapsed`, and the next `getStatus` would
+	-- report the vault as full again -- claimable repeatedly, for the whole
+	-- session, from one offline period. Zeroed rather than cleared: clearing
+	-- would fall back to the live-clock branch and start accruing while online,
+	-- which is the exact bug this freeze exists to prevent.
+	sessionElapsed[player] = 0
+
 	local credited, creditReason = EconomyService.credit(player, "Cash", payout, "vault_claim")
 	if not credited then
 		return false, creditReason or "credit_failed", 0
@@ -141,6 +203,9 @@ function OfflineService.onPlayerRemoving(player: Player): ()
 	PlayerProfile.mutate(player, function(d)
 		d.Vault.LastSeen = os.time()
 	end)
+	-- Released with the player. A Player key held after they leave keeps the
+	-- instance alive and leaks one entry per session on a long-running server.
+	sessionElapsed[player] = nil
 end
 
 return OfflineService

@@ -44,9 +44,24 @@ local function run(): (boolean, string?, number)
 	-- Configured limits match the data contract
 	----------------------------------------------------------------------------
 
+	-- MANUAL ROLLING IS SLOWER THAN AUTO-ROLL (operator decision, 2026-08-13;
+	-- API_DATA_CONTRACT §2.2 amended the same day).
+	--
+	-- This asserted 5/s burst 10, matching the FR-2.4 AUTO-ROLL ceiling. That
+	-- made the Auto-Roll gamepass worthless -- a tapping player got the paid
+	-- rate for free -- and let the button be spammed. The auto-roll loop is
+	-- server-driven and never passes through this bucket, so lowering the remote
+	-- does not slow auto-roll down.
 	local rollLimit = RateLimiter.limitFor("Roll")
-	e = e or check(rollLimit.burst == 10 and rollLimit.sustained == 5,
-		"Roll limit must be sustained=5 burst=10 per API_DATA_CONTRACT §2.2")
+	e = e or check(rollLimit.sustained == 2.5 and rollLimit.burst == 5,
+		"manual Roll must be sustained=2.5 burst=5 per API_DATA_CONTRACT §2.2")
+
+	-- THE RELATIONSHIP, not just the number. The point of the change is that
+	-- manual is strictly slower than the paid auto ceiling; asserting only the
+	-- literal would let a future edit raise it back to parity and stay green.
+	e = e or check(rollLimit.sustained < 5,
+		"manual Roll must stay BELOW the 5/s auto-roll ceiling, or the Auto-Roll"
+		.. " gamepass confers no advantage")
 
 	local forgeLimit = RateLimiter.limitFor("Forge")
 	e = e or check(forgeLimit.burst == 8 and forgeLimit.sustained == 4,
@@ -61,18 +76,27 @@ local function run(): (boolean, string?, number)
 	-- Burst cap, and over-budget calls are dropped AND counted
 	----------------------------------------------------------------------------
 
+	-- DERIVED FROM THE CONFIGURED LIMIT, not hardcoded. These asserted a literal
+	-- burst of 10 and sustained of 5, so lowering the manual roll rate broke
+	-- tests that were meant to prove the BUCKET WORKS, not what the number is.
+	-- The number itself is asserted once, above; everything here tests behaviour
+	-- and now survives a retune.
+	local burst = rollLimit.burst
+	local sustained = rollLimit.sustained
+
 	-- Anchored ahead of the real monotonic clock, so the hostile-clock cases
 	-- below (which fall back to os.clock()) see a BACKWARDS jump and therefore
 	-- no refill. A fixed literal would be behind os.clock() on a long-lived
 	-- server and the fallback would silently refill the bucket.
 	local t = os.clock() + 100000.0
-	for i = 1, 10 do
+	for i = 1, burst do
 		local ok = RateLimiter.consume(p1, "Roll", t)
 		e = e or check(ok, string.format("token %d should be granted within the burst cap", i))
 	end
 
 	local rejected = RateLimiter.consume(p1, "Roll", t)
-	e = e or check(not rejected, "the 11th token in the same instant must be rejected")
+	e = e or check(not rejected, string.format(
+		"token %d in the same instant must be rejected (burst is %d)", burst + 1, burst))
 	e = e or check(RateLimiter.rejectionCount(p1) == 1,
 		string.format("rejection count should be 1, got %d", RateLimiter.rejectionCount(p1)))
 
@@ -85,10 +109,13 @@ local function run(): (boolean, string?, number)
 	-- BUCKETS REFILL at the sustained rate
 	----------------------------------------------------------------------------
 
-	-- One second later, at sustained=5, five tokens are back -- no more, no less.
+	-- One second later exactly `sustained` tokens are back -- no more, no less.
+	-- `sustained` may be fractional (2.5), so the whole-token count available
+	-- after one second is its floor.
+	local refilled = math.floor(sustained)
 	local ok1 = RateLimiter.consume(p1, "Roll", t + 1.0)
 	e = e or check(ok1, "a token must be available one second after exhaustion (refill)")
-	for i = 2, 5 do
+	for i = 2, refilled do
 		local ok = RateLimiter.consume(p1, "Roll", t + 1.0)
 		e = e or check(ok, string.format("refilled token %d should be granted", i))
 	end
@@ -96,8 +123,8 @@ local function run(): (boolean, string?, number)
 	e = e or check(not overRefill,
 		"refill must grant exactly `sustained` tokens per second, not more")
 
-	-- Refill is CAPPED at burst: waiting an hour does not bank 18,000 tokens.
-	for i = 1, 10 do
+	-- Refill is CAPPED at burst: waiting an hour does not bank thousands.
+	for i = 1, burst do
 		local ok = RateLimiter.consume(p1, "Roll", t + 3600.0)
 		e = e or check(ok, string.format("token %d should be granted after a long idle", i))
 	end
@@ -130,7 +157,7 @@ local function run(): (boolean, string?, number)
 	-- The seam accepts an optional clock for testing. Non-finite values must be
 	-- ignored in favour of the real clock rather than being used to refill.
 	RateLimiter.clearPlayer(p2)
-	for _ = 1, 10 do
+	for _ = 1, burst do
 		RateLimiter.consume(p2, "Roll", t)
 	end
 	local nanAttempt = RateLimiter.consume(p2, "Roll", 0 / 0)

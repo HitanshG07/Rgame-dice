@@ -9,7 +9,20 @@ export type Limit = { sustained: number, burst: number }
 export type Bucket = { tokens: number, last: number }
 
 local LIMITS: { [string]: Limit } = {
-	Roll = { sustained = 5, burst = 10 },
+	-- MANUAL ROLLING IS SLOWER THAN AUTO-ROLL (operator decision, 2026-08-13).
+	--
+	-- This was 5/sec sustained with a burst of 10 -- the same ceiling FR-2.4
+	-- gives AUTO-ROLL, which is a paid gamepass. Two problems with that: holding
+	-- the button spammed the server as fast as an exploiter could, and the pass
+	-- bought nothing except not having to tap.
+	--
+	-- 2.5/sec sustained keeps ordinary play comfortable while leaving auto-roll a
+	-- real 2x advantage. The burst of 5 absorbs an impatient double-tap without
+	-- refusing a legitimate press.
+	--
+	-- THIS IS THE ENFORCEMENT. The client's cooldown is presentation only -- an
+	-- exploiter runs their own client and never sees it.
+	Roll = { sustained = 2.5, burst = 5 },
 	Forge = { sustained = 4, burst = 8 },
 	SetElement = { sustained = 4, burst = 8 },
 	SetShape = { sustained = 4, burst = 8 },

@@ -326,13 +326,23 @@ RemoteGateway.register("AddDieSlot", announcing(function(player: Player)
 	if not data then
 		return false, Remotes.Notice.ProfileUnavailable
 	end
-	if data.DieSlots >= DiceCatalog.MAX_DIE_SLOTS then
+	-- THE CAP RISES WITH ASCENSIONS (operator decision, 2026-08-13). A player at
+	-- zero ascensions tops out at 3 dice; each prestige adds one, to a hard
+	-- maximum of 7.
+	--
+	-- NEVER CONFISCATES. A player who already owns more slots than their current
+	-- ascension count permits -- which every existing profile does, since the cap
+	-- used to be a flat 7 -- keeps every die they have. This check only refuses
+	-- to sell them ANOTHER one. Taking a purchased slot away because a rule
+	-- changed underneath them would be the worst possible reading of this.
+	local slotCap = DiceCatalog.dieSlotCapFor(data.Ascensions)
+	if data.DieSlots >= slotCap then
 		return false, Remotes.Notice.InvalidRequest
 	end
 	-- Priced by the shared catalog, which is also what the SLOTS panel reads to
 	-- print the number on the button -- so the quoted price and the charged price
 	-- are the same expression, not two copies of it (L-025).
-	local cost = DiceCatalog.dieSlotCost(data.DieSlots)
+	local cost = DiceCatalog.dieSlotCost(data.DieSlots, data.Ascensions)
 	if cost == nil then
 		return false, Remotes.Notice.InvalidRequest
 	end
@@ -532,6 +542,13 @@ admitPlayer = function(player: Player)
 			StateSyncService.push(player)
 		end
 	end)
+
+	-- FREEZE THE OFFLINE WINDOW before anything can read the vault.
+	--
+	-- Must run BEFORE the first StateSync push, or the client's opening snapshot
+	-- carries a live-clock figure that then jumps when the freeze lands. It also
+	-- must run AFTER `PlayerProfile.load`, since it reads `Vault.LastSeen`.
+	OfflineService.beginSession(player)
 
 	RollService.beginSession(player)
 	-- Quests, chests and the login streak are all session- or day-scoped and
