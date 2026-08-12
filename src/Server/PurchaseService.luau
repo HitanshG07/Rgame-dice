@@ -43,6 +43,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Catalog = require(Shared:WaitForChild("MonetisationCatalog"))
+local DiceCatalog = require(Shared:WaitForChild("DiceCatalog"))
 local ForgeMath = require(Shared:WaitForChild("ForgeMath"))
 local PlayerProfile = require(script.Parent:WaitForChild("PlayerProfile"))
 local BoostService = require(script.Parent:WaitForChild("BoostService"))
@@ -132,8 +133,14 @@ local function applyGrant(player: Player, entry: Catalog.Entry): (boolean, strin
 			end
 			-- The Starter Bundle's die slot. Clamped to the ceiling FR-1.1 sets,
 			-- so a bundle can never push a player past seven dice.
+			--
+			-- THROUGH `grantDieSlots`, which also creates the DIE. This incremented
+			-- the counter alone, so a bundle raised `DieSlots` without adding
+			-- anything to `d.Dice` -- the player paid for a die that was never
+			-- built and the board drew fewer dice than the panel promised.
 			if entry.amount ~= nil and entry.amount > 0 then
-				data.DieSlots = math.min(7, data.DieSlots + entry.amount)
+				PlayerProfile.grantDieSlots(data, entry.amount,
+					DiceCatalog.MAX_DIE_SLOTS, DiceCatalog.newStartingDie)
 			end
 			-- FR-12.5: buying it closes the offer permanently. Latched true and
 			-- never cleared -- StateSync reads this to stop advertising it, and
@@ -356,13 +363,58 @@ function PurchaseService.cashMultiplier(player: Player): number
 	return 1
 end
 
--- Extra die slots owned. Applied on top of the profile's earned slots.
+-- Extra die slots the +2 Die Slots pass is worth.
+--
+-- READ-ONLY. This used to be added to `DieSlots` inside the SNAPSHOT, so the
+-- bonus existed only as a number on the client's screen: nothing persisted it
+-- and no dice were ever created for it. See `applyPassSlotGrant`, which turns
+-- the entitlement into real stored slots and real dice.
 function PurchaseService.bonusDieSlots(player: Player): number
 	local entry = Catalog.Passes.DieSlots2
 	if PurchaseService.ownsPass(player, "DieSlots2") and entry.amount ~= nil then
 		return entry.amount
 	end
 	return 0
+end
+
+-- MATERIALISES THE PASS BONUS into the profile, once.
+--
+-- The +2 Die Slots pass is a PERMANENT entitlement, so its slots have to exist
+-- in the saved profile like any other -- with dice to fill them. Adding the
+-- bonus at display time instead produced a player who was shown four slots and
+-- rolled two dice (operator-reported 2026-08-13, seen as the board drawing
+-- fewer dice than the panel promised, and as dice overlapping because the
+-- layout was computed for a count that did not match what was drawn).
+--
+-- IDEMPOTENT, and that is the whole difficulty. This runs on EVERY join, so it
+-- must not add two more slots each time. `PassSlotsGranted` records how much of
+-- the entitlement has already been materialised, and only the shortfall is
+-- granted -- so a rejoin is a no-op, and raising the pass's amount later tops
+-- a player up by the difference rather than re-granting the whole thing.
+function PurchaseService.applyPassSlotGrant(player: Player): ()
+	local owed = PurchaseService.bonusDieSlots(player)
+	if owed <= 0 then
+		return
+	end
+	PlayerProfile.mutate(player, function(data)
+		local already = tonumber(data.PassSlotsGranted) or 0
+		local shortfall = owed - already
+		if shortfall <= 0 then
+			return
+		end
+		-- Bounded by the ABSOLUTE ceiling, deliberately not by the player's
+		-- ascension cap. The ascension curve gates what Cash can BUY; a pass is
+		-- paid for with Robux and must not be silently withheld because the
+		-- player has not prestiged yet. The hard 7 still applies -- BoardView has
+		-- layouts for exactly that many.
+		local gained = PlayerProfile.grantDieSlots(data, shortfall,
+			DiceCatalog.MAX_DIE_SLOTS, DiceCatalog.newStartingDie)
+		-- Credited by what was ACTUALLY granted, not by what was owed. A player
+		-- already at the seven-slot ceiling gains nothing, and recording the full
+		-- entitlement anyway would permanently forfeit slots they could claim
+		-- later if the ceiling ever rose.
+		data.PassSlotsGranted = already + gained
+	end)
 end
 
 -- Multiplier on forge cost. Below 1.0 is a discount.
@@ -433,9 +485,20 @@ function PurchaseService.init(): ()
 
 			-- A pass that changes a persisted value must write it, not merely be
 			-- remembered in a cache that dies with the session.
+			--
+			-- THIS IS THE ONE THE OPERATOR HIT. It raised `DieSlots` by two and
+			-- never touched `d.Dice`, so a player who owned the +2 Die Slots pass
+			-- had `DieSlots = 4` and two actual dice: the SLOTS panel promised four,
+			-- the board drew two, and the layout was computed for a count that did
+			-- not match what was rendered -- which is the overlap that was reported.
+			--
+			-- `grantDieSlots` backfills from `#d.Dice`, so this ALSO repairs an
+			-- already-drifted profile the next time the pass resolves at join,
+			-- rather than leaving existing owners permanently short.
 			if entry.key == "DieSlots2" and entry.amount ~= nil then
 				PlayerProfile.mutate(player, function(data)
-					data.DieSlots = math.min(7, data.DieSlots + (entry.amount :: number))
+					PlayerProfile.grantDieSlots(data, entry.amount :: number,
+						DiceCatalog.MAX_DIE_SLOTS, DiceCatalog.newStartingDie)
 				end)
 			end
 

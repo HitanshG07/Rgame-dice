@@ -136,7 +136,6 @@ function StateSyncService.buildSnapshot(data: PlayerProfile.Profile, streak: num
 		settings[key] = enabled
 	end
 
-	local extraSlots = if player ~= nil then PurchaseService.bonusDieSlots(player) else 0
 
 	-- WHICH GAMEPASSES THE PLAYER OWNS (FR-12).
 	--
@@ -277,7 +276,19 @@ function StateSyncService.buildSnapshot(data: PlayerProfile.Profile, streak: num
 		highestRoll = data.HighestRoll,
 		ascensions = data.Ascensions,
 		totalRolls = data.TotalRolls,
-		dieSlots = math.min(7, data.DieSlots + extraSlots),
+		-- THE STORED VALUE, NOT A COMPUTED ONE.
+		--
+		-- This was `data.DieSlots + extraSlots`, adding the +2 Die Slots pass
+		-- bonus at DISPLAY time only. The bonus was never persisted and no dice
+		-- were ever created for it, so a pass owner was told they had four slots
+		-- while `d.Dice` held two: the SLOTS panel promised four, the board drew
+		-- two, and `BoardView` laid out for a count that did not match what was
+		-- rendered -- which is the overlap that was reported.
+		--
+		-- The pass is now granted for real at join (`PurchaseService.onPlayerAdded`
+		-- -> `applyPassSlotGrant`), which creates the dice as well, so the stored
+		-- count IS the truth and there is nothing left to add here.
+		dieSlots = data.DieSlots,
 	}
 end
 

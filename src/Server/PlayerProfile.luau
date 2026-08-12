@@ -56,6 +56,9 @@ export type Profile = {
 	LifetimeCash: number, HighestRoll: number, Ascensions: number, TotalRolls: number,
 	Dice: { Die },
 	DieSlots: number,
+	-- How much of the +2 Die Slots pass entitlement has already been turned into
+	-- real stored slots. Lets the grant run on every join without stacking.
+	PassSlotsGranted: number,
 	Diamond: {
 		StreakStrength: number, MassCeiling: number, SlotNodes: number,
 		Elements: { [string]: boolean }, Shapes: { [string]: boolean },
@@ -107,6 +110,7 @@ local TEMPLATE: Profile = {
 		},
 	},
 	DieSlots = 1,
+	PassSlotsGranted = 0,
 	Diamond = {
 		StreakStrength = 0, MassCeiling = 0, SlotNodes = 0,
 		Elements = { None = true },
@@ -143,6 +147,50 @@ local TEMPLATE: Profile = {
 	GroupClaimed = false,
 	Settings = { Particles = true, MotionBlur = true, Music = true, SFX = true },
 }
+
+-- GRANTS DIE SLOTS AND THE DICE TO FILL THEM, together.
+--
+-- THE DEFECT THIS EXISTS TO PREVENT (operator-reported 2026-08-13, as
+-- "the maximum number of slots shows 7 but in game its only 6" and dice
+-- overlapping on the board).
+--
+-- `DieSlots` is an entitlement COUNTER and `Dice` is the actual array. They are
+-- two representations of one fact, and three separate places wrote them:
+-- `AddDieSlot` incremented both, but the `+2 Die Slots` GAMEPASS and the
+-- Starter Bundle incremented only the counter. A player who bought the pass
+-- ended up with `DieSlots = 4` and two real dice.
+--
+-- Nothing errored. `DiceRenderer` correctly draws one tile per entry in
+-- `state.dice`, so the board showed fewer dice than the panel promised, and
+-- `BoardView` laid out for a count that did not match what was drawn -- which
+-- is the overlap. The player paid for dice they never received.
+--
+-- Callers must use this rather than touching `d.DieSlots` directly. Operates on
+-- profile DATA inside an existing mutation, so it composes with the atomic
+-- writes its callers already perform.
+function PlayerProfile.grantDieSlots(d: any, count: number, maxSlots: number, makeDie: () -> any?): number
+	if type(count) ~= "number" or count ~= count or count <= 0 then
+		return 0
+	end
+	local want = math.floor(count)
+	local before = d.DieSlots
+	d.DieSlots = math.min(maxSlots, d.DieSlots + want)
+	local gained = d.DieSlots - before
+
+	-- The dice themselves. `#d.Dice` rather than `gained` is the loop bound on
+	-- purpose: it repairs a profile that ALREADY drifted, so an existing player
+	-- who bought the pass gets their missing dice on the next grant rather than
+	-- staying permanently short.
+	for _ = #d.Dice + 1, d.DieSlots do
+		local die = makeDie()
+		if die == nil then
+			break
+		end
+		table.insert(d.Dice, die)
+	end
+
+	return gained
+end
 
 function PlayerProfile.getTemplate(): Profile
 	return TEMPLATE
@@ -213,6 +261,27 @@ function PlayerProfile._reconcile(raw: any): Profile
 	if type(data.Dice) ~= "table" or #data.Dice == 0 then
 		data.Dice = deepCopy(TEMPLATE.Dice)
 	end
+
+	-- SELF-REPAIR: `DieSlots` and `#Dice` must agree.
+	--
+	-- Two grant paths (the +2 Die Slots pass and the Starter Bundle) used to
+	-- raise the counter without creating the dice, so profiles exist RIGHT NOW
+	-- with `DieSlots = 4` and two dice. The writers are fixed, but a fix to the
+	-- writer does nothing for data already on disk -- the player would stay short
+	-- until they happened to buy another slot.
+	--
+	-- Repaired on the way IN, which is where every other schema drift in this
+	-- function is handled. Missing dice are created from the template's starting
+	-- die; the counter is never lowered to match a short array, because that
+	-- would silently confiscate a slot the player paid for.
+	if type(data.DieSlots) ~= "number" or data.DieSlots ~= data.DieSlots then
+		data.DieSlots = #data.Dice
+	end
+	data.DieSlots = math.clamp(math.floor(data.DieSlots), #data.Dice, 7)
+	for _ = #data.Dice + 1, data.DieSlots do
+		table.insert(data.Dice, deepCopy(TEMPLATE.Dice[1]))
+	end
+
 	-- Per-die defaults. NEITHER reconcile layer reaches here on its own:
 	-- ProfileStore's ReconcileTable only walks STRING keys, so it never
 	-- descends into an ARRAY like Dice, and the loop above only fills a

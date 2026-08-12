@@ -360,13 +360,14 @@ RemoteGateway.register("AddDieSlot", announcing(function(player: Player)
 	-- rungs up a ladder they were meant to climb, and a shape they very likely did
 	-- not own. Nothing refused it, because a die written straight into the profile
 	-- never passes through `SetShape`'s ownership check.
-	local fresh = DiceCatalog.newStartingDie()
-	if fresh == nil then
+	if DiceCatalog.newStartingDie() == nil then
 		return false, Remotes.Notice.ServerError
 	end
+	-- Through the shared helper, so all THREE grant paths -- this, the +2 Die
+	-- Slots pass and the Starter Bundle -- increment the counter and create the
+	-- die by the same code. Two of the three used to write the counter alone.
 	PlayerProfile.mutate(player, function(d)
-		d.DieSlots = math.min(7, d.DieSlots + 1)
-		table.insert(d.Dice, fresh :: any)
+		PlayerProfile.grantDieSlots(d, 1, slotCap, DiceCatalog.newStartingDie)
 	end)
 	return true, nil
 end))
@@ -536,6 +537,14 @@ admitPlayer = function(player: Player)
 	-- fail-closed direction.
 	task.spawn(function()
 		PurchaseService.onPlayerAdded(player)
+		-- MATERIALISE PASS-GRANTED SLOTS once ownership is known. The +2 Die
+		-- Slots bonus used to be added to the snapshot at display time only, so
+		-- it was never persisted and no dice were created for it -- the player
+		-- saw four slots and rolled two dice. Idempotent, so running it on every
+		-- join does not stack.
+		if PlayerProfile.isActive(player) then
+			PurchaseService.applyPassSlotGrant(player)
+		end
 		-- Re-push once entitlements are known, or the client would show the
 		-- pre-ownership snapshot until the next state change.
 		if PlayerProfile.isActive(player) then
