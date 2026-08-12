@@ -472,7 +472,11 @@ RemoteGateway.register("GetLeaderboard", function(player: Player, boardId: strin
 		return nil, nil
 	end
 	local entries = LeaderboardService.getBoard(boardId)
-	return entries, 1
+	-- The player's REAL rank, or nil when they are not on the board. This
+	-- returned a hardcoded `1` -- every player was told they were first in the
+	-- world, which is a fabricated score and exactly the kind of invented figure
+	-- the client must never be handed.
+	return entries, LeaderboardService.getPlayerRank(player, boardId)
 end)
 
 ForgeService.registerHandlers(announcing)

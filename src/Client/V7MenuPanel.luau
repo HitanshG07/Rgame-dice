@@ -26,6 +26,11 @@ export type V7MenuController = {
 	-- opened but had no method by which state could ever reach them.
 	applyState: (self: V7MenuController, state: any) -> (),
 	shopRefresh: ((any) -> ())?,
+	-- Boards are fetched on open rather than pushed, so this takes a BOARD ID
+	-- rather than a snapshot.
+	boardsRefresh: ((string) -> ())?,
+	activeBoard: string?,
+	ascendRefresh: ((any) -> ())?,
 	shapeRefresh: ((any) -> ())?,
 	questRefresh: ((any) -> ())?,
 	vaultRefresh: ((any) -> ())?,
@@ -42,6 +47,10 @@ function V7MenuPanel.new(): V7MenuController
 	local playerGui = player:WaitForChild("PlayerGui")
 
 	local overlays: { [string]: Frame } = {}
+
+	-- Forward-declared so closures built during construction can reach the
+	-- finished controller. Assigned at the end of `new`.
+	local controller: any = nil
 
 	local screenGui = Instance.new("ScreenGui")
 	screenGui.Name = "V7MenuGui"
@@ -142,8 +151,7 @@ function V7MenuPanel.new(): V7MenuController
 			end
 		end
 
-		buyBtn.MouseButton1Click:Connect(promptPurchase)
-		buyBtn.Activated:Connect(promptPurchase)
+		UITheme.onPressed(buyBtn, promptPurchase)
 
 		if isPass then
 			passCards[entry.key] = { button = buyBtn, blurb = blurbLbl, baseBlurb = entry.blurb }
@@ -255,7 +263,7 @@ function V7MenuPanel.new(): V7MenuController
 			btnContainer.Name = "Action"
 			btnContainer.Parent = card
 
-			btn.Activated:Connect(function()
+			UITheme.onPressed(btn, function()
 				local entry = shapeCards[shapeId]
 				local owned = entry and entry.owned
 				UITheme.setEnabled(btn, false)
@@ -368,34 +376,357 @@ function V7MenuPanel.new(): V7MenuController
 	boardsOverlay.Parent = screenGui
 	overlays["boards"] = boardsOverlay
 
-	local lbCard = UITheme.panel(UDim2.fromScale(0.96, 0.9), UDim2.fromScale(0.02, 0.05))
-	lbCard.Parent = boardsBody
-	local lbTxt = Instance.new("TextLabel")
-	lbTxt.Size = UDim2.fromScale(0.9, 0.8)
-	lbTxt.Position = UDim2.fromScale(0.05, 0.1)
-	lbTxt.BackgroundTransparency = 1
-	lbTxt.Font = UITheme.FontHeading
-	lbTxt.Text = "RANK #1: @DiceKing_99 — $4.92E+28\nRANK #2: @ArcaneRoller — $1.18E+26\nRANK #3: @MythicMaster — $8.45E+24\n\nYOUR RANK: #142 (HitanshG07) — $1.84E+12"
-	lbTxt.TextColor3 = UITheme.Colors.TextGold
-	lbTxt.TextScaled = true
-	lbTxt.Parent = lbCard
+	-- THE BOARD WAS ENTIRELY FABRICATED.
+	--
+	-- It read `RANK #1: @DiceKing_99 - $4.92E+28` and named the operator at rank
+	-- #142, all hardcoded, all invented. `GetLeaderboard` existed server-side and
+	-- returned real DataStore-backed entries; nothing on the client ever called
+	-- it. Three fake usernames and four fake scores, permanently on screen.
+	--
+	-- THREE BOARDS, because the server keeps three (FR-11) and only one of them
+	-- was ever hinted at. Tabs rather than one merged list: they measure
+	-- different things and a combined ranking would be meaningless.
+	local BOARD_TABS: { { id: string, label: string, prefix: string } } = {
+		{ id = "NetWorth", label = "NET WORTH", prefix = "$" },
+		{ id = "HighestRoll", label = "BEST ROLL", prefix = "$" },
+		{ id = "Ascensions", label = "ASCENSIONS", prefix = "" },
+	}
+	local activeBoard = "NetWorth"
+
+	local boardTabRow = Instance.new("Frame")
+	boardTabRow.Name = "BoardTabs"
+	boardTabRow.Size = UDim2.fromScale(0.96, 0.08)
+	boardTabRow.Position = UDim2.fromScale(0.02, 0.01)
+	boardTabRow.BackgroundTransparency = 1
+	boardTabRow.Parent = boardsBody
+
+	local boardTabLayout = Instance.new("UIListLayout")
+	boardTabLayout.FillDirection = Enum.FillDirection.Horizontal
+	boardTabLayout.Padding = UDim.new(0.02, 0)
+	boardTabLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	boardTabLayout.Parent = boardTabRow
+
+	local boardRowsHolder = Instance.new("Frame")
+	boardRowsHolder.Name = "Rows"
+	boardRowsHolder.Size = UDim2.fromScale(0.96, 0.72)
+	boardRowsHolder.Position = UDim2.fromScale(0.02, 0.11)
+	boardRowsHolder.BackgroundTransparency = 1
+	boardRowsHolder.Parent = boardsBody
+
+	local boardRowsLayout = Instance.new("UIListLayout")
+	boardRowsLayout.Padding = UDim.new(0, 4)
+	boardRowsLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	boardRowsLayout.Parent = boardRowsHolder
+
+	local boardStatus = UITheme.label("Loading...", UDim2.fromScale(0.96, 0.06),
+		UDim2.fromScale(0.02, 0.85), UITheme.Colors.TextDim)
+	boardStatus.Name = "BoardStatus"
+	boardStatus.TextScaled = true
+	boardStatus.Parent = boardsBody
+
+	-- A fixed pool of rows, refilled rather than rebuilt. The board holds at most
+	-- 50 entries and rebuilding Instances on every refresh would churn the whole
+	-- list every time a tab is pressed.
+	local BOARD_ROW_COUNT = 12
+	local boardRows: { any } = {}
+	for i = 1, BOARD_ROW_COUNT do
+		local row = UITheme.panel(UDim2.fromScale(1, 0), UDim2.fromScale(0, 0))
+		row.Name = "BoardRow" .. tostring(i)
+		row.Size = UDim2.new(1, 0, 0, 34)
+		row.LayoutOrder = i
+		row.Visible = false
+		row.Parent = boardRowsHolder
+
+		local rankLbl = UITheme.label("", UDim2.fromScale(0.12, 0.7), UDim2.fromScale(0.02, 0.15),
+			UITheme.Colors.TextGold)
+		rankLbl.Name = "Rank"
+		rankLbl.TextScaled = true
+		rankLbl.Parent = row
+
+		local nameLbl = UITheme.label("", UDim2.fromScale(0.5, 0.7), UDim2.fromScale(0.16, 0.15),
+			UITheme.Colors.TextPrimary)
+		nameLbl.Name = "PlayerName"
+		nameLbl.TextScaled = true
+		nameLbl.TextXAlignment = Enum.TextXAlignment.Left
+		nameLbl.Parent = row
+
+		local scoreLbl = UITheme.label("", UDim2.fromScale(0.28, 0.7), UDim2.fromScale(0.68, 0.15),
+			UITheme.Colors.Cash)
+		scoreLbl.Name = "Score"
+		scoreLbl.TextScaled = true
+		scoreLbl.TextXAlignment = Enum.TextXAlignment.Right
+		scoreLbl.Parent = row
+
+		table.insert(boardRows, { row = row, rank = rankLbl, name = nameLbl, score = scoreLbl })
+	end
+
+	local refreshBoards: (string) -> ()
+
+	local boardTabButtons: { [string]: TextButton } = {}
+	for i, tab in ipairs(BOARD_TABS) do
+		local tc, tb = UITheme.neumorphicButton(tab.label, UITheme.Colors.TextGold,
+			UDim2.fromScale(0.31, 1), UDim2.fromScale(0, 0))
+		tc.Name = "Tab_" .. tab.id
+		tc.LayoutOrder = i
+		tc.Parent = boardTabRow
+		boardTabButtons[tab.id] = tb
+		UITheme.onPressed(tb, function()
+			-- `activeBoard` is the closure's copy, used below to discard a stale
+			-- response. `controller` is assigned at the end of `new` and is what
+			-- `openOverlay` reads to reopen on the tab the player last chose --
+			-- nil-guarded because a click cannot happen before construction
+			-- finishes, but the type checker cannot know that.
+			activeBoard = tab.id
+			if controller ~= nil then
+				controller.activeBoard = tab.id
+			end
+			refreshBoards(tab.id)
+		end)
+	end
+
+	-- THE FETCH. `GetLeaderboard` reads the server's CACHE and never triggers a
+	-- DataStore call of its own (T-22), so pressing a tab repeatedly is cheap --
+	-- but NetClient still throttles it to one call every two seconds.
+	refreshBoards = function(boardId: string)
+		for id, btn in pairs(boardTabButtons) do
+			UITheme.setEnabled(btn, id ~= boardId)
+		end
+
+		local def
+		for _, t in ipairs(BOARD_TABS) do
+			if t.id == boardId then def = t end
+		end
+		if def == nil then
+			return
+		end
+
+		boardStatus.Text = "Loading..."
+		boardStatus.TextColor3 = UITheme.Colors.TextDim
+
+		task.spawn(function()
+			local entries, myRank = NetClient.getLeaderboard(boardId)
+			-- Still the active tab? A player switching tabs quickly must not have
+			-- an older response paint over a newer one.
+			if activeBoard ~= boardId then
+				return
+			end
+
+			if type(entries) ~= "table" then
+				for _, ui in ipairs(boardRows) do
+					ui.row.Visible = false
+				end
+				boardStatus.Text = "Could not load the board. Try again shortly."
+				boardStatus.TextColor3 = UITheme.Colors.Negative
+				return
+			end
+
+			local shown = 0
+			for i, ui in ipairs(boardRows) do
+				local e = entries[i]
+				if type(e) ~= "table" then
+					ui.row.Visible = false
+				else
+					shown += 1
+					ui.row.Visible = true
+					ui.rank.Text = "#" .. tostring(e.rank or i)
+					ui.name.Text = tostring(e.name or "?")
+					local raw = tonumber(e.rawVal) or 0
+					ui.score.Text = def.prefix .. Format.formatNumber(raw)
+					-- The player's own row, highlighted so they can find
+					-- themselves without reading every line.
+					local isMe = myRank ~= nil and (e.rank == myRank)
+					ui.name.TextColor3 = if isMe
+						then UITheme.Colors.TextGold else UITheme.Colors.TextPrimary
+				end
+			end
+
+			if shown == 0 then
+				-- AN EMPTY BOARD IS A REAL STATE, not an error. A fresh universe
+				-- has nobody on it, and saying so is better than a spinner or a
+				-- fabricated top three.
+				boardStatus.Text = "No one is on this board yet -- be the first."
+				boardStatus.TextColor3 = UITheme.Colors.TextDim
+			elseif myRank ~= nil then
+				boardStatus.Text = string.format("You are ranked #%d.", myRank)
+				boardStatus.TextColor3 = UITheme.Colors.Positive
+			else
+				-- Honest about the limit rather than inventing a number: the
+				-- server sends the top page only, so outside it the rank is
+				-- genuinely unknown to us.
+				boardStatus.Text = "You are not in the top " .. tostring(shown) .. " yet."
+				boardStatus.TextColor3 = UITheme.Colors.TextDim
+			end
+		end)
+	end
 
 	-- 4. ASCENSION OVERLAY
 	local ascendOverlay, ascendBody = UITheme.overlay("🌌 ASCENSION & DIAMOND TREE")
 	ascendOverlay.Parent = screenGui
 	overlays["ascend"] = ascendOverlay
 
-	local ascendCard = UITheme.panel(UDim2.fromScale(0.96, 0.4), UDim2.fromScale(0.02, 0.05))
-	ascendCard.Parent = ascendBody
-	local ascendTxt = Instance.new("TextLabel")
-	ascendTxt.Size = UDim2.fromScale(0.9, 0.8)
-	ascendTxt.Position = UDim2.fromScale(0.05, 0.1)
-	ascendTxt.BackgroundTransparency = 1
-	ascendTxt.Font = UITheme.FontHeading
-	ascendTxt.Text = "RESET CASH FOR PRESTIGE DIAMONDS\n\nCurrent Gain: +450 Diamonds (♦️)"
-	ascendTxt.TextColor3 = UITheme.Colors.PurpleAscend
-	ascendTxt.TextScaled = true
-	ascendTxt.Parent = ascendCard
+	-- THIS PANEL LIED ABOUT THE MOST DESTRUCTIVE ACTION IN THE GAME.
+	--
+	-- It was a single static label reading "Current Gain: +450 Diamonds"
+	-- regardless of the player's actual lifetime cash, with NO button, NO
+	-- confirmation, and no statement of what ascending destroys. FR-9.4 is
+	-- explicit: "The ascension screen states, before confirming, exactly what is
+	-- lost and exactly what is gained." None of that existed.
+	--
+	-- The reward is now projected from the shared formula against the player's
+	-- real LifetimeCash, and the reset is spelled out item by item behind a
+	-- two-step confirm.
+	local ascendReward = UITheme.label("--", UDim2.fromScale(0.94, 0.14), UDim2.fromScale(0.03, 0.03),
+		UITheme.Colors.PurpleAscend)
+	ascendReward.Name = "AscendReward"
+	ascendReward.Font = UITheme.FontHeading
+	ascendReward.TextScaled = true
+	ascendReward.Parent = ascendBody
+
+	local ascendProgress = UITheme.label("", UDim2.fromScale(0.94, 0.06), UDim2.fromScale(0.03, 0.18),
+		UITheme.Colors.TextDim)
+	ascendProgress.Name = "AscendProgress"
+	ascendProgress.TextScaled = true
+	ascendProgress.Parent = ascendBody
+
+	-- FR-9.4: EXACTLY what is lost and EXACTLY what is gained, both stated before
+	-- the player can confirm. Two columns so neither can be missed.
+	local lostCard = UITheme.panel(UDim2.fromScale(0.46, 0.34), UDim2.fromScale(0.03, 0.26))
+	lostCard.Name = "LostCard"
+	lostCard.Parent = ascendBody
+
+	local lostTitle = UITheme.label("YOU LOSE", UDim2.fromScale(0.9, 0.18), UDim2.fromScale(0.05, 0.05),
+		UITheme.Colors.Negative)
+	lostTitle.TextScaled = true
+	lostTitle.Parent = lostCard
+
+	local lostBody = UITheme.label("", UDim2.fromScale(0.9, 0.68), UDim2.fromScale(0.05, 0.26),
+		UITheme.Colors.TextPrimary)
+	lostBody.Name = "LostBody"
+	lostBody.TextScaled = true
+	lostBody.TextWrapped = true
+	lostBody.TextYAlignment = Enum.TextYAlignment.Top
+	lostBody.Parent = lostCard
+
+	local keptCard = UITheme.panel(UDim2.fromScale(0.46, 0.34), UDim2.fromScale(0.51, 0.26))
+	keptCard.Name = "KeptCard"
+	keptCard.Parent = ascendBody
+
+	local keptTitle = UITheme.label("YOU KEEP", UDim2.fromScale(0.9, 0.18), UDim2.fromScale(0.05, 0.05),
+		UITheme.Colors.Positive)
+	keptTitle.TextScaled = true
+	keptTitle.Parent = keptCard
+
+	local keptBody = UITheme.label("", UDim2.fromScale(0.9, 0.68), UDim2.fromScale(0.05, 0.26),
+		UITheme.Colors.TextPrimary)
+	keptBody.Name = "KeptBody"
+	keptBody.TextScaled = true
+	keptBody.TextWrapped = true
+	keptBody.TextYAlignment = Enum.TextYAlignment.Top
+	keptBody.Parent = keptCard
+
+	-- Written from what AscensionService.ascend ACTUALLY does, not from memory.
+	-- FR-9.1's list plus the three things the reset was corrected to preserve.
+	lostBody.Text = "\u{2022} All Cash\n\u{2022} All Gems\n\u{2022} Cash upgrades\n"
+		.. "\u{2022} Your dice, reset to one starting D2\n\u{2022} Extra die slots"
+	keptBody.Text = "\u{2022} Every Diamond, plus the new ones\n\u{2022} Unlocked shapes and elements\n"
+		.. "\u{2022} Diamond tree levels\n\u{2022} Gamepasses\n\u{2022} Promo codes and login streak"
+
+	local ascendC, ascendBtn = UITheme.neumorphicButton("ASCEND", UITheme.Colors.PurpleAscend,
+		UDim2.fromScale(0.44, 0.12), UDim2.fromScale(0.03, 0.64))
+	ascendC.Name = "AscendButton"
+	ascendC.Parent = ascendBody
+
+	local ascendStatus = UITheme.label("", UDim2.fromScale(0.94, 0.08), UDim2.fromScale(0.03, 0.79),
+		UITheme.Colors.TextDim)
+	ascendStatus.Name = "AscendStatus"
+	ascendStatus.TextScaled = true
+	ascendStatus.TextWrapped = true
+	ascendStatus.Parent = ascendBody
+
+	local ASCEND_REFUSAL: { [string]: string } = {
+		insufficient_lifetime_cash = "You have not earned enough this run yet.",
+		ascension_failed = "Could not ascend. Try again.",
+		profile_unavailable = "Still loading -- try again in a moment.",
+		rate_limited = "Slow down a moment, then try again.",
+		throttled = "Slow down a moment, then try again.",
+	}
+
+	-- TWO-STEP CONFIRM. Ascending wipes a run and cannot be undone, so a single
+	-- press must not do it -- the first press arms, the second commits, and the
+	-- armed state times out on its own so a stray click cannot leave the button
+	-- primed for later.
+	local ascendArmed = false
+	local ascendArmToken = 0
+
+	local function disarmAscend()
+		ascendArmed = false
+		UITheme.setButtonText(ascendBtn, "ASCEND")
+	end
+
+	UITheme.onPressed(ascendBtn, function()
+		if not ascendArmed then
+			ascendArmed = true
+			ascendArmToken += 1
+			local token = ascendArmToken
+			UITheme.setButtonText(ascendBtn, "CONFIRM?")
+			ascendStatus.Text = "Press again to confirm. This cannot be undone."
+			ascendStatus.TextColor3 = UITheme.Colors.Negative
+			task.delay(4, function()
+				if ascendArmed and ascendArmToken == token then
+					disarmAscend()
+					ascendStatus.Text = ""
+				end
+			end)
+			return
+		end
+
+		disarmAscend()
+		UITheme.setEnabled(ascendBtn, false)
+		ascendStatus.Text = "Ascending..."
+		ascendStatus.TextColor3 = UITheme.Colors.TextDim
+		task.spawn(function()
+			local result = NetClient.ascend()
+			if result.ok then
+				ascendStatus.Text = "Ascended. Your Diamonds have been granted."
+				ascendStatus.TextColor3 = UITheme.Colors.Positive
+			else
+				local reason = tostring(result.reason or "ascension_failed")
+				ascendStatus.Text = ASCEND_REFUSAL[reason] or "Could not ascend right now."
+				ascendStatus.TextColor3 = UITheme.Colors.Negative
+			end
+			UITheme.setEnabled(ascendBtn, true)
+		end)
+	end)
+
+	local function refreshAscend(state: any)
+		local lifetime = if type(state) == "table" then tonumber(state.lifetimeCash) or 0 else 0
+		local ascensions = if type(state) == "table" then tonumber(state.ascensions) or 0 else 0
+		local projected = DiceCatalog.ascensionDiamonds(lifetime)
+		local threshold = DiceCatalog.ASCEND_MIN_LIFETIME_CASH
+
+		if projected > 0 then
+			ascendReward.Text = string.format("+%s \u{2666}", Format.formatNumber(projected))
+			ascendReward.TextColor3 = UITheme.Colors.PurpleAscend
+			ascendProgress.Text = string.format(
+				"Earned $%s this run  \u{00B7}  %d ascension%s so far",
+				Format.formatNumber(lifetime), ascensions,
+				if ascensions == 1 then "" else "s")
+			UITheme.setEnabled(ascendBtn, true)
+		else
+			-- Below the threshold: say how far off, rather than showing a reward
+			-- that is not available or a button that silently refuses.
+			ascendReward.Text = "+0 \u{2666}"
+			ascendReward.TextColor3 = UITheme.Colors.TextDim
+			ascendProgress.Text = string.format(
+				"Earn $%s in a run to ascend. You are at $%s.",
+				Format.formatNumber(threshold), Format.formatNumber(lifetime))
+			UITheme.setEnabled(ascendBtn, false)
+			-- Arming state must not survive the reward going away.
+			if ascendArmed then
+				disarmAscend()
+			end
+		end
+	end
 
 	-- 5. QUESTS OVERLAY
 	local questsOverlay, questsBody = UITheme.overlay("📜 DAILY QUESTS & REWARDS")
@@ -459,7 +790,7 @@ function V7MenuPanel.new(): V7MenuController
 		claimContainer.Parent = row
 
 		local rowState = { id = nil :: string? }
-		claimBtn.Activated:Connect(function()
+		UITheme.onPressed(claimBtn, function()
 			local id = rowState.id
 			if id == nil then
 				return
@@ -588,7 +919,7 @@ function V7MenuPanel.new(): V7MenuController
 		throttled = "Slow down a moment, then try again.",
 	}
 
-	claimVaultBtn.Activated:Connect(function()
+	UITheme.onPressed(claimVaultBtn, function()
 		UITheme.setEnabled(claimVaultBtn, false)
 		task.spawn(function()
 			local result = NetClient.claimVault(false)
@@ -733,7 +1064,7 @@ function V7MenuPanel.new(): V7MenuController
 		toggleC.Parent = row
 
 		local key = def.key
-		toggleBtn.Activated:Connect(function()
+		UITheme.onPressed(toggleBtn, function()
 			-- Sends the OPPOSITE of what the server last told us, not the opposite
 			-- of what the knob is showing. Those are the same thing while the panel
 			-- is in sync, and when they are not, the server's value is the one worth
@@ -837,7 +1168,7 @@ function V7MenuPanel.new(): V7MenuController
 		end)
 	end
 
-	redeemBtn.Activated:Connect(submitCode)
+	UITheme.onPressed(redeemBtn, submitCode)
 	codeBox.FocusLost:Connect(function(enterPressed: boolean)
 		if enterPressed then
 			submitCode()
@@ -906,7 +1237,7 @@ function V7MenuPanel.new(): V7MenuController
 		throttled = "Slow down a moment, then try again.",
 	}
 
-	addSlotBtn.Activated:Connect(function()
+	UITheme.onPressed(addSlotBtn, function()
 		UITheme.setEnabled(addSlotBtn, false)
 		task.spawn(function()
 			local result = NetClient.addDieSlot()
@@ -974,6 +1305,9 @@ function V7MenuPanel.new(): V7MenuController
 		-- The refresh functions are stored on the controller so `applyState` can
 		-- fan a single snapshot out to every panel that needs it.
 		shopRefresh = refreshShop,
+		boardsRefresh = refreshBoards,
+		activeBoard = "NetWorth",
+		ascendRefresh = refreshAscend,
 		shapeRefresh = refreshShapes,
 		questRefresh = refreshQuests,
 		vaultRefresh = refreshVault,
@@ -982,6 +1316,9 @@ function V7MenuPanel.new(): V7MenuController
 		_capabilities = capabilities,
 		lastState = nil,
 	}, V7MenuPanel) :: any
+
+	-- Hands the finished controller to the closures built above (board tabs).
+	controller = self
 
 	return self
 end
@@ -1001,7 +1338,8 @@ function V7MenuPanel:applyState(state: any)
 	end
 	self.lastState = state
 	for _, fn in ipairs({ self.shopRefresh, self.shapeRefresh, self.questRefresh,
-		self.vaultRefresh, self.slotsRefresh, self.settingsRefresh }) do
+		self.vaultRefresh, self.slotsRefresh, self.settingsRefresh,
+		self.ascendRefresh }) do
 		if type(fn) == "function" then
 			local ok, err = pcall(fn, state)
 			if not ok then
@@ -1030,6 +1368,17 @@ function V7MenuPanel:openOverlay(name: string)
 	local target = self.overlays[name]
 	if target then
 		target.Visible = true
+	end
+
+	-- BOARDS IS PULL, NOT PUSH. Every other panel rides the StateSync snapshot,
+	-- but leaderboards are global rather than per-player, so they are fetched on
+	-- demand -- and only when the panel is actually opened, so a player who never
+	-- looks at them never costs the server a request.
+	if name == "boards" and type(self.boardsRefresh) == "function" then
+		local ok, err = pcall(self.boardsRefresh, self.activeBoard or "NetWorth")
+		if not ok then
+			warn("[V7MenuPanel] board refresh failed: " .. tostring(err))
+		end
 	end
 end
 

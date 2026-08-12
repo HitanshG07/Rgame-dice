@@ -284,6 +284,31 @@ function DiceCatalog.newStartingDie()
 	return DiceCatalog.newDie(DiceCatalog.STARTING_SHAPE)
 end
 
+-- ASCENSION (FR-9.5). Shared so the ASCEND panel can show a REAL projection of
+-- what a reset would pay, and the same threshold the server enforces.
+--
+-- The panel previously hardcoded "+450 Diamonds" regardless of the player's
+-- actual lifetime cash -- a fabricated reward figure attached to the single most
+-- destructive button in the game.
+DiceCatalog.ASCEND_MIN_LIFETIME_CASH = 1e6
+
+-- Diamonds a reset would grant at a given lifetime cash. Sub-linear on purpose:
+-- doubling a run's earnings does not double its prestige payout, so a player is
+-- pushed to ascend rather than to grind one run forever.
+function DiceCatalog.ascensionDiamonds(lifetimeCash: number): number
+	if type(lifetimeCash) ~= "number" or lifetimeCash ~= lifetimeCash then
+		return 0
+	end
+	if lifetimeCash < DiceCatalog.ASCEND_MIN_LIFETIME_CASH then
+		return 0
+	end
+	local earned = math.floor((lifetimeCash / 1e6) ^ 0.5)
+	if earned ~= earned or earned < 0 then
+		return 0
+	end
+	return earned
+end
+
 -- DIE SLOTS (FR-1.1: one to seven dice).
 DiceCatalog.MAX_DIE_SLOTS = 7
 DiceCatalog.SLOT_BASE_COST = 1000

@@ -69,6 +69,48 @@ local caches: { [string]: { lastFetch: number, entries: { Entry } } } = {
 	Ascensions = { lastFetch = 0, entries = {} },
 }
 
+-- USERNAME CACHE. `GetNameFromUserIdAsync` is a web call; a 50-entry board would
+-- make 50 of them on every refresh and stall the fetch. Names effectively never
+-- change, so one lookup per user id per server lifetime is plenty.
+local nameCache: { [number]: string } = {}
+-- Ids with a lookup currently in flight. SEPARATE from `nameCache` so a pending
+-- marker can never be mistaken for a resolved name and rendered on the board.
+local namePending: { [number]: boolean } = {}
+
+-- Returns the best name known RIGHT NOW, and kicks off a lookup for next time if
+-- the id is still unknown. Never yields -- callers are inside a board build that
+-- must not block on the network.
+function LeaderboardService._resolveName(uid: number): string
+	local cached = nameCache[uid]
+	if cached ~= nil then
+		return cached
+	end
+
+	local online = Players:GetPlayerByUserId(uid)
+	if online ~= nil then
+		nameCache[uid] = online.Name
+		return online.Name
+	end
+
+	-- Placeholder now; the cache is filled for the next refresh. Guarded so
+	-- repeated refreshes do not spawn duplicate lookups for the same id.
+	if not namePending[uid] then
+		namePending[uid] = true
+		task.spawn(function()
+			local ok, fetched = pcall(function()
+				return Players:GetNameFromUserIdAsync(uid)
+			end)
+			if ok and type(fetched) == "string" and #fetched > 0 then
+				nameCache[uid] = fetched
+			end
+			-- Cleared either way: a failed lookup should be retryable on a later
+			-- refresh rather than cached as permanently unknown.
+			namePending[uid] = nil
+		end)
+	end
+	return "Player " .. tostring(uid)
+end
+
 local function getOrderedStore(boardId: string)
 	local dsName = BOARDS[boardId]
 	if not dsName then
@@ -124,33 +166,53 @@ function LeaderboardService.getBoard(boardId: string): { Entry }
 		local score = tonumber(item.value) or 0
 		local raw = LeaderboardService.inverseTransform(score)
 
-		local name = "Player_" .. tostring(uid)
-		local p = Players:GetPlayerByUserId(uid)
-		if p then
-			name = p.Name
-		else
-			task.spawn(function()
-				local pcallOk, fetchedName = pcall(function()
-					return Players:GetNameFromUserIdAsync(uid)
-				end)
-				if pcallOk and type(fetchedName) == "string" then
-					name = fetchedName
-				end
-			end)
-		end
-
-		table.insert(newEntries, {
+		-- THE NAME, RESOLVED INTO THE ENTRY THAT SHIPS.
+		--
+		-- This used to `task.spawn` a `GetNameFromUserIdAsync` and assign the
+		-- result to the local `name` -- AFTER that local's value had already been
+		-- copied into the entry table below. The spawned thread therefore updated
+		-- a variable nobody read again, and every offline player on the board
+		-- rendered permanently as "Player_1234567". A closure writing to a
+		-- captured local does not reach back into a table built from it.
+		--
+		-- Resolved through a persistent cache instead, and the entry is written
+		-- with whatever is known NOW. A name that arrives late lands in the cache
+		-- and is picked up on the next refresh, which is the correct trade: the
+		-- board is cached for CACHE_TTL_SEC anyway, and blocking the whole fetch
+		-- on 50 sequential web calls would be far worse than one stale label.
+		local entry: Entry = {
 			userId = uid,
-			name = name,
+			name = LeaderboardService._resolveName(uid),
 			score = score,
 			rawVal = raw,
 			rank = rank,
-		})
+		}
+		table.insert(newEntries, entry)
 	end
 
 	cache.lastFetch = now
 	cache.entries = newEntries
 	return newEntries
+end
+
+-- THE PLAYER'S OWN RANK on a board, or nil if they are not on it.
+--
+-- The `GetLeaderboard` handler returned a HARDCODED 1 for every caller, so the
+-- panel would have told every player they were first in the world. A rank the
+-- server invents is worse than no rank at all.
+--
+-- Read from the cached page, so this costs nothing and cannot disagree with the
+-- list rendered beside it. A player outside the top 50 gets nil, which the panel
+-- renders as "unranked" -- honest, and the alternative (a second sorted query
+-- per request) is a DataStore call on a remote an exploiter can spam (T-22).
+function LeaderboardService.getPlayerRank(player: Player, boardId: string): number?
+	local entries = LeaderboardService.getBoard(boardId)
+	for _, entry in ipairs(entries) do
+		if entry.userId == player.UserId then
+			return entry.rank
+		end
+	end
+	return nil
 end
 
 function LeaderboardService.updatePlayer(player: Player): ()

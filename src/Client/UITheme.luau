@@ -445,6 +445,38 @@ function UITheme.neumorphicTile(size: UDim2, pos: UDim2): (Frame, Frame)
 	return container, body
 end
 
+-- THE SANCTIONED WAY TO BIND A BUTTON PRESS.
+--
+-- Binds BOTH `Activated` and `MouseButton1Click`, debounced so the two firing
+-- for one press runs the handler once.
+--
+-- WHY BOTH. `Activated` does not fire in every input path -- notably it can be
+-- missed for a synthetic/driven click and behaves differently across input
+-- devices -- while `MouseButton1Click` covers the ordinary mouse case. The HUD
+-- has always bound both and its buttons work; V7MenuPanel bound `Activated`
+-- alone in nine places and those buttons were unreachable to a driven click,
+-- which is also how a real player on some input devices would find them.
+--
+-- Found 2026-08-12 while trying to verify the ASCEND confirm: the panel
+-- rendered correctly, the button was topmost and interactable, the coordinates
+-- were right, and pressing it did nothing at all.
+function UITheme.onPressed(button: TextButton, handler: () -> ()): ()
+	local last = 0
+	local function trigger()
+		local now = os.clock()
+		if now - last < 0.12 then
+			return
+		end
+		last = now
+		local ok, err = pcall(handler)
+		if not ok then
+			warn("[UITheme] button handler errored: " .. tostring(err))
+		end
+	end
+	button.Activated:Connect(trigger)
+	button.MouseButton1Click:Connect(trigger)
+end
+
 -- The sanctioned way to change a neumorphic button's caption at runtime.
 --
 -- Falls back to the button's own Text for any button not built by

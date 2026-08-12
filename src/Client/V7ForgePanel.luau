@@ -127,7 +127,7 @@ function V7ForgePanel.new(): V7ForgeController
 		tc.LayoutOrder = i
 		tc.Visible = false
 		tc.Parent = tabRow
-		tb.Activated:Connect(function()
+		UITheme.onPressed(tb, function()
 			selectDie(i)
 		end)
 		table.insert(dieTabs, { container = tc, button = tb })
@@ -257,7 +257,7 @@ function V7ForgePanel.new(): V7ForgeController
 		local elemC, elemB = UITheme.neumorphicButton("-", UITheme.Colors.Multiplier,
 			UDim2.fromScale(0.17, 0.66), UDim2.fromScale(0.50, 0.17))
 		elemC.Parent = row
-		elemB.Activated:Connect(function()
+		UITheme.onPressed(elemB, function()
 			local current = faceElements[i] or "None"
 			-- Advance to the next UNLOCKED element, wrapping. If nothing else is
 			-- unlocked the press is a no-op rather than a request the server will
@@ -282,10 +282,10 @@ function V7ForgePanel.new(): V7ForgeController
 			UDim2.fromScale(0.10, 0.66), UDim2.fromScale(0.83, 0.17))
 		plusC.Parent = row
 
-		minusB.Activated:Connect(function()
+		UITheme.onPressed(minusB, function()
 			adjust(i, -STEP)
 		end)
-		plusB.Activated:Connect(function()
+		UITheme.onPressed(plusB, function()
 			adjust(i, STEP)
 		end)
 
@@ -310,7 +310,7 @@ function V7ForgePanel.new(): V7ForgeController
 	local buyMassC, buyMassBtn = UITheme.neumorphicButton("+ MASS", UITheme.Colors.Positive,
 		UDim2.fromScale(0.24, 0.07), UDim2.fromScale(0.02, 0.875))
 	buyMassC.Parent = bodyFrame
-	buyMassBtn.Activated:Connect(function()
+	UITheme.onPressed(buyMassBtn, function()
 		UITheme.setEnabled(buyMassBtn, false)
 		task.spawn(function()
 			local ok, reason = NetClient.buyUpgrade("MassBudget")
@@ -334,7 +334,7 @@ function V7ForgePanel.new(): V7ForgeController
 	local evenC, evenBtn = UITheme.neumorphicButton("EVEN", UITheme.Colors.Gems,
 		UDim2.fromScale(0.15, 0.07), UDim2.fromScale(0.29, 0.875))
 	evenC.Parent = bodyFrame
-	evenBtn.Activated:Connect(function()
+	UITheme.onPressed(evenBtn, function()
 		local count = #draft
 		if count == 0 then
 			return
@@ -505,13 +505,13 @@ function V7ForgePanel.new(): V7ForgeController
 		end
 	end
 
-	resetBtn.Activated:Connect(function()
+	UITheme.onPressed(resetBtn, function()
 		draft = table.clone(committed)
 		dirty = false
 		refresh()
 	end)
 
-	commitBtn.Activated:Connect(function()
+	UITheme.onPressed(commitBtn, function()
 		if #draft == 0 then
 			return
 		end

@@ -13,17 +13,20 @@ local EconomyService = require(script.Parent:WaitForChild("EconomyService"))
 
 local AscensionService = {}
 
-local MIN_LIFETIME_CASH = 1e6 -- Threshold required to ascend (SRS FR-9.5)
+-- Threshold required to ascend (SRS FR-9.5). Read from the shared catalog so the
+-- ASCEND panel quotes the same number the server enforces.
+local MIN_LIFETIME_CASH = DiceCatalog.ASCEND_MIN_LIFETIME_CASH
 
+-- DELEGATES to the shared implementation. The formula moved to DiceCatalog so
+-- the client could show an honest projection of the reward instead of the
+-- hardcoded "+450 Diamonds" the panel used to display; keeping a second copy
+-- here is exactly the drift L-025 exists to prevent. The finiteness guard stays
+-- because this is the path a real grant runs through.
 function AscensionService.calculateDiamonds(lifetimeCash: number): number
-	if not ForgeMath.isFinite(lifetimeCash) or lifetimeCash < MIN_LIFETIME_CASH then
+	if not ForgeMath.isFinite(lifetimeCash) then
 		return 0
 	end
-	local earned = math.floor((lifetimeCash / 1e6) ^ 0.5)
-	if not ForgeMath.isFinite(earned) or earned < 0 then
-		return 0
-	end
-	return earned
+	return DiceCatalog.ascensionDiamonds(lifetimeCash)
 end
 
 function AscensionService.canAscend(player: Player): (boolean, number)
