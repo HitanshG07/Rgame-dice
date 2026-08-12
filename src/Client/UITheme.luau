@@ -27,6 +27,20 @@ UITheme.Colors = {
 	Multiplier     = Color3.fromRGB(249, 115, 22),
 	PurpleAscend   = Color3.fromRGB(168, 85, 247),
 	
+	-- The board's felt, in the shared 3D scene the dice are thrown into.
+	--
+	-- DELIBERATELY LIGHTER AND WARMER THAN `BaseCream`, which is the full-screen
+	-- backdrop the tray sits on. The felt was drawn in `PanelDeep` at first --
+	-- RGB(20,16,14) against a backdrop of RGB(26,22,20) -- a six-point difference
+	-- no eye resolves, so the table vanished and the dice read as floating in
+	-- space rather than lying on a surface. A board the dice are thrown ONTO has
+	-- to be visibly a thing they are on.
+	--
+	-- Kept dark regardless, so a die's own colour is what draws the eye, and
+	-- pitched to sit just inside the bronze tray border RGB(56,44,36) so the felt
+	-- reads as the surface inside the frame rather than as a second frame.
+	Felt           = Color3.fromRGB(42, 33, 27),
+
 	-- Legacy
 	PanelDark      = Color3.fromRGB(26, 22, 20),
 	PanelMaroon    = Color3.fromRGB(36, 30, 26),

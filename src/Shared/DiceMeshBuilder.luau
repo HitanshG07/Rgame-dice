@@ -856,7 +856,14 @@ function DiceMeshBuilder.buildInto(parent: Instance): { Model }
 				"[DiceMeshBuilder] %s recovered %d face normals, expected %d",
 				entry.name, faces, expected))
 		end
-		model.PrimaryPart = pivot
+		-- `anchorPivot` above already created the Pivot part and assigned it as the
+		-- PrimaryPart. A line here re-assigned `model.PrimaryPart = pivot` reading
+		-- a local that does not exist at this scope -- so it evaluated to nil and
+		-- CLEARED the PrimaryPart on every generated die, silently undoing the
+		-- step whose own comment calls itself "NOT OPTIONAL". Without a
+		-- PrimaryPart, `PivotTo` turns a model about its bounding-box centre, so
+		-- every die ORBITED instead of spinning. Removed rather than corrected:
+		-- `anchorPivot` is the one place that should own this.
 		model.Parent = parent
 		table.insert(built, model)
 	end

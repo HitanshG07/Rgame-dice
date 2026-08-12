@@ -1,49 +1,67 @@
 --!strict
 -- BoardView.luau
--- The 2D board: a flat felt tray drawn in screen space, and the slot geometry
--- every die is dealt into (SRS FR-1.1, FR-1.4; HLD §4.3).
+-- The board: a felt tray drawn in screen space holding ONE shared 3D scene, and
+-- the world geometry every die is thrown into (SRS FR-1.1, FR-1.4; HLD §4.3).
 --
 -- WHY THIS REPLACED THE 3D PIT. The operator asked for a 2D board after seeing
 -- the pit render: a deep well viewed from 27 studs up, with the floor eating the
--- frame and the die reading as a speck. This module is the answer to that, and
--- the change is confined to the view layer -- no server module, no shared module,
+-- frame and the die reading as a speck. The tray is the answer to that, and the
+-- change is confined to the view layer -- no server module, no shared module,
 -- and no gameplay rule contains a single line of 3D. The server samples an
 -- outcome from a mass distribution and sends a number; how that number is shown
 -- was always this layer's business alone.
 --
--- WHAT WAS KNOWINGLY GIVEN UP, recorded because a later reader will otherwise
--- assume nobody noticed. The inverted-mass mechanic (FR-2) is the heart of the
--- game: mass poured onto a face makes that face land LESS often. In the pit you
--- could SEE that -- a lopsided solid tumbling and refusing to settle heavy-side
--- up. Flat, that same rule shows only as a number appearing less frequently,
--- which is indistinguishable from bad luck. The operator was told this plainly
--- and chose 2D anyway; it is their call, and this file's job is to lose as
--- little of the read as a flat presentation allows. Hence:
+-- WHY THE GEOMETRY IS NOW 3D AGAIN, AND WHY THAT IS NOT A REVERSAL.
 --
---   * dice still TUMBLE rather than flipping to an answer -- DiceRenderer spins
---     them in-plane and settles them, so a roll is still an event with a
---     duration, not a state change;
---   * every face carries a visible WEIGHT BAR, so a heavy face is legible as
---     heavy while it is on screen rather than only inside the forge;
---   * the settle DRAGS toward the heavy side, so the die visibly fights to
---     avoid resting on its heavy face.
+-- The tray is still a flat ScreenGui rectangle. What changed is what lives
+-- INSIDE it. Every die used to occupy its own `ViewportFrame` -- its own camera,
+-- its own 3D scene -- pinned to a slot looked up from a precomputed table. Three
+-- consequences followed directly from that, and all three were operator
+-- complaints:
 --
--- None of that is as good as watching a weighted object fall. It is what is
--- available in two dimensions.
+--   * IT FELT BOXED IN, because each die genuinely was in a box.
+--   * DICE COULD NOT SCATTER. Positions came from `LAYOUTS[count][index]`, so
+--     the same board produced the same arrangement every single throw.
+--   * THERE WAS NO FLOOR. Separate scenes cannot share one, so bounces had to be
+--     faked per-die against an imaginary plane, and dice could never intermingle
+--     because they were never in the same space to begin with.
 --
--- WHY SCREEN SPACE AND NOT A SurfaceGui ON A PART. A SurfaceGui would keep a
--- camera, a part and a framing solve alive to render something with no depth --
--- all of the 3D machinery and none of its benefit. A ScreenGui has no camera, no
--- viewport solve, no aspect-driven frustum arithmetic, and it scales to 320px
--- through 4K by construction (NFR-3).
+-- So the seven viewports collapsed into ONE covering the whole interior, with a
+-- single camera and a real felt plane. Dice are placed in STUDS on that plane
+-- and animated in 3D. Scatter, intermingling, a shared floor and genuine damped
+-- bounces all stop being effects to fake and become consequences of the dice
+-- actually being in the same place.
 --
--- THE API IS DELIBERATELY THE SAME SHAPE AS ArenaView'S. `isReady`,
--- `getContainer`, `getAnchor`, `getSpawnPoint`, `init`, `shutdown` all survive
--- with their meanings intact; only their coordinate TYPE changed, from Vector3
--- studs to UDim2 screen scale. Keeping the shape means DiceRenderer's six call
--- sites moved coordinate systems without moving responsibility, and the
--- containment guarantee (FR-1.4) is still enforced HERE rather than trusted to
--- the renderer -- `clampToBoard` remains the only way to obtain a legal slot.
+-- The pit's failure was the CAMERA, not the third dimension: it looked down a
+-- well from far away. This looks at a table from close and slightly above, which
+-- is how a person sees dice they have just thrown.
+--
+-- WHAT THE MOVE TO A FLAT PRESENTATION COST, kept here because it is still true.
+-- The inverted-mass mechanic (FR-2) is the heart of the game: mass poured onto a
+-- face makes that face land LESS often. That read is best served by watching a
+-- lopsided solid tumble, which is exactly what a shared 3D scene restores -- so
+-- this rebuild buys back most of what the flat board gave up. What remains
+-- unrecoverable is nothing: dice tumble, they fight the settle, and their weight
+-- bars are legible. The compromise is retired rather than merely documented.
+--
+-- THE COORDINATE CONTRACT CHANGED, DELIBERATELY AND VISIBLY. `getAnchor`,
+-- `getSpawnPoint` and `clampToBoard` now speak in `Vector3` STUDS on the felt
+-- rather than `UDim2` screen scale. The names and the meanings survive; only the
+-- space moved. Containment (FR-1.4) is still enforced HERE and `clampToBoard` is
+-- still the only way to obtain a legal rest point -- the renderer cannot place a
+-- die outside the tray even by mistake, which is the whole reason the guarantee
+-- lives in this file rather than in the caller.
+--
+-- `getRect` and `getCenter` are UNCHANGED and still screen-space. FeedbackFX
+-- anchors floating payout text with them and has no business knowing that the
+-- board's interior became three-dimensional.
+--
+-- NO DIE-COUNT CEILING. The old layout table had exactly seven entries, so seven
+-- was baked into the geometry itself. Scatter is sampled, not looked up, so this
+-- module has no opinion on how many dice arrive. `MAX_DICE` remains only as the
+-- current gameplay limit for `getDieRadius`'s size curve, and passing more than
+-- that yields the smallest size rather than an error. The operator's 20-dice
+-- progression ceiling therefore needs no change here.
 --
 -- EVERY COLOUR COMES FROM UITheme, for the reason UITheme's own header gives.
 --
@@ -60,127 +78,161 @@ local UITheme = require(script.Parent:WaitForChild("UITheme"))
 local BoardView = {}
 
 --------------------------------------------------------------------------------
--- Board geometry.
+-- The tray, in absolute screen scale.
 --
 -- EVERY NUMBER HERE IS A FRACTION OF THE SCREEN, never a pixel (FR-13.7, NFR-3).
--- The tray is defined once as a rectangle in screen scale, and slots are placed
--- inside it as fractions OF THE TRAY, so the whole board scales as one object.
 --------------------------------------------------------------------------------
 
--- The tray, in absolute screen scale. Centred horizontally; sat in the upper
--- middle of the screen so the HUD's bottom bar and MenuPanel's sidebars frame it
--- rather than cover it.
---
--- WIDER THAN IT IS TALL, on purpose. Seven dice laid out flat want horizontal
--- room; a square tray would either shrink every die or stack them into rows that
--- read as a grid rather than a throw.
 -- Centred BETWEEN THE SIDEBARS, not on the screen. MenuPanel occupies roughly
 -- the outer 14% of each edge; centring on the screen leaves the board looking
 -- shoved left, because the eye centres it against the gap it sits in rather
 -- than against the window.
+--
+-- WIDER THAN IT IS TALL, on purpose. Dice thrown onto a table want horizontal
+-- room; a square tray either shrinks every die or stacks them into rows that
+-- read as a grid rather than a throw.
 local TRAY_X = 0.165
 local TRAY_Y = 0.135
 local TRAY_W = 0.670
 local TRAY_H = 0.660
 
--- The playable interior, as a fraction of the tray, inset from the tray's own
--- border so a die never touches the frame. This is the 2D equivalent of the
--- pit's inner wall faces, and it is what FR-1.4 containment is measured against.
-local INNER_INSET = 0.055
-
--- How far a resting die is held clear of the interior edge, as a fraction of the
--- tray. The flat analogue of the pit's REST_EPSILON: an extent alone puts the
--- die's bounding box EXACTLY on the boundary, where any float error -- or a
--- caller reporting a nominal half-size rather than a true maximum extent --
--- shows as the die clipping the frame.
-local REST_EPSILON = 0.004
-
--- Die footprint, as a fraction of the TRAY's smaller dimension, so a die is the
--- same visual size regardless of the screen's aspect ratio. A single die gets
--- the large size; a crowded board scales down so seven still fit without
--- overlapping.
--- A SOLO DIE IS THE WHOLE GAME AND SHOULD LOOK LIKE IT. The first value here
--- was 0.30, which rendered as a stamp adrift in a large empty tray -- the same
--- "die is a speck" complaint that ended the 3D pit, reproduced flat. A single
--- die now takes over half the tray's height.
-local DIE_SCALE_SOLO = 0.560
-local DIE_SCALE_FULL = 0.205
-
-local MAX_DICE = 7 -- SRS FR-1.1
-
--- Where the tumble begins: above the tray's top edge, so a die is dealt IN
--- rather than appearing. Expressed in tray fractions and deliberately negative
--- -- the spawn point is OUTSIDE the interior on purpose, and FR-1.4 constrains
--- where a die comes to REST, not where it starts.
-local SPAWN_ABOVE = 0.45
-
 --------------------------------------------------------------------------------
--- Slot layouts, precomputed once for every legal die count (FR-1.1: 1 to 7).
+-- The felt, in world studs.
 --
--- Precomputed rather than derived per roll because these are the same seven
--- answers forever, and a roll is not the moment to be doing arithmetic.
+-- The scene is centred on the origin with +Y up. The camera looks at the origin
+-- from in front and above, so +X is right on screen and +Z is toward the viewer.
 --
--- Positions are offsets from the interior's CENTRE, expressed as a fraction of
--- the interior's half-extent, so each lies in [-1, 1] on both axes and the
--- layout is independent of the tray's real size.
---
--- LAID OUT IN ROWS, not a ring. A ring reads as a ritual circle in 3D where
--- perspective separates the near and far dice; flat, a ring just looks like a
--- clock face and wastes the middle. Rows read as dice thrown onto a table.
+-- THESE ARE THE ONLY NUMBERS THAT DEFINE THE PLAYABLE AREA. The half-extents
+-- below are what FR-1.4 containment is measured against, and the camera solve
+-- frames exactly this rectangle -- so widening the felt widens what is on screen
+-- rather than pushing dice out of shot.
 --------------------------------------------------------------------------------
 
-type Slot = { x: number, y: number }
+-- Half-extents of the felt rectangle.
+--
+-- THE DEPTH IS SET BY HOW THE FELT PROJECTS, NOT BY HOW IT MEASURES. Viewed from
+-- a pitched camera the felt's depth compresses on screen by the cosine of the
+-- pitch while its width does not, so a felt that looks correctly proportioned in
+-- world space renders as a letterbox with dead space above and below. At a 45
+-- degree pitch the depth is foreshortened to about 0.71 of itself, and the tray
+-- is roughly 1.75 times wider than it is tall, so the depth that FILLS the tray
+-- is `halfX / (1.75 * cos(pitch))` -- about 10.5, not the 8.0 first tried, which
+-- rendered the felt as a small trapezoid adrift in a mostly empty board.
+local FELT_HALF_X = 13.0
+local FELT_HALF_Z = 10.5
 
-local function buildLayouts(): { { Slot } }
-	local layouts: { { Slot } } = {}
+-- The felt surface sits at Y = 0, and a die RESTS with its centre one radius
+-- above it -- a solid normalised to a bounding sphere touches the floor at its
+-- own radius, not at its centre. Stated once here because both the rest solve
+-- and the bounce solve need it and must not disagree.
+local FLOOR_Y = 0.0
 
-	-- Row plans: how many dice sit on each row, for each total count. Chosen so
-	-- no row is more than one die longer than another, which keeps the cluster
-	-- balanced rather than top-heavy.
-	local plans: { { number } } = {
-		{ 1 },
-		{ 2 },
-		{ 3 },
-		{ 2, 2 },
-		{ 3, 2 },
-		{ 3, 3 },
-		{ 4, 3 },
-	}
+-- How far above the felt a die is released.
+--
+-- MEASURED AGAINST THE FRUSTUM, NOT PICKED, and lowered twice.
+--
+-- The first value was 26, which put the release point BEHIND the camera
+-- entirely -- the camera sits about 18 studs up and looks down, so anything
+-- higher than it and not far away is behind the view plane. The second was 10,
+-- which cleared that but still spent much of the throw above the top edge: a
+-- screenshot taken mid-roll showed an EMPTY felt with every die out of shot.
+--
+-- The visible band above the felt is only about five studs at the far edge,
+-- because a pitched camera puts the far edge high in frame already. So the
+-- release sits at 5.5 and the arc peaks a stud or two over that, which keeps the
+-- whole throw in view apart from a brief moment at the very start -- and a die
+-- entering from just off the top edge is exactly what being thrown in looks
+-- like.
+local THROW_HEIGHT = 4.0
 
-	for count = 1, MAX_DICE do
-		local plan = plans[count]
-		local slots: { Slot } = {}
-		local rows = #plan
+-- How far beyond the felt's FAR edge a throw begins.
+--
+-- FROM THE FAR SIDE, TOWARD THE VIEWER. The near side is the bottom of the frame
+-- and sits close to the camera, so a die released there would be enormous and
+-- would travel away from the viewer, shrinking. Coming from the far edge, dice
+-- enter high in frame and grow as they approach -- and the far edge is where
+-- "off screen" actually is for a camera pitched down at a table.
+-- Kept small for the same reason FRICTION was lowered: the further back the
+-- throw starts, the further back the first contact must be for the bounces to
+-- land the die on its mark, and past the felt's far edge that becomes
+-- unsatisfiable.
+local THROW_BACK_Z = 0.5
 
-		for rowIndex, inRow in ipairs(plan) do
-			-- Spread rows across the vertical span. A single row sits dead
-			-- centre; two or more are evenly pitched with a margin at each end
-			-- so the outermost dice are not against the interior edge.
-			local y: number
-			if rows == 1 then
-				y = 0
-			else
-				y = -0.55 + ((rowIndex - 1) / (rows - 1)) * 1.10
-			end
+-- Lateral spread of the release points. Dice do not leave the hand from one
+-- pixel; a little scatter at the source makes the incoming arcs non-parallel,
+-- which is most of what makes a throw look thrown.
+local THROW_SPREAD_X = 9.0
 
-			for column = 1, inRow do
-				local x: number
-				if inRow == 1 then
-					x = 0
-				else
-					x = -0.62 + ((column - 1) / (inRow - 1)) * 1.24
-				end
-				table.insert(slots, { x = x, y = y })
-			end
-		end
+-- Clearance held between a resting die's bounding sphere and the felt edge, in
+-- studs. The 3D analogue of the old REST_EPSILON: an extent alone puts the die
+-- EXACTLY on the boundary, where any float error shows as a die overhanging the
+-- frame.
+local REST_EPSILON = 0.25
 
-		layouts[count] = slots
-	end
+-- Die size, as a bounding-sphere RADIUS in studs, interpolated by die count.
+--
+-- A SOLO DIE IS THE WHOLE GAME AND SHOULD LOOK LIKE IT. The flat board's first
+-- attempt rendered one die as a stamp adrift in a large empty tray -- the same
+-- "die is a speck" complaint that ended the 3D pit, reproduced flat. One die is
+-- therefore large enough to read as the subject of the shot.
+--
+-- The floor exists because the curve must not collapse to nothing past the
+-- current cap: the operator's progression ceiling is 20 dice and this module
+-- must not be what stops them arriving.
+local DIE_RADIUS_SOLO = 4.00
+local DIE_RADIUS_FULL = 2.00
+local DIE_RADIUS_MIN = 0.85
 
-	return layouts
-end
+-- The count at which the size curve reaches DIE_RADIUS_FULL. Matches the current
+-- gameplay cap (SRS FR-1.1), but is NOT a limit: beyond it the curve keeps
+-- shrinking toward DIE_RADIUS_MIN so a larger board still fits.
+local MAX_DICE = 7
 
-local LAYOUTS: { { Slot } } = buildLayouts()
+-- Scatter separation, as a multiple of die radius. Dice may lie close enough to
+-- touch and to read as a cluster; they may not occupy the same point.
+local MIN_SEPARATION_FACTOR = 1.85
+
+-- How hard the sampler tries to honour that separation before accepting the
+-- best-effort placement. A crowded board can be genuinely unsatisfiable, and a
+-- throw is not the moment to loop forever.
+local SCATTER_ATTEMPTS = 24
+
+--------------------------------------------------------------------------------
+-- The camera.
+--
+-- Looks at the felt from in front and above. The angle is the single most
+-- important number in this file: too shallow and the dice hide behind each
+-- other, too steep and it becomes the top-down grid the old board already was.
+-- Around 52 degrees shows the top face clearly -- which is the answer the player
+-- is reading -- while keeping enough obliquity that the solids read as solid.
+--------------------------------------------------------------------------------
+
+local CAMERA_PITCH = math.rad(45)
+local CAMERA_FOV = 42
+
+-- Fraction of the frame the felt fills. Below 1.0 so a die mid-tumble at the
+-- felt's edge, and the apex of a bounce, both stay inside the viewport -- Roblox
+-- clips ViewportFrame geometry hard at the frame bounds, and a clipped die reads
+-- as broken geometry rather than as a framing problem (L-044).
+local CAMERA_FILL = 0.90
+
+-- Extra vertical world-space room above the felt, in studs, reserved so a
+-- bouncing die is not cropped at the top edge. The first bounce peaks around
+-- four studs up, but a die is only near the top of frame when it is also near
+-- the FAR edge, where the projection has already lifted it -- so the reserve
+-- needed is much smaller than the bounce height itself.
+-- 2.5, SOLVED RATHER THAN GUESSED. The binding case is a die at the apex of its
+-- throw while still near the FAR edge, where the projection has already lifted
+-- it high in frame. Measured at 1.5 that die reached 1.10 in normalised screen
+-- coordinates -- 10% past the top edge -- and 14% of the frames in a sampled
+-- roll had at least one die clipped. Working backwards from "apex must project
+-- inside the frame at the far edge" gave 2.5, which brought the peak to 1.03 --
+-- still grazing. 3.0 clears it outright.
+--
+-- Note the measurement is taken at the die's PIVOT, so its top surface crosses
+-- the edge before its centre does; leaving the peak at exactly 1.0 would still
+-- shave the top off a die. The margin is deliberate.
+local CAMERA_HEADROOM = 3.0
 
 --------------------------------------------------------------------------------
 -- Numeric hygiene
@@ -190,14 +242,15 @@ local function isFinite(value: number): boolean
 	return value == value and value ~= math.huge and value ~= -math.huge
 end
 
--- A negative, NaN or infinite extent is treated as zero rather than propagated.
--- Same contract the pit had: a die that cannot be measured is a display problem,
--- and an error thrown mid-roll would be a bigger one.
-local function safeExtent(extent: number): number
-	if not isFinite(extent) or extent < 0 then
+-- A negative, NaN or infinite radius is treated as zero rather than propagated.
+-- Same contract the pit and the flat board both had: a die that cannot be
+-- measured is a display problem, and an error thrown mid-roll would be a bigger
+-- one -- the payout is already credited by then either way.
+local function safeRadius(radius: number): number
+	if not isFinite(radius) or radius < 0 then
 		return 0
 	end
-	return extent
+	return radius
 end
 
 --------------------------------------------------------------------------------
@@ -206,9 +259,10 @@ end
 
 local built = false
 local screenGui: ScreenGui? = nil
-local tray: Frame? = nil
-local container: Frame? = nil
+local viewport: ViewportFrame? = nil
+local sceneRoot: Folder? = nil
 local connections: { RBXScriptConnection } = {}
+local rng = Random.new()
 
 -- What the backdrop displaced, so `shutdown` can put it back exactly. The board
 -- is a guest in someone else's DataModel and must leave no trace.
@@ -219,9 +273,84 @@ local restoreCharacterVisible: { [BasePart]: number } = {}
 -- Construction
 --------------------------------------------------------------------------------
 
--- The felt. Deeper than a panel and slightly warmer, so the board reads as a
--- surface dice are thrown ONTO rather than as another UI panel.
-local function build(): (ScreenGui, Frame, Frame)
+-- The felt surface itself, as a real part in the shared scene.
+--
+-- A REAL PART RATHER THAN A DRAWN RECTANGLE, because the dice are now 3D objects
+-- in this space and need something to be visibly ON. A flat frame behind a
+-- ViewportFrame would sit at a fixed screen depth and the dice would slide
+-- across it without contact; a part in the scene shares their perspective, so a
+-- die near the far edge is genuinely further away and reads that way.
+local function buildFelt(parent: Instance): ()
+	local felt = Instance.new("Part")
+	felt.Name = "Felt"
+	felt.Anchored = true
+	felt.CanCollide = false
+	felt.CanQuery = false
+	felt.CanTouch = false
+	felt.CastShadow = false
+	felt.Material = Enum.Material.SmoothPlastic
+	felt.Color = UITheme.Colors.Felt
+	felt.Size = Vector3.new(FELT_HALF_X * 2, 0.4, FELT_HALF_Z * 2)
+	-- Top surface flush with FLOOR_Y, so a die resting at `radius` above the
+	-- floor is resting on the felt and not floating over it.
+	felt.CFrame = CFrame.new(0, FLOOR_Y - 0.2, 0)
+	felt.Parent = parent
+end
+
+-- THE FRAMING SOLVE.
+--
+-- Places the camera at the distance that makes the felt fill the frame, derived
+-- from the felt's own size, the camera's own field of view and the frame's
+-- measured aspect ratio -- never hand-tuned. A hand-tuned distance silently
+-- stops agreeing the moment any of the three changes, which is precisely how the
+-- previous renderer ended up drawing dice as specks.
+--
+-- THE MISTAKE THIS REPLACES, because it is an easy one to make again. The first
+-- version fitted the felt's 3D bounding RADIUS to the camera's vertical
+-- half-angle. That is wrong twice over: the felt's DEPTH is foreshortened on
+-- screen by the cosine of the pitch, so its projected height is much less than
+-- its radius; and the frame is far wider than it is tall, so the horizontal
+-- limit is a different distance entirely. Fitting the radius vertically solved
+-- for a requirement nothing had, and put the camera roughly twice as far away as
+-- it belonged -- the felt rendered at about a third of the tray.
+--
+-- So both axes are solved separately, in the space they are actually measured
+-- in, and the binding one wins.
+local function solveCamera(vp: ViewportFrame, cam: Camera): ()
+	local size = vp.AbsoluteSize
+	-- Before the first layout pass `AbsoluteSize` is (0,0). A fallback keeps the
+	-- camera somewhere sane for the frames before the resize signal corrects it,
+	-- rather than dividing by zero into a NaN CFrame -- which does not error, it
+	-- just renders nothing.
+	local aspect = if size.X > 0 and size.Y > 0 then size.X / size.Y else 1.75
+
+	local tanHalf = math.tan(math.rad(CAMERA_FOV) * 0.5)
+	if tanHalf <= 1e-6 then
+		return
+	end
+
+	-- The felt's half-extents AS PROJECTED. Width is unaffected by the pitch;
+	-- depth compresses by its cosine.
+	local halfWidth = FELT_HALF_X
+	local halfHeight = FELT_HALF_Z * math.cos(CAMERA_PITCH) + CAMERA_HEADROOM
+
+	-- The distance each axis needs on its own. Roblox's field of view is
+	-- VERTICAL, so the horizontal half-angle carries the aspect ratio.
+	local forHeight = halfHeight / tanHalf
+	local forWidth = halfWidth / (tanHalf * aspect)
+
+	local distance = math.max(forHeight, forWidth) / math.max(CAMERA_FILL, 0.05)
+
+	local eye = Vector3.new(
+		0,
+		math.sin(CAMERA_PITCH) * distance,
+		math.cos(CAMERA_PITCH) * distance
+	)
+	cam.CFrame = CFrame.lookAt(eye, Vector3.new(0, 0, 0))
+end
+
+-- The tray, the shared viewport, and the scene inside it.
+local function build(): (ScreenGui, Frame, ViewportFrame, Folder)
 	local player = Players.LocalPlayer
 	local gui = Instance.new("ScreenGui")
 	gui.Name = "DiceForgeBoard"
@@ -238,7 +367,6 @@ local function build(): (ScreenGui, Frame, Frame)
 	frame.BackgroundTransparency = 1
 	frame.Parent = gui
 
-	-- The playable interior container with a slim, equal border on all sides.
 	local interior = Instance.new("Frame")
 	interior.Name = "Interior"
 	interior.Size = UDim2.fromScale(1, 1)
@@ -253,22 +381,73 @@ local function build(): (ScreenGui, Frame, Frame)
 	stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
 	stroke.Parent = interior
 
-	-- Dice are parented HERE, one layer above the felt, so the renderer never
-	-- has to know about the tray's own children or their ZIndex.
-	local dice = Instance.new("Frame")
-	dice.Name = "Dice"
-	dice.Size = UDim2.fromScale(1, 1)
-	dice.BackgroundTransparency = 1
-	dice.ZIndex = 2
-	dice.Parent = interior
+	-- THE ONE SHARED SCENE. Every die in the game renders here.
+	--
+	-- FLAT, SHADOWLESS LIGHTING (operator-directed 2026-08-13). Reported as "some
+	-- of its face ahve a dark shade on them like shadow". The cause was lighting,
+	-- not geometry: an ambient of RGB 80 with a directional light meant any face
+	-- angled away from that one corner received only the dim ambient term and
+	-- rendered noticeably darker. On a tumbling die that reads as faces
+	-- flickering between shades. Full white ambient with the directional
+	-- contribution set to black gives every face identical illumination whichever
+	-- way it lands, which is also what keeps a numeral legible at any angle.
+	local vp = Instance.new("ViewportFrame")
+	vp.Name = "Scene"
+	vp.Size = UDim2.fromScale(1, 1)
+	vp.Position = UDim2.fromScale(0, 0)
+	vp.BackgroundTransparency = 1
+	vp.BorderSizePixel = 0
+	-- CLIPPED, unlike the old per-die frames. This one covers the whole tray, so
+	-- clipping is the containment backstop rather than a thing that cuts dice in
+	-- half: FR-1.4 already keeps every resting die inside the felt, and the
+	-- camera solve keeps the throw arc inside the frustum. Anything reaching this
+	-- boundary is a bug, and cropping it at the tray edge is better than letting
+	-- it draw over the HUD.
+	vp.ClipsDescendants = true
+	vp.Ambient = Color3.fromRGB(255, 255, 255)
+	vp.LightColor = Color3.fromRGB(0, 0, 0)
+	vp.LightDirection = Vector3.new(0, -1, 0)
+	vp.ZIndex = 2
+	vp.Parent = interior
 
-	-- Embedded Result Summary Bar at the bottom edge of the board container
+	local scene = Instance.new("Folder")
+	scene.Name = "Scene"
+	scene.Parent = vp
+
+	buildFelt(scene)
+
+	local cam = Instance.new("Camera")
+	cam.Name = "SceneCamera"
+	cam.FieldOfView = CAMERA_FOV
+	cam.Parent = vp
+	vp.CurrentCamera = cam
+
+	solveCamera(vp, cam)
+
+	-- RE-SOLVED WHENEVER THE FRAME CHANGES SIZE. The solve depends on the tray's
+	-- aspect ratio, which is not known until the GUI has been laid out -- at
+	-- construction `AbsoluteSize` is still (0,0) -- and changes again whenever the
+	-- window is resized or the device is rotated. A one-shot solve at build time
+	-- would therefore be computed from a fallback and then never corrected, which
+	-- is a framing bug that only appears on other people's screens (NFR-3).
+	table.insert(connections, vp:GetPropertyChangedSignal("AbsoluteSize"):Connect(function()
+		solveCamera(vp, cam)
+	end))
+
+	-- The result summary bar, at the bottom edge of the board. Drawn OVER the
+	-- viewport rather than inside the scene: it is a readout, not an object on
+	-- the table, and a 3D label would tumble with the perspective.
 	local resultBar = Instance.new("Frame")
 	resultBar.Name = "ResultBar"
 	resultBar.Size = UDim2.fromScale(0.96, 0.065)
 	resultBar.Position = UDim2.fromScale(0.02, 0.915)
 	resultBar.BackgroundColor3 = Color3.fromRGB(24, 19, 16)
 	resultBar.ZIndex = 5
+	-- HIDDEN UNTIL THERE IS A RESULT TO SHOW. It defaulted to visible, so a
+	-- player who had just joined and not yet rolled was shown an empty black
+	-- strip across the bottom of their board -- a readout of nothing, which reads
+	-- as a UI element that failed to load rather than as one with nothing to say.
+	resultBar.Visible = false
 	resultBar.Parent = interior
 
 	local rbCorner = Instance.new("UICorner")
@@ -292,7 +471,7 @@ local function build(): (ScreenGui, Frame, Frame)
 		gui.Parent = player:WaitForChild("PlayerGui")
 	end
 
-	return gui, frame, dice
+	return gui, frame, vp, scene
 end
 
 -- THE BACKDROP.
@@ -302,8 +481,13 @@ end
 -- default world -- baseplate, skybox, spawn, and the player's own avatar -- out
 -- of the shot. Deleting the pit deleted the only thing suppressing them, and the
 -- first flat build rendered the board as a floating panel with a Roblox
--- character standing in front of it. A 2D board still needs SOMETHING to be in
+-- character standing in front of it. The board still needs SOMETHING to be in
 -- front of; it just needs a colour rather than geometry.
+--
+-- NOTE THE SCENE INSIDE THE VIEWPORT IS NOT THE WORLD. A ViewportFrame renders
+-- its own children with its own camera and never sees the Workspace, so the
+-- dice's 3D scene cannot be intruded upon by the baseplate or the avatar. The
+-- backdrop is still needed for everything around the tray.
 --
 -- A FULL-SCREEN FRAME, NOT A SKYBOX CHANGE OR A LIGHTING EDIT. Both of those are
 -- global, shared, and would outlive this module in ways a teardown cannot
@@ -317,7 +501,6 @@ local function buildBackdrop(gui: ScreenGui): ()
 	backdrop.BackgroundColor3 = UITheme.Colors.BaseCream
 	backdrop.BackgroundTransparency = 0
 	backdrop.BorderSizePixel = 0
-	-- Behind every other child of this ScreenGui, including the tray.
 	backdrop.ZIndex = 0
 	backdrop.Parent = gui
 end
@@ -328,6 +511,12 @@ end
 -- swinging it around behind a board that does not move; the avatar is made
 -- transparent rather than destroyed, because destroying a character the server
 -- owns is not this module's business and would fight respawn.
+--
+-- THIS IS THE WORKSPACE CAMERA, NOT THE SCENE'S. The viewport has its own,
+-- solved in `build`, and the two never interact. The previous renderer's frame
+-- step re-parked the Workspace camera on EVERY frame, which was both redundant
+-- and a per-frame write to global state from a draw loop; doing it once here is
+-- the whole of what was needed.
 local function claimView(): ()
 	local camera = Workspace.CurrentCamera
 	if camera ~= nil then
@@ -373,19 +562,31 @@ function BoardView.isReady(): boolean
 	return built
 end
 
--- The frame dice parent themselves to. Named `getContainer` to match the pit's
--- API exactly, so the renderer's call site did not have to change meaning.
-function BoardView.getContainer(): Frame
-	local frame = container
-	if frame == nil then
-		error("[BoardView] getContainer before init", 2)
+-- The scene dice parent themselves into. Named to match the old `getContainer`
+-- in role -- "the thing a die is put inside" -- but it is a Folder in a 3D scene
+-- now rather than a Frame, so the name says `Scene` and the type change is
+-- visible at every call site rather than silently reinterpreted.
+function BoardView.getScene(): Folder
+	local scene = sceneRoot
+	if scene == nil then
+		error("[BoardView] getScene before init", 2)
 	end
-	return frame
+	return scene
 end
 
--- The interior's centre, in the same fraction-of-interior coordinates
--- `getAnchor` returns. Kept for FeedbackFX, which anchors floating payout text
--- to the middle of the board.
+-- The viewport the scene renders through. The renderer needs it only to confirm
+-- the scene is live; nothing outside this module changes its camera.
+function BoardView.getViewport(): ViewportFrame
+	local vp = viewport
+	if vp == nil then
+		error("[BoardView] getViewport before init", 2)
+	end
+	return vp
+end
+
+-- The interior's centre in SCREEN scale. Unchanged, and deliberately still 2D:
+-- FeedbackFX anchors floating payout text to the middle of the board and has no
+-- business knowing the interior became three-dimensional.
 function BoardView.getCenter(): UDim2
 	return UDim2.fromScale(0.5, 0.5)
 end
@@ -402,108 +603,196 @@ function BoardView.getRect(): (number, number, number, number)
 	return TRAY_X, TRAY_Y, TRAY_W, TRAY_H
 end
 
--- How big a die should be drawn, as a fraction of the interior, for a board
--- holding `count` dice. Interpolated rather than stepped so going from one die
--- to seven scales smoothly instead of snapping.
+-- The felt's half-extents in studs, for a caller that needs to reason about the
+-- playable area. Exposed for the same reason `getRect` is.
+function BoardView.getFeltExtents(): (number, number)
+	return FELT_HALF_X, FELT_HALF_Z
+end
+
+-- The height of the felt's surface. A die rests with its LOWEST GEOMETRY on this
+-- plane, which is not the same as its centre sitting one bounding-sphere radius
+-- above it.
 --
--- Returned as a SQUARE in scale terms only after the caller applies a
--- UIAspectRatioConstraint; a raw fraction of a non-square parent is not square
--- on screen. The renderer owns that constraint, because the renderer owns the
--- die's Instance.
-function BoardView.getDieScale(count: number): number
+-- THIS USED TO RETURN `FLOOR_Y + radius` AND THAT WAS WRONG. A bounding-sphere
+-- radius only describes where the centre goes for an actual sphere. The D2 is a
+-- flat coin whose sphere radius is its full width but whose half-THICKNESS is a
+-- fraction of that, so resting its centre a radius up left it hovering about
+-- three studs above the felt -- and because the camera is pitched, a hovering
+-- die also projects further out, so a coin well inside the felt in world
+-- coordinates was drawn overhanging its edge on screen. Every shape was wrong by
+-- a different amount, which is exactly what a single radius cannot express.
+--
+-- The renderer measures each die's true resting height from its own geometry in
+-- the orientation it will actually rest in, and adds it to this.
+function BoardView.getFloorY(): number
+	return FLOOR_Y
+end
+
+-- How big a die should be drawn, as a bounding-sphere RADIUS in studs, for a
+-- board holding `count` dice. Interpolated rather than stepped so going from one
+-- die to seven scales smoothly instead of snapping.
+--
+-- BEYOND `MAX_DICE` THE CURVE CONTINUES rather than clamping, down to a floor.
+-- The old `getDieScale` clamped its input to 7, which meant an eighth die would
+-- have been drawn at the seven-die size and the board would have overflowed. The
+-- operator's stated progression ceiling is 20, so shrinking past the current cap
+-- is a requirement, not a defensive nicety.
+function BoardView.getDieRadius(count: number): number
 	local n = count
 	if not isFinite(n) then
 		n = 1
 	end
-	n = math.clamp(math.floor(n), 1, MAX_DICE)
-	local t = (n - 1) / (MAX_DICE - 1)
-	return DIE_SCALE_SOLO + (DIE_SCALE_FULL - DIE_SCALE_SOLO) * t
+	n = math.max(1, math.floor(n))
+
+	if n <= MAX_DICE then
+		local t = (n - 1) / (MAX_DICE - 1)
+		return DIE_RADIUS_SOLO + (DIE_RADIUS_FULL - DIE_RADIUS_SOLO) * t
+	end
+
+	-- Past the cap, area-conserving: radius falls as 1/sqrt(count) so twice the
+	-- dice take the same total felt. Floored so a very large board still renders
+	-- something rather than converging on zero.
+	local shrink = math.sqrt(MAX_DICE / n)
+	return math.max(DIE_RADIUS_MIN, DIE_RADIUS_FULL * shrink)
 end
 
--- FR-1.4, the containment guarantee, in two dimensions.
+-- FR-1.4, THE CONTAINMENT GUARANTEE, in three dimensions.
 --
 -- CONTRACT
---   `position` is a point in INTERIOR-RELATIVE scale: {0,0} is the interior's
---   top-left corner and {1,1} its bottom-right. `extent` is the die's TRUE
---   MAXIMUM HALF-SIZE as a fraction of the interior, measured to the furthest
---   point of its geometry in ANY direction and in the orientation it will
---   actually be shown in -- not a nominal half-width. A square rotated 45
---   degrees mid-tumble reaches its half-DIAGONAL, and a caller that passes the
---   half-width has told the board the die is smaller than it is. Containment is
---   then exact for the size it was given and wrong for the die on screen; the
---   board cannot detect the difference. A negative or non-finite `extent` is
---   treated as zero.
+--   `position` is a point in WORLD STUDS in the scene. `radius` is the die's
+--   TRUE MAXIMUM bounding-sphere radius -- the furthest any part of its geometry
+--   reaches from its pivot, in ANY orientation. A sphere is used rather than a
+--   box precisely because the die tumbles: a box bound is only correct for one
+--   orientation, and the die passes through every other one on the way.
 --
--- GUARANTEES, for finite `position` and any `extent`:
+-- GUARANTEES, for any `position` and any `radius`:
 --   * Never errors, for any input, at any board or die size.
---   * The returned X and Y lie within `extent + REST_EPSILON` of the interior's
---     edges on every side.
---   * If the die is WIDER than the interior, that range inverts; rather than
---     letting `math.clamp` raise on an inverted range, the axis degrades to the
---     interior's centre exactly -- the same "dead centre" answer the pit gave.
+--   * The returned X and Z lie at least `radius + REST_EPSILON` inside the
+--     felt's edges on every side.
+--   * Y is untouched. Height is the animation's business; containment is about
+--     staying ON the table, and a die mid-throw is legitimately above it.
+--   * If the die is WIDER than the felt, that range inverts; rather than letting
+--     `math.clamp` raise on an inverted range, the axis degrades to the felt's
+--     centre exactly -- the same "dead centre" answer the pit and the flat board
+--     both gave.
 --
 -- Every degradation is deliberate, for the reason the pit's version gave: a die
 -- that cannot fit is a display problem, and an error thrown mid-roll would be a
 -- bigger one -- the payout is already credited by then either way.
-function BoardView.clampToBoard(position: UDim2, extent: number): UDim2
-	local half = safeExtent(extent) + REST_EPSILON
+function BoardView.clampToBoard(position: Vector3, radius: number): Vector3
+	local margin = safeRadius(radius) + REST_EPSILON
 
-	local lo = half
-	local hi = 1 - half
-
-	local function axis(value: number): number
+	local function axis(value: number, halfExtent: number): number
 		if not isFinite(value) then
-			return 0.5
+			return 0
 		end
-		if lo > hi then
-			return 0.5
+		local limit = halfExtent - margin
+		if limit <= 0 then
+			return 0
 		end
-		return math.clamp(value, lo, hi)
+		return math.clamp(value, -limit, limit)
 	end
 
-	return UDim2.fromScale(axis(position.X.Scale), axis(position.Y.Scale))
+	local y = if isFinite(position.Y) then position.Y else FLOOR_Y
+
+	return Vector3.new(
+		axis(position.X, FELT_HALF_X),
+		y,
+		axis(position.Z, FELT_HALF_Z)
+	)
 end
 
--- The resting position for slot `index` of `count`, in interior-relative scale.
--- No rotation is returned: the renderer supplies the orientation, because
--- orientation is where the server's chosen face is expressed and the board must
--- have no opinion on it.
+-- WHERE A DIE COMES TO REST -- sampled, not looked up.
 --
--- CONTRACT
---   `extent` carries the same meaning and the same demand as in `clampToBoard`.
+-- THIS IS THE HEART OF THE REBUILD. The old `getAnchor(index, count, extent)`
+-- returned a deterministic point from a precomputed table, so the same board
+-- produced an identical arrangement on every single throw and no amount of
+-- animation polish could make a roll feel unrehearsed. Positions are now
+-- SAMPLED uniformly across the felt.
+--
+-- `taken` carries the rest points already chosen for this same throw, and a
+-- candidate is rejected if it lands within `MIN_SEPARATION_FACTOR` radii of one
+-- of them. That is what lets dice intermingle -- they may sit close enough to
+-- touch, in any arrangement -- while never stacking into the same point.
+--
+-- BEST-EFFORT, NOT GUARANTEED. A crowded board can be genuinely unsatisfiable,
+-- and after `SCATTER_ATTEMPTS` the least-bad candidate is accepted rather than
+-- looping. Two dice slightly closer than ideal is a visual imperfection; a
+-- frame-time spike during a roll is a defect. Containment is applied to whatever
+-- is chosen, so the guarantee that matters is never the thing given up.
 --
 -- GUARANTEES:
---   * Never errors. Any `index` or `count` -- fractional, negative, out of
---     range, infinite or NaN -- resolves to the centre slot rather than
---     throwing.
---   * The returned position satisfies `clampToBoard`'s guarantees for the same
---     `extent`.
-function BoardView.getAnchor(index: number, count: number, extent: number): UDim2
-	local half = safeExtent(extent)
+--   * Never errors. Any `count`, any `radius`, any `taken` contents.
+--   * The result satisfies `clampToBoard` for the same `radius`.
+--   * Y is the FLOOR, not a resting centre height. The caller adds the die's own
+--     measured sit height, because only it knows the die's geometry -- see
+--     `getFloorY` for why a radius cannot stand in for that.
+function BoardView.sampleRestPoint(radius: number, taken: { Vector3 }): Vector3
+	local r = safeRadius(radius)
+	local minGap = r * 2 * MIN_SEPARATION_FACTOR * 0.5
+	local minGapSq = minGap * minGap
 
-	local offset: Slot = { x = 0, y = 0 }
-	if isFinite(index) and isFinite(count) then
-		local slots = LAYOUTS[math.clamp(math.floor(count), 1, MAX_DICE)]
-		if slots ~= nil then
-			offset = slots[math.floor(index)] or offset
+	-- Sample within the region a die can legally rest in, so a candidate is
+	-- rarely wasted on a point the clamp would pull back to the edge -- which
+	-- would pile dice along the borders.
+	local spanX = math.max(0, FELT_HALF_X - r - REST_EPSILON)
+	local spanZ = math.max(0, FELT_HALF_Z - r - REST_EPSILON)
+
+	local restY = FLOOR_Y
+
+	local best: Vector3? = nil
+	local bestClearance = -1
+
+	for _ = 1, SCATTER_ATTEMPTS do
+		local candidate = Vector3.new(
+			rng:NextNumber(-spanX, spanX),
+			restY,
+			rng:NextNumber(-spanZ, spanZ)
+		)
+
+		-- Distance to the nearest die already placed this throw, squared.
+		local nearestSq = math.huge
+		for _, other in ipairs(taken) do
+			local dx = candidate.X - other.X
+			local dz = candidate.Z - other.Z
+			local dSq = dx * dx + dz * dz
+			if dSq < nearestSq then
+				nearestSq = dSq
+			end
+		end
+
+		if nearestSq >= minGapSq then
+			return BoardView.clampToBoard(candidate, r)
+		end
+
+		-- Keep the roomiest near-miss, so the fallback is the best of what was
+		-- seen rather than simply the last thing tried.
+		if nearestSq > bestClearance then
+			bestClearance = nearestSq
+			best = candidate
 		end
 	end
 
-	-- Slot offsets are in [-1, 1] of the interior half-extent; the usable half
-	-- shrinks by the die's own extent so a slot at the edge still lands a whole
-	-- die inside.
-	local usable = math.max(0, 0.5 - half - REST_EPSILON)
-	local raw = UDim2.fromScale(0.5 + offset.x * usable, 0.5 + offset.y * usable)
-
-	return BoardView.clampToBoard(raw, half)
+	local fallback = best or Vector3.new(0, restY, 0)
+	return BoardView.clampToBoard(fallback, r)
 end
 
--- Where the tumble begins: directly above its own slot, off the top of the
--- interior. Deliberately NOT clamped -- the start point is outside the board on
--- purpose, and FR-1.4 constrains where a die comes to REST.
-function BoardView.getSpawnPoint(index: number, count: number): UDim2
-	local anchor = BoardView.getAnchor(index, count, 0)
-	return UDim2.fromScale(anchor.X.Scale, anchor.Y.Scale - SPAWN_ABOVE)
+-- WHERE A THROW BEGINS: above and in front of the felt, spread laterally.
+--
+-- Deliberately OUTSIDE the felt on both axes -- FR-1.4 constrains where a die
+-- comes to REST, not where it starts, and a die that begins inside the tray has
+-- not been thrown into it.
+--
+-- Randomised per die, so the incoming arcs are not parallel. Parallel arcs are
+-- the single strongest tell that a throw was animated rather than simulated, and
+-- they were unavoidable in the old renderer because every die started directly
+-- above its own fixed slot.
+function BoardView.sampleThrowPoint(): Vector3
+	return Vector3.new(
+		rng:NextNumber(-THROW_SPREAD_X, THROW_SPREAD_X),
+		THROW_HEIGHT + rng:NextNumber(-1.5, 1.5),
+		-(FELT_HALF_Z + THROW_BACK_Z) + rng:NextNumber(-1.5, 1.5)
+	)
 end
 
 function BoardView.init(_net: any): ()
@@ -511,11 +800,11 @@ function BoardView.init(_net: any): ()
 		return
 	end
 
-	local gui, frame, dice = build()
+	local gui, _frame, vp, scene = build()
 	buildBackdrop(gui)
 	screenGui = gui
-	tray = frame
-	container = dice
+	viewport = vp
+	sceneRoot = scene
 	built = true
 
 	claimView()
@@ -534,7 +823,9 @@ local diceColorsByShape = {
 
 function BoardView.updateResultSummary(rollResults: { { shape: string, value: number } }?): ()
 	if screenGui == nil then return end
-	local interior = screenGui:FindFirstChild("Tray", true) and screenGui.Tray:FindFirstChild("Interior")
+	local trayFrame = screenGui:FindFirstChild("Tray")
+	if trayFrame == nil then return end
+	local interior = trayFrame:FindFirstChild("Interior")
 	if interior == nil then return end
 	local resultBar = interior:FindFirstChild("ResultBar")
 	if resultBar == nil then return end
@@ -568,9 +859,10 @@ function BoardView.updateResultSummary(rollResults: { { shape: string, value: nu
 	local totalItems = #shapeOrder
 	local itemWidth = math.min(0.18, 0.90 / math.max(1, totalItems))
 
-	for i, shapeName in ipairs(shapeOrder) do
+	for _, shapeName in ipairs(shapeOrder) do
 		local info = grouped[shapeName]
 		local item = Instance.new("Frame")
+		item.Name = "Result_" .. shapeName
 		item.Size = UDim2.fromScale(itemWidth, 0.76)
 		item.BackgroundColor3 = Color3.fromRGB(16, 13, 11)
 		item.ZIndex = 6
@@ -590,6 +882,7 @@ function BoardView.updateResultSummary(rollResults: { { shape: string, value: nu
 			else string.format("%dx %s (SUM: %d)", info.count, shapeName, info.sum)
 
 		local lbl = Instance.new("TextLabel")
+		lbl.Name = "Label"
 		lbl.Size = UDim2.fromScale(1, 1)
 		lbl.BackgroundTransparency = 1
 		lbl.Font = UITheme.FontHeading
@@ -607,11 +900,12 @@ end
 -- so `init` after `shutdown` rebuilds cleanly.
 --
 -- THE BACKDROP IS GLOBAL STATE AND IS PUT BACK. The ScreenGui itself is ours and
--- dies with us, but `claimView` reached outside this module twice -- it made the
--- camera Scriptable and it made the player's avatar invisible. Both belong to
--- the DataModel, not to the board, and a teardown that left either in place
--- would strand the player behind an invisible character with a frozen camera and
--- no board to explain it.
+-- dies with it -- including the whole 3D scene, which is parented inside it --
+-- but `claimView` reached outside this module twice: it made the camera
+-- Scriptable and it made the player's avatar invisible. Both belong to the
+-- DataModel, not to the board, and a teardown that left either in place would
+-- strand the player behind an invisible character with a frozen camera and no
+-- board to explain it.
 function BoardView.shutdown(): ()
 	for _, connection in ipairs(connections) do
 		connection:Disconnect()
@@ -623,8 +917,8 @@ function BoardView.shutdown(): ()
 		gui:Destroy()
 	end
 	screenGui = nil
-	tray = nil
-	container = nil
+	viewport = nil
+	sceneRoot = nil
 	built = false
 
 	local camera = Workspace.CurrentCamera

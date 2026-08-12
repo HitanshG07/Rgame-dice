@@ -1,7 +1,7 @@
 --!strict
 -- DiceRenderer.luau
--- Draws the player's dice on the 2D board and animates a roll (SRS FR-1.2,
--- FR-1.3, FR-2.6; HLD §4.3).
+-- Throws the player's dice into the board's shared 3D scene and lands them on
+-- the face the server chose (SRS FR-1.2, FR-1.3, FR-2.6; HLD §4.3).
 --
 -- THIS MODULE SHOWS RESULTS. IT NEVER PRODUCES THEM. The server samples the
 -- outcome from the die's mass distribution and credits the payout BEFORE this
@@ -12,40 +12,63 @@
 -- index is substituted, never rejected, because refusing to animate would hide
 -- a result the player has already been paid.
 --
--- FLAT, BY OPERATOR DECISION. This was a 3D renderer: real solids, real
--- tumbling, a face-normal rotation solve. The operator asked for a 2D board and
--- was told plainly what that costs -- see BoardView's header, which records the
--- trade in full. The short version: mass makes a face land LESS often (FR-2),
--- and in 3D you could WATCH that happen to a lopsided solid. Flat, the same rule
--- is just a number appearing less often, which looks exactly like bad luck.
+--------------------------------------------------------------------------------
+-- THE REBUILD, AND WHAT IT REPLACED
+--------------------------------------------------------------------------------
 --
--- SO THIS FILE FIGHTS FOR THE READ, three ways, and they are the reason it is
--- not simply a label that changes text:
+-- Every die used to live in its OWN ViewportFrame, with its own camera, pinned
+-- to a slot looked up from a table indexed by (index, count). The operator's
+-- complaint was that it "feels like its in a restricted box like area", and that
+-- was not a matter of polish -- each die genuinely was in a box, and three
+-- things followed that no amount of tuning could reach:
 --
---   1. THE DIE STILL TUMBLES. It spins through multiple whole turns and settles.
---      A roll remains an EVENT with a duration, not a state change. The spin
---      budget is carried over unchanged from the 3D version, including its
---      payout bonus -- a big win still buys a longer, fuller tumble.
---   2. EVERY FACE CARRIES A WEIGHT BAR. Mass is visible ON THE DIE while it is
---      on the board, not only inside the forge panel. A heavy face is legibly
---      heavy at a glance (FR-1.3).
---   3. THE SETTLE DRAGS AWAY FROM THE HEAVY FACE. As the spin decays the die
+--   * THE SAME BOARD LANDED THE SAME WAY EVERY THROW. Positions came from
+--     `LAYOUTS[count][index]`. Late jitter was bolted on top, but the underlying
+--     arrangement was still a grid with noise added.
+--   * DICE COULD NOT INTERMINGLE. Separate viewports are separate 3D scenes. Two
+--     dice could not be near each other, because they were never in the same
+--     space at all.
+--   * THERE WAS NO FLOOR. Bounces were faked by moving each die's CAMERA up and
+--     down within its own frame -- so the "bounce" was the viewer bobbing, not
+--     the die falling, and every die bounced against its own private plane.
+--
+-- Now there is ONE scene, owned by BoardView, with a real felt plane and one
+-- camera. Dice are models at real stud coordinates in that scene. The result:
+--
+--   * A GENUINE BALLISTIC ARC. `solveThrow` computes the launch velocity that
+--     carries a die from its release point to its landing point under constant
+--     gravity, and the die follows `p = p0 + v*t + 0.5*g*t^2`. The parabola is
+--     not drawn; it is integrated.
+--   * TWO DAMPED BOUNCES against the shared floor, each with its own arc solved
+--     from a restitution coefficient, so the second is visibly smaller than the
+--     first and both are smaller than the throw.
+--   * ORGANIC SCATTER. Landing points are sampled per throw with a minimum
+--     separation, so dice cluster and intermingle differently every time.
+--   * NO DIE-COUNT CEILING. Visuals are pooled on demand rather than allocated
+--     as a fixed array of seven. The operator's 20-dice progression ceiling
+--     needs no change here.
+--
+-- WHAT SURVIVED, because it was right. Mass is the heart of the game (FR-2) and
+-- must stay legible:
+--
+--   1. THE DIE STILL TUMBLES end over end for the whole flight, so a roll is an
+--      EVENT with a duration rather than a state change. The spin budget and its
+--      payout bonus carry over unchanged -- a big win still buys a longer,
+--      fuller tumble.
+--   2. EVERY DIE CARRIES A WEIGHT BAR on the board (FR-1.3), so a heavy face is
+--      legible at a glance without opening the forge. It is a billboarded 2D
+--      overlay tracking the die's projected position, because a bar drawn INTO
+--      the scene would tumble with the die and become unreadable.
+--   3. THE SETTLE DRAGS AWAY FROM THE HEAVY FACE. As the tumble decays the die
 --      leans off its heavy side, so it visibly FIGHTS to avoid resting there.
---      This is cosmetic -- it cannot and does not alter the outcome, which
---      arrived from the server already decided -- but it makes the mechanic's
---      DIRECTION observable, which is the whole thing that flatness threatened.
+--      Cosmetic -- it cannot and does not alter the outcome, which arrived from
+--      the server already decided -- but it makes the mechanic's DIRECTION
+--      observable.
 --
--- WHY THE DIE IS A SQUARE REGARDLESS OF SHAPE. A D20 drawn as a flat icosagon is
--- an unreadable smudge at board size, and twenty tiny numerals around a rim are
--- illegible on a phone (NFR-3). Every shape is therefore drawn as one square
--- tile showing ONE numeral -- the face that is up -- with the shape named on it.
--- The face COUNT still comes from the catalog and still governs what can land;
--- only the silhouette is uniform.
---
--- WHY AN UNKNOWN SHAPE IS DRAWN UNNUMBERED. Until StateSync says what this die
--- is, printing a numeral would be asserting a face this module has not been
--- told. An unnumbered tile is honest; a numbered one is a guess that will
--- contradict the credited result.
+-- WHY AN UNKNOWN SHAPE DRAWS NOTHING. Until StateSync says what a die is,
+-- rendering some default solid would be asserting a shape this module has not
+-- been told, and its numerals would contradict the credited result. An absent
+-- die is honest; a guessed one is a lie that looks like a feature.
 --
 -- EVERY COLOUR COMES FROM UITheme, for the reason UITheme's own header gives.
 
@@ -61,16 +84,14 @@ local DiceRenderer = {}
 -- Constants
 --------------------------------------------------------------------------------
 
-local MAX_DICE = 7                 -- SRS FR-1.1
-local MAX_FACES = 20               -- the D20, the largest shape in DiceCatalog
 local DEFAULT_SHAPE = "D6"
 
 -- Face counts by shape id. Mirrors DiceCatalog; the renderer needs only the
 -- count, never the mass rules, and requiring the catalog here would pull a
 -- server-shaped dependency into the view layer for one integer.
 --
--- An id absent from this table is an UNKNOWN shape and is drawn unnumbered
--- rather than guessed at.
+-- An id absent from this table is an UNKNOWN shape and draws no die rather than
+-- a guessed one.
 local FACE_COUNTS: { [string]: number } = {
 	D2 = 2,
 	D3 = 3,
@@ -82,14 +103,75 @@ local FACE_COUNTS: { [string]: number } = {
 	D20 = 20,
 }
 
--- Animation. Carried over from the 3D renderer unchanged, because the timing was
--- tuned against real rolls and flatness does not change how long a throw should
--- feel.
-local MIN_DURATION = 0.85
-local MAX_DURATION = 2.40
+-- Where the generated solids live. The renderer never builds geometry.
+local DICE_SOURCE = "dice_faces"
 
--- Spin budget, in whole turns plus a fraction. The measured 3D tumble ran 6.11
--- turns; this keeps the same band so the flat die does not feel cheaper.
+--------------------------------------------------------------------------------
+-- Flight timing.
+--
+-- Split into the throw and its two bounces rather than given as one duration,
+-- because each phase is a separate ballistic solve and their lengths are what
+-- make the motion read as physical. A single blended curve was what the old
+-- renderer did and it read as an object being moved rather than falling.
+--------------------------------------------------------------------------------
+
+-- Gravity, in studs per second squared. NOT Roblox's 196.2: the felt is roughly
+-- 26 studs across and a die is a couple of studs, so real-world gravity at that
+-- scale drops a die the height of the throw in under a fifth of a second and the
+-- whole roll is over before the eye registers it. This is tuned so the arc reads
+-- at the scale the scene is actually built at -- which is the same reason film
+-- miniatures are shot at high frame rates.
+local GRAVITY = 95.0
+
+-- The throw's airtime, before the first bounce. A bigger payout buys a longer
+-- one, within this band.
+--
+-- SHORT, AND THAT IS A FRAMING CONSTRAINT RATHER THAN A TASTE. `solveThrow`
+-- gives the die whatever launch velocity the requested airtime demands, and for
+-- any airtime longer than a free fall that velocity points UPWARD -- the longer
+-- the throw, the higher the arc. At 0.62-0.95s the apex reached about 12 studs,
+-- which projects clean off the top of the frame: measured mid-roll, the felt was
+-- EMPTY because every die was above the shot. The visible band above the felt is
+-- only about five studs at the far edge, so the arc has to fit inside it.
+--
+-- Duration comes from the bounces instead, which is where it belongs.
+local THROW_TIME_MIN = 0.40
+local THROW_TIME_MAX = 0.50
+
+-- COEFFICIENT OF RESTITUTION. Each bounce returns this fraction of the vertical
+-- speed it arrived with, so bounce heights fall off as the square. 0.42 gives a
+-- clearly visible first bounce and a small, settling second one -- dice on felt
+-- are quite dead, and a bouncier value reads as a rubber ball.
+local RESTITUTION = 0.55
+
+-- How much horizontal speed survives each floor contact. Below 1.0 so a die
+-- slows as it skips, which is what makes the final rest look like the end of a
+-- motion rather than a stop.
+--
+-- 0.45 RATHER THAN 0.62, and the reason is geometric as much as physical. The
+-- further a die travels after its first contact, the further BACK that contact
+-- has to be for the bounces to still deliver it to its rest point -- and for a
+-- die resting near the far edge, "further back" runs off the felt, where the
+-- clamp takes over and the exactness is lost. Measured at 0.62 the residual the
+-- settle had to absorb reached 1.4 studs; at 0.45 it stays under one, which is
+-- inside a die's own radius and reads as rocking into place rather than sliding.
+-- Felt is also genuinely a high-friction surface, so this is the more physical
+-- value in the first place.
+local FRICTION = 0.45
+
+-- Bounces before the die is at rest. The operator asked for two.
+local BOUNCE_COUNT = 2
+
+-- After the last bounce, the die eases from wherever it touched down to its
+-- exact sampled rest point, unwinding the last of its spin onto the chosen
+-- face. This is the only non-ballistic segment, and it is deliberately short:
+-- long enough to look like a die rocking to a halt, short enough that nobody
+-- sees it slide.
+local SETTLE_TIME = 0.34
+
+-- Spin budget, in whole turns plus a fraction, spent across the whole flight.
+-- Carried over from the previous renderer, whose timing was tuned against real
+-- rolls.
 local SPIN_TURNS_MIN = 3
 local SPIN_TURNS_MAX = 5
 local SPIN_TURNS_PAYOUT_BONUS = 2
@@ -97,101 +179,69 @@ local SPIN_FRACTION_MIN = 0.25
 local SPIN_FRACTION_MAX = 0.75
 local TAU = math.pi * 2
 
--- The arc a die travels as it is dealt in. Purely vertical would read as a drop;
--- a slight lateral drift reads as a throw.
-local DEAL_DRIFT = 0.06
-
 -- How far the die leans off its heavy side during the settle, in radians. Small
 -- on purpose: this is a lean, not a wobble, and anything larger reads as the
 -- animation glitching rather than as weight.
 local HEAVY_LEAN = 0.14
 
--- Overshoot on the final settle, as a fraction of the die's own size. The die
--- arrives slightly past its slot and eases back, which is what makes it look
--- like it was thrown rather than moved.
-local SETTLE_OVERSHOOT = 0.10
-
--- Mass at or above this fraction of a die's total makes a face read as HEAVY:
--- its weight bar goes full-width and gold. Matched to the 3D renderer's glow
--- threshold so "heavy" means the same thing it meant before.
-local GLOW_THRESHOLD = 0.55
-
--- Face-tile proportions, as fractions of the die tile.
-local NUMERAL_H = 0.62
-local SHAPE_H = 0.17
-local BAR_H = 0.07
-local BAR_INSET = 0.10
-
--- The ViewportFrame camera.
---
--- `DiceMeshBuilder` normalises every die so its furthest corner reaches 3.0
--- studs from centre -- a 6.0 "diameter" in the builder's terms -- precisely so
--- ONE camera distance frames every shape identically. If TARGET_EXTENT changes,
--- these follow it.
---
--- THE DISTANCE IS NOT A CONSTANT. It is solved per model in `applyModel` from
--- that die's own measured radius, because two attempts at a hand-tuned number
--- were both wrong -- the value has to agree with whatever the builder's
--- normalisation actually produced, and only measuring the clone can establish
--- that. A camera three times too far away renders a perfectly good die as a
--- speck of thin edges, which is indistinguishable from broken geometry.
-local CAMERA_FOV = 50
--- Fraction of the frame the die should occupy. Below 1.0 leaves breathing room
--- so a tumbling die's corners never clip the viewport edge -- but not much
--- below: the die IS the game, and a solid floating in a large empty tile is the
--- same "die is a speck" complaint that ended the 3D pit and then the first flat
--- board.
---
--- 1.34 was too far the other way -- it cropped the cube's corners and pushed the
--- die under the shape label. The radius being solved against is the worst-case
--- CORNER reach, which a die only presents briefly mid-tumble, so filling just
--- under that frames the resting solid generously while leaving the corners room
--- to swing through.
-local CAMERA_FILL = 0.55
-
 -- THE RESTING TILT. A die parked square to the camera shows one face filling the
--- frame and reads as a flat coloured square -- which is exactly what a
--- ViewportFrame was adopted to avoid. Resting it a few degrees off both axes
--- shows three faces at once, so the solid is legible as a solid even when
+-- frame and reads as a flat coloured square. Resting it a few degrees off both
+-- axes shows three faces at once, so the solid is legible as a solid even when
 -- nothing is moving.
 --
--- Applied to the CAMERA, not the die, so the face the server chose still points
--- squarely at the viewer and `rotationShowingFace` stays exactly true.
-local REST_TILT_X = math.rad(22)
-local REST_TILT_Y = math.rad(28)
+-- Applied ON TOP of the face-showing rotation, so the face the server chose
+-- still points essentially at the viewer and `rotationShowingFace` stays true.
+local REST_TILT = CFrame.Angles(math.rad(-9), math.rad(16), math.rad(6))
 
--- Where the dice models live once generated. The renderer never builds geometry
-local DICE_FOLDER = "DiceGroupFinal"
+-- Mass at or above this fraction of an even share makes a face read as HEAVY:
+-- its weight bar goes full-width and gold.
+local GLOW_THRESHOLD = 0.55
+
+-- The weight bar overlay, in screen scale relative to the tray interior.
+local BAR_W = 0.052
+local BAR_H = 0.0095
 
 --------------------------------------------------------------------------------
 -- Types
 --------------------------------------------------------------------------------
 
+-- One ballistic segment: a launch point, a launch velocity, and how long the
+-- die is in the air before it next touches the floor.
+type Arc = {
+	origin: Vector3,
+	velocity: Vector3,
+	duration: number,
+}
+
 type DieVisual = {
-	tile: Frame,
-	modelRadius: number,
-	-- The 3D solid currently representing the die.
-	-- nil until a known shape arrives, because a die whose shape is unknown must
-	-- not be drawn as some other shape.
+	-- The 3D solid. nil until a known shape arrives, because a die whose shape is
+	-- unknown must not be drawn as some other shape.
 	model: Model?,
 	modelShape: string?,
-	numeral: TextLabel,
-	shapeTag: TextLabel,
+	-- The solid's own bounding-sphere radius as generated, before scaling. Used
+	-- to scale it to the board's chosen radius for the current die count.
+	sourceRadius: number,
+	-- The weight bar, a 2D overlay tracking the die's projected position.
 	bar: Frame,
 	barFill: Frame,
-	stroke: UIStroke,
+	-- Whether this die HAS a bar worth showing (its masses are readable), kept
+	-- separate from the Frame's own `Visible`. The frame step also hides a bar
+	-- whose die has gone behind the camera, and without a separate record of the
+	-- intent there is nothing to restore it FROM -- a bar hidden once for a
+	-- transient reason stays hidden for the rest of the session.
+	barShown: boolean,
 	shape: string,
 	faceCount: number,
-	-- false while the authoritative shape for this slot is still unknown. An
-	-- unnumbered die is honest; a numbered one would be asserting a face.
+	-- false while the authoritative shape for this slot is still unknown.
 	numbered: boolean,
 	-- Normalised mass per face, as a fraction of this die's total. Display only.
 	weights: { number },
-	-- Half-size as a fraction of the interior, INCLUDING the diagonal reach of a
-	-- rotated square. BoardView's containment contract demands true maximum
-	-- extent in the orientation shown, and a spinning square reaches its
-	-- half-diagonal, not its half-width.
-	extent: number,
+	-- Board radius in studs at the current die count.
+	radius: number,
+	-- How far this die's pivot sits above the felt when it is at rest, measured
+	-- from its own geometry in its own resting orientation. NOT derivable from
+	-- `radius` -- see `measureSitHeight`.
+	sitHeight: number,
 }
 
 type DieSlot = {
@@ -199,17 +249,19 @@ type DieSlot = {
 	inUse: boolean,
 	animating: boolean,
 	elapsed: number,
-	duration: number,
-	startPos: UDim2,
-	endPos: UDim2,
+	-- The flight: the throw arc followed by one arc per bounce.
+	arcs: { Arc },
+	-- Total airtime across every arc, so the settle knows when it begins.
+	flightTime: number,
+	restPos: Vector3,
+	-- Where the last bounce put the die, which is where the settle eases FROM.
+	touchdown: Vector3,
 	spinTotal: number,
 	spinDir: number,
-	drift: number,
 	heavyLean: number,
 	faceIndex: number,
-	-- The 3D tumble. `spinAxis` is the axis the die turns about on its way to the
-	-- answer, and `finalRot` is the orientation that shows the server's face --
-	-- the destination the residual spin unwinds onto.
+	-- The axis the die tumbles about in flight, and the orientation that shows
+	-- the server's face -- the destination the residual spin unwinds onto.
 	spinAxis: Vector3,
 	finalRot: CFrame,
 }
@@ -222,15 +274,23 @@ type Net = {
 }
 
 --------------------------------------------------------------------------------
--- State. Fixed size, allocated once.
+-- State
 --------------------------------------------------------------------------------
 
+-- Grown on demand rather than preallocated to a fixed seven. The old fixed pool
+-- was itself the die-count ceiling: `for i = 1, MAX_DICE` appeared in the frame
+-- step, the teardown and the refresh, so raising the cap meant finding every
+-- one of them.
 local slots: { DieSlot } = {}
 local started = false
 local rng = Random.new()
 
 local connections: { RBXScriptConnection } = {}
 local frameConnection: RBXScriptConnection? = nil
+
+-- The overlay layer the weight bars are drawn on. Owned by this module and
+-- parented into the board's interior.
+local overlay: Frame? = nil
 
 -- Last authoritative dice configuration seen on StateSync. Display only: it
 -- decides how a die LOOKS, never what it rolls.
@@ -244,43 +304,39 @@ local function isFinite(value: number): boolean
 	return value == value and value ~= math.huge and value ~= -math.huge
 end
 
+local function isFiniteVector(v: Vector3): boolean
+	return isFinite(v.X) and isFinite(v.Y) and isFinite(v.Z)
+end
+
 --------------------------------------------------------------------------------
--- The 3D dice: sourcing, and the rotation that shows a chosen face
+-- The solids, and the rotation that shows a chosen face
 --------------------------------------------------------------------------------
 
--- The folder of generated solids. Absent is a legitimate state rather than an
--- error: the models are generated by the server at boot and replicate
--- asynchronously, so a client can be fully initialised before they arrive. A
--- missing die falls back to the flat numeral and must never take the renderer
--- down.
-local diceFolder: Folder? = nil
-
-local function findDiceFolder(): Folder?
-	if diceFolder ~= nil and diceFolder.Parent ~= nil then
-		return diceFolder
-	end
-	local found = Workspace:FindFirstChild(DICE_FOLDER)
-	if found ~= nil and (found:IsA("Folder") or found:IsA("Model")) then
-		diceFolder = found :: Folder
-		return found :: Folder
+-- The source folder. Absent is a legitimate state rather than an error: the
+-- models are generated by the server at boot and replicate asynchronously, so a
+-- client can be fully initialised before they arrive. A missing solid means a
+-- die is not drawn this frame, and must never take the renderer down.
+local function findSource(): Folder?
+	local found = ReplicatedStorage:FindFirstChild(DICE_SOURCE)
+	if found ~= nil and found:IsA("Folder") then
+		return found
 	end
 	return nil
 end
 
--- Called when the dice folder shows up late, so tiles that already rendered
--- without a solid can acquire one. Assigned by `init`; nil before then.
+-- Called when the solids show up late, so dice that could not be drawn can
+-- acquire their models. Assigned by `init`; nil before then.
 local onDiceAvailable: (() -> ())? = nil
 
 -- Watches for late replication. Without this, a client whose first StateSync
--- beat the models would keep its blank tiles until the NEXT state change --
--- which, on a player who is not rolling, may be never.
+-- beat the models would keep an empty board until the NEXT state change --
+-- which, for a player who is not rolling, may be never.
 local function watchForDice(): RBXScriptConnection?
-	if findDiceFolder() ~= nil then
+	if findSource() ~= nil then
 		return nil
 	end
-	return Workspace.ChildAdded:Connect(function(child: Instance)
-		if child.Name == DICE_FOLDER and child:IsA("Folder") then
-			diceFolder = child :: Folder
+	return ReplicatedStorage.ChildAdded:Connect(function(child: Instance)
+		if child.Name == DICE_SOURCE and child:IsA("Folder") then
 			local notify = onDiceAvailable
 			if notify ~= nil then
 				notify()
@@ -289,58 +345,131 @@ local function watchForDice(): RBXScriptConnection?
 	end)
 end
 
+-- The furthest any part of a model reaches from its pivot. Measured rather than
+-- assumed: `GetExtentsSize` returns an AXIS-ALIGNED box that includes the flat
+-- numeral plates standing proud of each face, and on the D6 it overstates the
+-- solid by more than 3x. The honest measure for a tumbling object is the
+-- bounding SPHERE, because the die presents every orientation in turn.
+local function measureRadius(model: Model): number
+	local centre = model:GetPivot().Position
+	local radius = 0
+	for _, d in ipairs(model:GetDescendants()) do
+		if d:IsA("BasePart") and d.Name ~= "Pivot" then
+			local reach = (d.Position - centre).Magnitude + d.Size.Magnitude * 0.5
+			if reach > radius then
+				radius = reach
+			end
+		end
+	end
+	return radius
+end
+
+-- HOW FAR A DIE'S PIVOT SITS ABOVE THE FELT WHEN IT IS AT REST.
+--
+-- WHY THIS IS MEASURED AND NOT DERIVED. The obvious answer -- rest the centre one
+-- bounding-sphere radius above the floor -- is only correct for a sphere. The D2
+-- is a flat coin: its sphere radius is its full width, but lying flat it stands
+-- barely a fraction of that tall. Resting it a radius up left it hovering about
+-- three studs above the felt, and because the camera is pitched, a hovering die
+-- also projects further from the board's centre -- so a coin comfortably inside
+-- the felt was drawn overhanging its edge. Every shape was wrong by a different
+-- amount, which is precisely what one radius cannot express.
+--
+-- So the die is placed at the origin in the orientation it will REST in, and its
+-- lowest surface is measured. Shape-agnostic by construction: a coin sits on its
+-- half-thickness, a cube on half its edge, an icosahedron on its inradius, and a
+-- shape added to the catalog tomorrow sits correctly with no entry anywhere.
+--
+-- Each part's downward reach is the projection of its half-extents onto world
+-- -Y, which is the standard axis-aligned bound of an oriented box -- three
+-- multiplies rather than eight corner transforms, because this runs once per die
+-- per roll and a D12 carries 132 parts.
+local function measureSitHeight(model: Model, rotation: CFrame): number
+	model:PivotTo(rotation)
+
+	local lowest = math.huge
+	for _, d in ipairs(model:GetDescendants()) do
+		if d:IsA("BasePart") then
+			local cf = d.CFrame
+			local half = d.Size * 0.5
+			local reach = math.abs(cf.RightVector.Y) * half.X
+				+ math.abs(cf.UpVector.Y) * half.Y
+				+ math.abs(cf.LookVector.Y) * half.Z
+			local bottom = cf.Position.Y - reach
+			if bottom < lowest then
+				lowest = bottom
+			end
+		end
+	end
+
+	if lowest == math.huge or not isFinite(lowest) then
+		return 0
+	end
+	-- The rotation carried no translation, so the pivot is at the origin and the
+	-- lowest surface's depth below it IS the height the pivot must sit at.
+	return -lowest
+end
+
 -- THE ROTATION SOLVE -- the whole reason the builder records face normals.
 --
--- The server chose a face. This returns the CFrame that turns the die so that
--- face points at the camera, which sits on +Z looking back toward the origin.
+-- The server chose a face. This returns the rotation that turns the die so that
+-- face points UP, out of the felt, because a die at rest on a table shows its
+-- answer on top. (The old flat board pointed the face at the CAMERA, which was
+-- right when a die was a tile in its own frame and is wrong now that it is an
+-- object lying on a surface.)
 --
 -- The model's local face normal is read from the attribute the builder wrote
--- when it generated the geometry (a numeral's offset from the centroid IS its
--- outward normal). `CFrame.fromMatrix` is not needed: rotating the normal onto
--- +Z is a single axis-angle turn about the axis perpendicular to both.
+-- when it generated the geometry -- a numeral's offset from the centroid IS its
+-- outward normal.
 --
--- DEGENERATE CASES ARE REAL AND BOTH ARE HANDLED. When the normal already
--- points at the camera the cross product is zero-length and its `.Unit` is NaN,
--- which would silently poison every subsequent CFrame; when it points directly
--- away, the axis is likewise undefined but a half-turn IS required. Neither can
--- be left to float behaviour -- a NaN CFrame does not error, it just makes the
--- die vanish.
+-- DEGENERATE CASES ARE REAL AND BOTH ARE HANDLED. When the normal is already up
+-- the cross product is zero-length and its `.Unit` is NaN, which would silently
+-- poison every subsequent CFrame; when it points straight down the axis is
+-- likewise undefined but a half-turn IS required. Neither can be left to float
+-- behaviour -- a NaN CFrame does not error, it just makes the die vanish.
 local function rotationShowingFace(model: Model, faceIndex: number): CFrame
 	local normal = model:GetAttribute("FaceNormal" .. tostring(faceIndex))
-	local up = model:GetAttribute("FaceUp" .. tostring(faceIndex))
-	
 	if typeof(normal) ~= "Vector3" then
 		return CFrame.identity
 	end
 
-	local n = (normal :: Vector3).Unit
-	local u = if typeof(up) == "Vector3"
-		then (up :: Vector3).Unit
-		else (if math.abs(n.Y) < 0.99 then (Vector3.new(0, 1, 0) - n * n.Y).Unit else Vector3.new(0, 0, -n.Y).Unit)
+	local n = normal :: Vector3
+	if n.Magnitude < 1e-4 then
+		return CFrame.identity
+	end
+	n = n.Unit
 
-	-- Ensure u is orthogonal to n
-	u = (u - n * u:Dot(n)).Unit
-	local r = u:Cross(n).Unit
+	local up = Vector3.new(0, 1, 0)
+	local dot = math.clamp(n:Dot(up), -1, 1)
 
-	return CFrame.fromMatrix(Vector3.zero, r, u, n)
+	if dot > 0.9999 then
+		-- Already up.
+		return CFrame.identity
+	end
+	if dot < -0.9999 then
+		-- Pointing straight down: a half turn about any horizontal axis.
+		return CFrame.fromAxisAngle(Vector3.new(1, 0, 0), math.pi)
+	end
+
+	local axis = n:Cross(up)
+	if axis.Magnitude < 1e-6 then
+		return CFrame.identity
+	end
+	return CFrame.fromAxisAngle(axis.Unit, math.acos(dot))
 end
 
--- Swaps the solid inside a tile's viewport to `shapeId`, or clears it when the
--- shape is unknown or unavailable. Idempotent: re-applying the same shape is a
--- no-op, so a StateSync every roll does not rebuild seven models a second.
+-- Swaps a slot's solid to `shapeId`, or clears it when the shape is unknown or
+-- unavailable. Idempotent: re-applying the same shape is a no-op, so a StateSync
+-- on every roll does not rebuild the whole board.
 local function applyModel(visual: DieVisual, shapeId: string?): ()
 	-- THE GUARD MUST NOT CACHE A FAILURE AS A SUCCESS.
 	--
-	-- Comparing `modelShape` alone is not enough. The models are generated by the
-	-- server at boot and replicate asynchronously, so the FIRST StateSync can
-	-- easily arrive before `dice_faces` exists on this client. That call records
-	-- the shape, finds no folder, and returns with no model -- and every
-	-- subsequent call then matches on shape and returns early. The die is
-	-- permanently blank, the tile falls back to the numeral forever, and nothing
-	-- reports an error because each individual step behaved as written.
-	--
-	-- Found exactly that way: the tile rendered empty while a manual clone of the
-	-- same model into the same viewport worked perfectly.
+	-- Comparing `modelShape` alone is not enough. The models replicate
+	-- asynchronously, so the FIRST StateSync can easily arrive before they exist
+	-- on this client. That call records the shape, finds no folder, and returns
+	-- with no model -- and every subsequent call then matches on shape and
+	-- returns early. The die is permanently absent and nothing reports an error,
+	-- because each individual step behaved as written.
 	--
 	-- So the early exit requires the shape to match AND the model to actually be
 	-- there. A shape that wanted no model (nil) is satisfied by having none.
@@ -349,9 +478,8 @@ local function applyModel(visual: DieVisual, shapeId: string?): ()
 		return
 	end
 
-	if visual.model then
-		local existing = visual.model
-		existing.Parent = nil
+	local existing = visual.model
+	if existing ~= nil then
 		existing:Destroy()
 	end
 	visual.model = nil
@@ -361,206 +489,143 @@ local function applyModel(visual: DieVisual, shapeId: string?): ()
 		return
 	end
 
-	local folder = game:GetService("ReplicatedStorage"):FindFirstChild("dice_faces")
-	if not folder then
-		print("DiceRenderer applyModel failed: no dice_faces folder in ReplicatedStorage!")
+	local folder = findSource()
+	if folder == nil then
 		return
 	end
 	local source = folder:FindFirstChild(shapeId)
-	if not source then
-		print("DiceRenderer applyModel failed: source model " .. tostring(shapeId) .. " not found!")
+	if source == nil or not source:IsA("Model") then
 		return
 	end
-	
-	local clone = source:Clone()
-	clone.PrimaryPart = clone:FindFirstChild("Pivot")
-	
-	local viewport = visual.tile:FindFirstChild("Viewport", true)
-	if viewport then
-		clone.Parent = viewport
-	end
-	visual.model = clone
 
-	local centre = clone:GetPivot().Position
-	local radius = 0
-	for _, d in ipairs(clone:GetDescendants()) do
-		if d:IsA("BasePart") and d.Name ~= "Pivot" then
-			local reach = (d.Position - centre).Magnitude + d.Size.Magnitude * 0.5
-			if reach > radius then
-				radius = reach
-			end
+	local clone = source:Clone()
+
+	-- THE PIVOT MUST EXIST OR THE DIE ORBITS INSTEAD OF SPINNING.
+	--
+	-- `Model:PivotTo` turns the model about its pivot, and without a PrimaryPart
+	-- that pivot is the bounding-box centre of whatever Roblox picks. The builder
+	-- creates an invisible `Pivot` part at the centroid for exactly this reason,
+	-- but a clone can arrive with `PrimaryPart` unset, so it is re-established
+	-- here rather than assumed. Without a PrimaryPart the tumble becomes an
+	-- orbit, which is the single most obvious way this animation can look wrong.
+	if clone.PrimaryPart == nil then
+		local pivot = clone:FindFirstChild("Pivot")
+		if pivot ~= nil and pivot:IsA("BasePart") then
+			clone.PrimaryPart = pivot
 		end
 	end
-	visual.modelRadius = radius
+
+	clone.Parent = BoardView.getScene()
+	visual.model = clone
+	visual.sourceRadius = measureRadius(clone)
+end
+
+-- Scales a solid so its bounding sphere matches the board's chosen radius for
+-- the current die count.
+--
+-- Scaled here rather than at generation because the size depends on how many
+-- dice are on the board, which the builder cannot know. `ScaleTo` is used rather
+-- than walking parts by hand: it is pivot-relative and preserves the face
+-- normals the rotation solve depends on.
+local function applyRadius(visual: DieVisual, radius: number): ()
+	visual.radius = radius
+
+	local model = visual.model
+	if model == nil then
+		return
+	end
+	if visual.sourceRadius <= 1e-4 then
+		return
+	end
+
+	local want = radius / visual.sourceRadius
+	local current = model:GetScale()
+	if current > 1e-6 and math.abs(current - want) < 1e-3 then
+		return
+	end
+	model:ScaleTo(want)
 end
 
 --------------------------------------------------------------------------------
--- Construction (init only -- never called during a roll)
+-- Construction
 --------------------------------------------------------------------------------
 
+-- A die's screen-space furniture. The solid itself is created lazily by
+-- `applyModel`, because a shape that has not arrived must not be drawn.
 local function makeVisual(index: number): DieVisual
-	local tile = Instance.new("Frame")
-	tile.Size = UDim2.fromScale(1, 1)
-	tile.BackgroundTransparency = 1
-	tile.Name = "Die" .. tostring(index)
-	tile.AnchorPoint = Vector2.new(0.5, 0.5)
-	tile.Visible = false
-	
-	local body = tile
-	
-	tile.ClipsDescendants = false
-	body.ClipsDescendants = false
-
-	local viewport = Instance.new("ViewportFrame")
-	viewport.Name = "Viewport"
-	viewport.Size = UDim2.fromScale(1, 1)
-	viewport.Position = UDim2.fromScale(0, 0)
-	viewport.BackgroundTransparency = 1
-	viewport.ClipsDescendants = false
-	-- FLAT, SHADOWLESS LIGHTING (operator-directed 2026-08-13).
-	--
-	-- REPORTED: "some of its face ahve a dark shade on them like shadow -need
-	-- this to be like shadowless for all faces for all dice".
-	--
-	-- The cause was here, not in the geometry. `Ambient` sat at RGB 80 with a
-	-- directional light from (-1,-1,-1), so any face angled away from that one
-	-- corner received only the dim ambient term and rendered noticeably darker
-	-- than its neighbours. On a tumbling die that reads as faces flickering
-	-- between shades, and on the flat D2 lens it made one whole side look muddy.
-	--
-	-- FULL WHITE AMBIENT with the directional contribution set to black gives
-	-- every face the same illumination regardless of orientation -- a flat-shaded
-	-- look that suits the low-poly dice, and one where a numeral is equally
-	-- legible whichever way the die lands. `LightDirection` is left pointing
-	-- somewhere valid rather than at the zero vector, which is not a meaningful
-	-- direction; with LightColor black it contributes nothing either way.
-	viewport.Ambient = Color3.fromRGB(255, 255, 255)
-	viewport.LightColor = Color3.fromRGB(0, 0, 0)
-	viewport.LightDirection = Vector3.new(0, -1, 0)
-	viewport.ZIndex = 2
-	viewport.Parent = body
-	
-	local cam = Instance.new("Camera")
-	cam.FieldOfView = CAMERA_FOV
-	cam.CFrame = CFrame.new(0, 0, 0)
-	viewport.CurrentCamera = cam
-	cam.Parent = viewport
-
-	-- A die must be SQUARE on screen. A fraction of a non-square parent is not,
-	-- so the aspect is constrained rather than assumed.
-	local aspect = Instance.new("UIAspectRatioConstraint")
-	aspect.AspectRatio = 1
-	aspect.DominantAxis = Enum.DominantAxis.Height
-	aspect.Parent = tile
-
-	local stroke = Instance.new("UIStroke")
-	stroke.Color = UITheme.Colors.BorderGold
-	stroke.Thickness = UITheme.BorderThickness
-	stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-	stroke.Enabled = false -- Hidden for 3D dice focus
-	stroke.Parent = body
-    
-    -- Make body background transparent
-    body.BackgroundTransparency = 1
-    for _, child in ipairs(tile:GetChildren()) do
-        if child:IsA("ImageLabel") then
-            child.ImageTransparency = 1 -- Hide the drop shadow
-        end
-    end
-
-	-- THE DIE ITSELF: a real 3D solid, rendered in Workspace and projected to screen.
-
-	-- The numeral. STILL PRESENT, and deliberately so.
-	--
-	-- The 3D die carries its own numerals on its faces, but at seven-dice size on
-	-- a 320px screen those are a few pixels tall (NFR-3). This label is the
-	-- readable answer; the solid is the read of HOW the answer happened. It sits
-	-- in the corner rather than the centre so it does not cover the die.
-	local numeral = Instance.new("TextLabel")
-	numeral.Name = "Numeral"
-	numeral.Size = UDim2.fromScale(0.34, 0.26)
-	numeral.Position = UDim2.fromScale(0.63, 0.05)
-	numeral.BackgroundTransparency = 1
-	numeral.Font = UITheme.Font
-	numeral.TextScaled = true
-	numeral.TextColor3 = UITheme.Colors.TextPrimary
-	numeral.TextXAlignment = Enum.TextXAlignment.Right
-	numeral.Text = ""
-	numeral.ZIndex = 3
-    numeral.Visible = false -- Hidden for 3D dice focus
-	numeral.Parent = body
-
-	-- The shape, named on the tile. In 3D the silhouette said what the die was;
-	-- flat, every shape is the same square, so the name has to be printed or the
-	-- information is simply gone.
-	local shapeTag = Instance.new("TextLabel")
-	shapeTag.Name = "Shape"
-	shapeTag.Size = UDim2.fromScale(0.3, 0.15)
-	shapeTag.Position = UDim2.fromScale(0.05, 0.05)
-	shapeTag.BackgroundTransparency = 1
-	shapeTag.Font = UITheme.Font
-	shapeTag.TextScaled = true
-	shapeTag.TextColor3 = UITheme.Colors.TextDim
-	shapeTag.TextXAlignment = Enum.TextXAlignment.Left
-	shapeTag.ZIndex = 3
-    shapeTag.Visible = false -- Hidden for 3D dice focus
-	shapeTag.Parent = body
-
-	-- Face count (top right)
-	local countTag = shapeTag:Clone()
-	countTag.Position = UDim2.fromScale(0.65, 0.05)
-	countTag.TextXAlignment = Enum.TextXAlignment.Right
-    countTag.Visible = false -- Hidden for 3D dice focus
-	countTag.Parent = body
-
-	-- 3. The weight bar. Shown whenever the die is resting, to communicate
-	--    mass without opening the forge (FR-1.3).
+	local layer = overlay
 
 	local bar = Instance.new("Frame")
-	bar.Size = UDim2.fromScale(0.8, 0.06)
-	bar.Position = UDim2.fromScale(0.1, 0.88)
+	bar.Name = "Weight" .. tostring(index)
+	bar.AnchorPoint = Vector2.new(0.5, 0.5)
+	bar.Size = UDim2.fromScale(BAR_W, BAR_H)
 	bar.BackgroundColor3 = UITheme.Colors.PanelDeep
 	bar.BorderSizePixel = 0
+	bar.Visible = false
 	bar.ZIndex = 4
-    bar.Visible = false -- Hidden for 3D dice focus
+	if layer ~= nil then
+		bar.Parent = layer
+	end
+
 	local barCorner = Instance.new("UICorner")
 	barCorner.CornerRadius = UDim.new(1, 0)
 	barCorner.Parent = bar
-	bar.Parent = body
 
 	local barFill = Instance.new("Frame")
 	barFill.Name = "Fill"
 	barFill.Size = UDim2.fromScale(0, 1)
 	barFill.BackgroundColor3 = UITheme.Colors.TextGold
 	barFill.BorderSizePixel = 0
+	barFill.ZIndex = 5
 	barFill.Parent = bar
+
 	local fillCorner = Instance.new("UICorner")
 	fillCorner.CornerRadius = UDim.new(1, 0)
 	fillCorner.Parent = barFill
 
-	local popScale = Instance.new("UIScale")
-	popScale.Scale = 1
-	popScale.Parent = tile
-
 	return {
-		tile = tile,
-		popScale = popScale,
-		body = body,
-		modelRadius = 0,
 		model = nil,
 		modelShape = nil,
-		numeral = numeral,
-		shapeTag = shapeTag,
-		countTag = countTag,
-		barContainer = bar,
+		sourceRadius = 0,
+		bar = bar,
 		barFill = barFill,
-		stroke = stroke,
+		barShown = false,
 		shape = DEFAULT_SHAPE,
 		faceCount = FACE_COUNTS[DEFAULT_SHAPE],
 		numbered = false,
 		weights = {},
-		extent = 0,
+		radius = 1,
+		sitHeight = 0,
 	}
+end
+
+-- Returns slot `index`, creating it if the board has never been this large.
+-- This is what removes the die-count ceiling: there is no preallocated array to
+-- run off the end of.
+local function ensureSlot(index: number): DieSlot
+	local existing = slots[index]
+	if existing ~= nil then
+		return existing
+	end
+
+	local slot: DieSlot = {
+		visual = makeVisual(index),
+		inUse = false,
+		animating = false,
+		elapsed = 0,
+		arcs = {},
+		flightTime = 0,
+		restPos = Vector3.new(0, 1, 0),
+		touchdown = Vector3.new(0, 1, 0),
+		spinTotal = 0,
+		spinDir = 1,
+		heavyLean = 0,
+		faceIndex = 1,
+		spinAxis = Vector3.new(0, 1, 0),
+		finalRot = CFrame.identity,
+	}
+	slots[index] = slot
+	return slot
 end
 
 --------------------------------------------------------------------------------
@@ -617,7 +682,7 @@ local function readWeights(faces: { any }, faceCount: number): { number }
 end
 
 -- Applies shape and mass to a die's appearance. Never touches position or
--- rotation -- those belong to the animation, and a config arriving mid-tumble
+-- rotation -- those belong to the animation, and a config arriving mid-flight
 -- must not snap a die that is in the air.
 local function applyConfig(visual: DieVisual, shapeId: string?, faces: { any }): ()
 	local resolved = shapeId or DEFAULT_SHAPE
@@ -625,43 +690,36 @@ local function applyConfig(visual: DieVisual, shapeId: string?, faces: { any }):
 	visual.faceCount = FACE_COUNTS[resolved] or FACE_COUNTS[DEFAULT_SHAPE]
 	visual.numbered = shapeId ~= nil
 	visual.weights = readWeights(faces, visual.faceCount)
-	visual.shapeTag.Text = if shapeId ~= nil then resolved else ""
-	visual.countTag.Text = if shapeId ~= nil then "D" .. visual.faceCount else ""
 
-	-- The solid follows the shape. Passing `shapeId` rather than `resolved` on
-	-- purpose: an unknown shape must draw NO die, not a default D6 that would be
-	-- asserting a shape the client has not been told.
+	-- Passing `shapeId` rather than `resolved` on purpose: an unknown shape must
+	-- draw NO die, not a default D6 that would be asserting a shape the client
+	-- has not been told.
 	applyModel(visual, shapeId)
 end
 
--- Shows `faceIndex` on the tile: its numeral, and its share of the die's mass.
+-- Paints the weight bar for `faceIndex`: its share of the die's mass.
 local function showFace(visual: DieVisual, faceIndex: number): ()
 	if not visual.numbered then
-		-- Shape unknown. No numeral, no bar -- nothing asserted.
-		visual.numeral.Text = ""
-		visual.barContainer.Visible = false
-		visual.stroke.Color = UITheme.Colors.BorderDim
+		visual.barShown = false
+		visual.bar.Visible = false
 		return
 	end
-
-	visual.numeral.Text = tostring(faceIndex)
 
 	local weight = visual.weights[faceIndex]
 	if weight == nil then
 		-- Masses unreadable. Better to draw no bar than a bar at a guess.
-		visual.barContainer.Visible = false
-		visual.numeral.TextColor3 = UITheme.Colors.TextPrimary
-		visual.stroke.Color = UITheme.Colors.BorderGold
+		visual.barShown = false
+		visual.bar.Visible = false
 		return
 	end
 
-	visual.barContainer.Visible = false
+	visual.barShown = true
 
 	-- The bar is scaled against an EVEN share, not against 1.0. A D20 face
 	-- holding 10% of the die's mass is carrying twice its share and must read as
-	-- heavy; against 1.0 it would render as a nearly empty bar and read as
-	-- light. Even share is the only baseline that means the same thing on a D4
-	-- and a D20.
+	-- heavy; against 1.0 it would render as a nearly empty bar and read as light.
+	-- Even share is the only baseline that means the same thing on a D4 and a
+	-- D20.
 	local evenShare = 1 / math.max(1, visual.faceCount)
 	local relative = weight / evenShare
 	-- 2x even share fills the bar. Beyond that it is already full and the colour
@@ -669,46 +727,181 @@ local function showFace(visual: DieVisual, faceIndex: number): ()
 	local fill = math.clamp(relative / 2, 0, 1)
 	visual.barFill.Size = UDim2.fromScale(fill, 1)
 
-	-- A VOID face -- one carrying so little mass it effectively never lands --
-	-- is drawn dim and grey. This mirrors what the HUD's VOID readout reports,
-	-- so the two cannot tell the player different stories.
-	local heavy = fill >= GLOW_THRESHOLD
+	-- A VOID face -- one carrying so little mass it effectively never lands -- is
+	-- drawn dim and grey. This mirrors what the HUD's VOID readout reports, so
+	-- the two cannot tell the player different stories.
 	if fill <= 0.001 then
 		visual.barFill.BackgroundColor3 = UITheme.Colors.VoidFace
-		visual.numeral.TextColor3 = UITheme.Colors.VoidFace
-		visual.stroke.Color = UITheme.Colors.BorderDim
-	elseif heavy then
+	elseif fill >= GLOW_THRESHOLD then
 		visual.barFill.BackgroundColor3 = UITheme.Colors.TextGold
-		visual.numeral.TextColor3 = UITheme.Colors.TextGold
-		visual.stroke.Color = UITheme.Colors.BorderGold
 	else
 		visual.barFill.BackgroundColor3 = UITheme.Colors.TextDim
-		visual.numeral.TextColor3 = UITheme.Colors.TextPrimary
-		visual.stroke.Color = UITheme.Colors.BorderGold
 	end
 end
 
--- Sizes a die tile for a board holding `count` dice, and records the true
--- maximum extent BoardView's containment contract demands.
-local function applyScale(visual: DieVisual, count: number): ()
-	local scale = BoardView.getDieScale(count)
-	visual.tile.Size = UDim2.fromScale(scale, scale)
+--------------------------------------------------------------------------------
+-- The ballistics
+--------------------------------------------------------------------------------
 
-	-- A square spun to 45 degrees reaches its HALF-DIAGONAL, which is
-	-- sqrt(2)/2 further out than its half-width. Reporting the half-width would
-	-- tell the board this die is smaller than it is, and the board cannot detect
-	-- the difference -- it would clamp exactly, to the wrong number, and corners
-	-- would clip the frame mid-tumble.
-	visual.extent = (scale * 0.5) * math.sqrt(2)
+-- Solves the launch velocity that carries a die from `origin` to `target` in
+-- exactly `duration` seconds under constant downward gravity.
+--
+-- Straight from `p = p0 + v*t + 0.5*g*t^2`, rearranged for v. The horizontal
+-- components are simply distance over time; the vertical one carries the extra
+-- term that makes the path a parabola rather than a line.
+--
+-- THIS IS WHY THE ARC IS REAL. The old renderer interpolated a position and then
+-- added a hand-shaped hump to the height, which is a drawing of a parabola. This
+-- computes the velocity an object would actually need, and the position is then
+-- integrated from it -- so the die accelerates downward correctly, arrives with
+-- the right speed for its bounce, and looks the way it does because of physics
+-- rather than in imitation of it.
+local function solveThrow(origin: Vector3, target: Vector3, duration: number): Arc
+	local t = math.max(duration, 1e-3)
+	local delta = target - origin
+	local velocity = Vector3.new(
+		delta.X / t,
+		delta.Y / t + 0.5 * GRAVITY * t,
+		delta.Z / t
+	)
+	return { origin = origin, velocity = velocity, duration = t }
+end
+
+-- Position and elapsed-relative velocity along an arc at local time `t`.
+local function arcPosition(arc: Arc, t: number): Vector3
+	return arc.origin + arc.velocity * t + Vector3.new(0, -0.5 * GRAVITY * t * t, 0)
+end
+
+-- A bounce too small to see is not worth its own arc; the settle absorbs it.
+local MIN_BOUNCE_TIME = 0.02
+
+-- How long the die spends in the air on each bounce, given the vertical speed it
+-- arrived at the floor with.
+--
+-- Each bounce returns RESTITUTION of the vertical speed it arrived with, and its
+-- airtime follows from that speed -- `2*v/g`, up and back down -- rather than
+-- being chosen. That is what makes each bounce visibly SMALLER than the last
+-- rather than merely shorter.
+--
+-- STATED ONCE, because two things need it: `buildFlight` builds the arcs from
+-- it, and `solveFirstContact` needs the same numbers to work out where the die
+-- must first touch down. Computing it twice is exactly the duplication that
+-- drifts (L-025) -- and here a drift would put the dice down in the wrong place
+-- with no error to show for it.
+local function bounceAirtimes(arrivalVy: number): { number }
+	local out: { number } = {}
+	local vy = math.abs(arrivalVy)
+	for _ = 1, BOUNCE_COUNT do
+		vy = vy * RESTITUTION
+		local airtime = (2 * vy) / GRAVITY
+		if airtime < MIN_BOUNCE_TIME then
+			break
+		end
+		table.insert(out, airtime)
+	end
+	return out
+end
+
+-- The vertical speed a die is travelling at when it first reaches the floor.
+-- Depends only on heights and airtime, never on where it lands horizontally,
+-- which is what makes the contact solve below tractable.
+local function arrivalSpeed(originY: number, floorY: number, throwTime: number): number
+	local t = math.max(throwTime, 1e-3)
+	local launch = (floorY - originY) / t + 0.5 * GRAVITY * t
+	return launch - GRAVITY * t
+end
+
+-- WHERE THE DIE MUST FIRST TOUCH DOWN so that its bounces carry it to exactly
+-- the rest point it was assigned.
+--
+-- THE DEFECT THIS FIXES, because the symptom was subtle and the cause was not.
+-- The die used to be aimed at its rest point (plus a little jitter) for the
+-- FIRST contact, and the two bounces then carried it several studs PAST there.
+-- The settle had to drag it back -- measured at 5.6 studs on one sampled roll --
+-- so every die finished by skating across the felt to its mark. The bounces
+-- looked right and the ending looked staged.
+--
+-- Solved backwards instead. After the first contact the die travels
+-- `v_h * FRICTION * a1 + v_h * FRICTION^2 * a2`, and `v_h` is itself
+-- `(contact - origin) / throwTime`. Writing `K` for the bracketed airtime sum,
+-- the rest point is `contact * (1 + K/T) - origin * K/T`, which rearranges to
+-- give the contact directly. The bounces then DELIVER the die rather than
+-- overshooting it, and the settle is left with nothing to correct.
+local function solveFirstContact(origin: Vector3, rest: Vector3, throwTime: number): Vector3
+	local t = math.max(throwTime, 1e-3)
+	local airtimes = bounceAirtimes(arrivalSpeed(origin.Y, rest.Y, t))
+
+	local k = 0
+	local carry = FRICTION
+	for _, airtime in ipairs(airtimes) do
+		k += carry * airtime
+		carry *= FRICTION
+	end
+
+	local ratio = k / t
+	local denom = 1 + ratio
+	if denom < 1e-6 then
+		return rest
+	end
+
+	return Vector3.new(
+		(rest.X + origin.X * ratio) / denom,
+		rest.Y,
+		(rest.Z + origin.Z * ratio) / denom
+	)
+end
+
+-- Builds the whole flight: the throw, then one arc per bounce.
+local function buildFlight(origin: Vector3, landing: Vector3, throwTime: number): ({ Arc }, number, Vector3)
+	local arcs: { Arc } = {}
+
+	local first = solveThrow(origin, landing, throwTime)
+	table.insert(arcs, first)
+
+	local total = first.duration
+	local contact = landing
+	local velocity = first.velocity + Vector3.new(0, -GRAVITY * first.duration, 0)
+
+	for _, airtime in ipairs(bounceAirtimes(velocity.Y)) do
+		local bounceVelocity = Vector3.new(
+			velocity.X * FRICTION,
+			math.abs(velocity.Y) * RESTITUTION,
+			velocity.Z * FRICTION
+		)
+
+		local arc: Arc = {
+			origin = contact,
+			velocity = bounceVelocity,
+			duration = airtime,
+		}
+		table.insert(arcs, arc)
+
+		total += airtime
+		contact = arcPosition(arc, airtime)
+		velocity = bounceVelocity + Vector3.new(0, -GRAVITY * airtime, 0)
+	end
+
+	return arcs, total, contact
+end
+
+-- Where the die is at flight-time `t`, walking the arcs in order.
+local function flightPosition(slot: DieSlot, t: number): Vector3
+	local remaining = t
+	for _, arc in ipairs(slot.arcs) do
+		if remaining <= arc.duration then
+			return arcPosition(arc, remaining)
+		end
+		remaining -= arc.duration
+	end
+	return slot.touchdown
 end
 
 --------------------------------------------------------------------------------
 -- The roll
 --------------------------------------------------------------------------------
 
--- Which face the die is "resting on" heavy-wise, used only to decide which way
--- the settle leans. Returns the heaviest face's index, or 0 when masses are
--- unknown.
+-- Which face is heaviest, used only to decide which way the settle leans.
+-- Returns 0 when masses are unknown.
 local function heaviestFace(visual: DieVisual): number
 	local best, bestIndex = -1, 0
 	for i = 1, visual.faceCount do
@@ -720,9 +913,29 @@ local function heaviestFace(visual: DieVisual): number
 	return bestIndex
 end
 
+-- Hides slots beyond `count`, and releases their solids. Called whenever the
+-- board shrinks, which the old fixed pool handled by iterating to seven.
+local function hideFrom(count: number): ()
+	for i = count + 1, #slots do
+		local slot = slots[i]
+		if slot ~= nil and slot.inUse then
+			slot.inUse = false
+			slot.animating = false
+			slot.visual.barShown = false
+			slot.visual.bar.Visible = false
+			local model = slot.visual.model
+			if model ~= nil then
+				model:Destroy()
+			end
+			slot.visual.model = nil
+			slot.visual.modelShape = nil
+		end
+	end
+end
+
 local function beginRoll(faces: { any }, payout: number): ()
-	local count = math.clamp(#diceConfig, 0, MAX_DICE)
-	if count == 0 then
+	local count = #diceConfig
+	if count <= 0 then
 		return
 	end
 
@@ -731,21 +944,23 @@ local function beginRoll(faces: { any }, payout: number): ()
 	if type(payout) == "number" and isFinite(payout) and payout > 0 then
 		magnitude = math.clamp(math.log(1 + payout) / math.log(1 + 1e6), 0, 1)
 	end
-	local duration = MIN_DURATION + (MAX_DURATION - MIN_DURATION) * magnitude
+	local throwTime = THROW_TIME_MIN + (THROW_TIME_MAX - THROW_TIME_MIN) * magnitude
 	local bonusTurns = math.floor(SPIN_TURNS_PAYOUT_BONUS * magnitude + 0.5)
 
+	local radius = BoardView.getDieRadius(count)
 	local rollSummaryData: { { shape: string, value: number } } = {}
 
+	-- Rest points are sampled together so each can be kept clear of the ones
+	-- already chosen. This is what produces organic scatter without stacking.
+	local taken: { Vector3 } = {}
+
 	for i = 1, count do
-		local slot = slots[i]
-		if slot == nil then
-			continue
-		end
+		local slot = ensureSlot(i)
 
 		local config = diceConfig[i]
 		local shapeId = readShape(config)
 		applyConfig(slot.visual, shapeId, readFaces(config))
-		applyScale(slot.visual, count)
+		applyRadius(slot.visual, radius)
 
 		local target = faces[i]
 		local faceIndex = 1
@@ -756,7 +971,7 @@ local function beginRoll(faces: { any }, payout: number): ()
 		slot.faceIndex = faceIndex
 
 		table.insert(rollSummaryData, {
-			shape = shapeId or "D6",
+			shape = shapeId or DEFAULT_SHAPE,
 			value = faceIndex,
 		})
 
@@ -766,37 +981,32 @@ local function beginRoll(faces: { any }, payout: number): ()
 			+ rng:NextNumber(SPIN_FRACTION_MIN, SPIN_FRACTION_MAX)
 		) * TAU
 		slot.spinDir = if rng:NextNumber() < 0.5 then -1 else 1
-		slot.drift = rng:NextNumber(-DEAL_DRIFT, DEAL_DRIFT)
 
-		-- THE 3D TUMBLE.
-		--
-		-- `finalRot` is where the die must END: the orientation that shows the
-		-- face the server chose. The animation then unwinds a whole-turn residual
-		-- ONTO that destination, so the die arrives showing the right face
-		-- without ever having been placed there early.
-		--
-		-- The axis is random per roll and deliberately off-axis -- a die that
-		-- always spun about Y would read as a carousel. It is normalised because
-		-- `CFrame.fromAxisAngle` on a non-unit axis scales the angle silently.
-		local model = slot.visual.model
-		slot.finalRot = if model ~= nil
-			then rotationShowingFace(model, faceIndex)
-			else CFrame.identity
-
+		-- The tumble axis is random per die and deliberately off-axis -- dice that
+		-- all spun about Y would read as a carousel. Normalised because
+		-- `CFrame.fromAxisAngle` on a non-unit axis scales the angle silently, and
+		-- a near-zero random vector has no meaningful direction at all.
 		local axis = Vector3.new(
 			rng:NextNumber(-1, 1),
 			rng:NextNumber(-1, 1),
 			rng:NextNumber(-1, 1)
 		)
-		-- A near-zero random vector has no meaningful direction; fall back rather
-		-- than normalise it into a NaN axis.
 		slot.spinAxis = if axis.Magnitude > 1e-3 then axis.Unit else Vector3.new(0, 1, 0)
+
+		-- `finalRot` is where the die must END: the orientation showing the face
+		-- the server chose, face up. The flight then unwinds its residual spin
+		-- ONTO that destination, so the die arrives correct without ever having
+		-- been placed there early.
+		local model = slot.visual.model
+		slot.finalRot = if model ~= nil
+			then rotationShowingFace(model, faceIndex)
+			else CFrame.identity
 
 		-- THE HEAVY-SIDE DRAG. If the face that landed is NOT the heaviest one,
 		-- the die leans away from the heavy face as it settles -- it visibly
-		-- avoided resting there. If the heavy face DID land, the lean is zero:
-		-- the die gave in, which is exactly the rarer, more notable event and
-		-- should look different. Cosmetic only; the outcome arrived decided.
+		-- avoided resting there. If the heavy face DID land, the lean is zero: the
+		-- die gave in, which is the rarer, more notable event and should look
+		-- different. Cosmetic only; the outcome arrived decided.
 		local heavy = heaviestFace(slot.visual)
 		if heavy ~= 0 and heavy ~= faceIndex then
 			slot.heavyLean = HEAVY_LEAN * slot.spinDir
@@ -804,30 +1014,59 @@ local function beginRoll(faces: { any }, payout: number): ()
 			slot.heavyLean = 0
 		end
 
-		-- Dynamic 100% random un-fixed organic scatter target for every roll
-		local baseAnchor = BoardView.getAnchor(i, count, slot.visual.extent)
-		local randomScatterX = (math.random() - 0.5) * 0.40
-		local randomScatterY = (math.random() - 0.5) * 0.30
-		local rawScatterPos = baseAnchor + UDim2.fromScale(randomScatterX, randomScatterY)
-		slot.endPos = BoardView.clampToBoard(rawScatterPos, slot.visual.extent)
-		slot.startPos = BoardView.getSpawnPoint(i, count)
+		-- The die's own resting height, measured now that `finalRot` is known --
+		-- the sit height depends on WHICH face is up, so it cannot be cached per
+		-- shape. Measured before the rest point is used, because the rest point's
+		-- Y comes from it.
+		local sit = if model ~= nil
+			then measureSitHeight(model, slot.finalRot * REST_TILT)
+			else 0
+		slot.visual.sitHeight = sit
+
+		-- ORGANIC SCATTER, sampled per throw and kept clear of its neighbours.
+		-- `sampleRestPoint` gives the point on the FELT; the die's centre sits its
+		-- own measured height above that.
+		local sample = BoardView.sampleRestPoint(radius, taken)
+		table.insert(taken, sample)
+		local rest = Vector3.new(sample.X, BoardView.getFloorY() + sit, sample.Z)
+		slot.restPos = rest
+
+		-- The die touches down SHORT of where it stops and the bounces carry it the
+		-- rest of the way -- a die that first lands exactly where it ends up has
+		-- not bounced, it has been placed. The contact point is solved so those
+		-- bounces arrive precisely on the rest point rather than past it.
+		--
+		-- Clamped because a rest point near the far edge can put its first contact
+		-- just off the felt. Clamping costs a little exactness, which the settle
+		-- then absorbs, and that is much the better trade: a die contacting thin
+		-- air outside the tray is a visible break of FR-1.4's whole premise.
+		-- EACH DIE GETS ITS OWN AIRTIME. Sharing one throw time across the roll
+		-- made every die rise, peak and land on the same beat -- six dice moving
+		-- as one clump, which is the single clearest tell that a throw was
+		-- animated rather than thrown. A small per-die jitter staggers the arcs
+		-- and, because airtime sets the launch velocity, gives each die its own
+		-- arc height too. Staggering the START instead would have left dice
+		-- hovering visibly at their release point, which is worse.
+		local ownTime = math.max(0.2, throwTime + rng:NextNumber(-0.07, 0.07))
+
+		local origin = BoardView.sampleThrowPoint()
+		local aim = BoardView.clampToBoard(
+			solveFirstContact(origin, rest, ownTime),
+			radius
+		)
+		local arcs, flightTime, touchdown = buildFlight(origin, aim, ownTime)
+		slot.arcs = arcs
+		slot.flightTime = flightTime
+		slot.touchdown = touchdown
 
 		slot.elapsed = 0
-		slot.duration = duration
 		slot.animating = true
+		slot.inUse = true
 
-		if not slot.inUse then
-			slot.inUse = true
-			slot.visual.tile.Parent = BoardView.getContainer()
-		end
-
-		-- Place it at the start immediately
-		slot.visual.tile.Visible = true
-		slot.visual.tile.Position = slot.startPos
-		slot.visual.tile.Rotation = math.deg(slot.spinTotal * slot.spinDir)
 		showFace(slot.visual, faceIndex)
 	end
 
+	hideFrom(count)
 	BoardView.updateResultSummary(rollSummaryData)
 end
 
@@ -835,98 +1074,174 @@ end
 -- The frame step
 --------------------------------------------------------------------------------
 
--- Ease-out cubic. The die travels fast and arrives slowly, which is what a
--- thrown object does.
+-- Ease-out cubic. Fast in, slow out -- what a settling object does.
 local function easeOut(a: number): number
 	local inv = 1 - a
 	return 1 - inv * inv * inv
 end
 
-local function step(_delta: number): ()
-	local cam = workspace.CurrentCamera
-	if cam then
-		cam.CameraType = Enum.CameraType.Scriptable
-		cam.CFrame = CFrame.new(0, 10000, 0) * CFrame.Angles(math.rad(-90), 0, 0)
+-- Projects a scene point to the overlay's scale coordinates, so a weight bar can
+-- follow its die.
+--
+-- SOLVED BY HAND RATHER THAN VIA `Camera:WorldToViewportPoint`, and that is not
+-- a preference. That method projects using the camera's `ViewportSize`, which
+-- Roblox maintains for the Workspace camera against the real screen -- a camera
+-- belonging to a ViewportFrame is not the screen and its `ViewportSize` does not
+-- describe the frame it draws into. Using it would put every bar somewhere
+-- plausible and wrong, and would be wrong differently at each window size, which
+-- is the hardest kind of visual bug to catch.
+--
+-- The perspective divide is four lines and depends only on values this module
+-- can see: the camera's own CFrame and field of view, and the frame's measured
+-- size. Roblox's FOV is VERTICAL, so the horizontal term carries the aspect
+-- ratio.
+--
+-- Returns the point in [0,1] scale of the viewport rectangle, and whether it is
+-- in front of the camera at all -- behind it the divide inverts and the bar
+-- would be drawn mirrored across the frame.
+local function project(vp: ViewportFrame, cam: Camera, point: Vector3): (UDim2, boolean)
+	local size = vp.AbsoluteSize
+	if size.X <= 0 or size.Y <= 0 then
+		return UDim2.fromScale(0.5, 0.5), false
 	end
-	
 
+	-- Camera space looks down its own -Z, so a visible point has negative Z.
+	local local_ = cam.CFrame:PointToObjectSpace(point)
+	local depth = -local_.Z
+	if depth <= 0.05 then
+		return UDim2.fromScale(0.5, 0.5), false
+	end
 
-	for i = 1, MAX_DICE do
-		local slot = slots[i]
-		if slot == nil or not slot.inUse then
-			if slot and slot.visual.model then
-				slot.visual.model:PivotTo(CFrame.new(0, 100000, 0))
-			end
+	local tanHalf = math.tan(math.rad(cam.FieldOfView) * 0.5)
+	if tanHalf <= 1e-6 then
+		return UDim2.fromScale(0.5, 0.5), false
+	end
+	local aspect = size.X / size.Y
+
+	local ndcX = (local_.X / depth) / (tanHalf * aspect)
+	local ndcY = (local_.Y / depth) / tanHalf
+
+	-- NDC is [-1,1] with +Y up; scale coordinates are [0,1] with +Y down.
+	return UDim2.fromScale(0.5 + ndcX * 0.5, 0.5 - ndcY * 0.5), true
+end
+
+local function step(delta: number): ()
+	if not BoardView.isReady() then
+		return
+	end
+
+	local vp = BoardView.getViewport()
+	local cam = vp.CurrentCamera
+	if cam == nil then
+		return
+	end
+
+	for _, slot in ipairs(slots) do
+		if not slot.inUse then
 			continue
 		end
-		local a = 1
-		if slot.animating then
-			slot.elapsed += _delta
-			a = math.clamp(slot.elapsed / math.max(slot.duration, 1e-3), 0, 1)
-		end
-		
-		-- Custom ease out for a snappy landing trajectory
-		local eased = 1 - (1 - a) * (1 - a) * (1 - a)
-
-		-- Smooth 2D trajectory path from throw spawn point to landed felt scatter location
-		local currentX = slot.startPos.X.Scale + (slot.endPos.X.Scale - slot.startPos.X.Scale) * eased
-		local currentY = slot.startPos.Y.Scale + (slot.endPos.Y.Scale - slot.startPos.Y.Scale) * eased
-		slot.visual.tile.Position = UDim2.fromScale(currentX, currentY)
 
 		local model = slot.visual.model
-		if model ~= nil then
-			-- OPTION 1: 3D Parabolic Gravity Drop & Multi-Bounce Physics
-			-- Height drop calculation with 2 dampening bounces (e = 0.35)
-			local heightOffset = 0
-			if a < 0.5 then
-				local fallT = a / 0.5
-				heightOffset = 3.0 * (1 - fallT^2)
-			elseif a < 0.8 then
-				local b1 = (a - 0.5) / 0.3
-				heightOffset = 0.6 * math.sin(b1 * math.pi)
-			elseif a < 1.0 then
-				local b2 = (a - 0.8) / 0.2
-				heightOffset = 0.15 * math.sin(b2 * math.pi)
-			end
-
-			-- Residual 3D Pitch, Yaw, and Roll spin decay
-			local rotDecay = (1 - eased)^1.8
-			local spin = CFrame.fromAxisAngle(slot.spinAxis, rotDecay * slot.spinTotal * slot.spinDir * 2)
-			local lean = CFrame.fromAxisAngle(Vector3.new(0, 0, 1), slot.heavyLean * math.sin(a * math.pi) * eased)
-			
-			local restTilt = CFrame.Angles(math.rad(-20), math.rad(25), math.rad(10))
-			local finalRot = slot.finalRot * spin * lean * restTilt
-
-			local distance = math.max(12, slot.visual.modelRadius * 3.4)	
-			
-			local cam = slot.visual.tile:FindFirstChild("Viewport", true).CurrentCamera
-			if cam then
-				-- Camera positions relative to the falling 3D die height offset
-				cam.CFrame = CFrame.new(0, heightOffset * 0.2, distance) * finalRot:Inverse()
-			end
-			
-			slot.visual.tile.Rotation = 0
-		else
-			local residual = slot.spinTotal * (1 - eased) * 2.0
-			slot.visual.tile.Rotation = math.deg(residual * slot.spinDir)
+		if model == nil then
+			slot.visual.bar.Visible = false
+			continue
 		end
 
-		if a >= 1 then
+		if slot.animating then
+			slot.elapsed += delta
+		end
+
+		local total = slot.flightTime + SETTLE_TIME
+
+		-- WHERE THE DIE ENDS UP, as one orientation used by every phase.
+		--
+		-- EVERY PHASE MUST AGREE ON THIS OR THE DIE POPS. An earlier pass applied
+		-- `REST_TILT` only during the settle and gave the settle its own residual
+		-- spin, so at the instant flight became settle the die jumped by the tilt
+		-- plus about 31 degrees -- a visible snap at exactly the moment the eye is
+		-- on the die waiting for the answer. Both the flight and the settle now
+		-- rotate AROUND this same target and decay to it, so every phase boundary
+		-- is continuous by construction rather than by tuning.
+		local target = slot.finalRot * REST_TILT
+
+		local position: Vector3
+		local rotation: CFrame
+
+		if slot.elapsed >= total then
+			-- AT REST. Exactly on the sampled point, exactly on the chosen face.
 			slot.animating = false
-			slot.visual.tile.Position = slot.endPos
-			slot.visual.tile.Rotation = 0
-			if slot.visual.popScale then
-				slot.visual.popScale.Scale = 1
+			slot.elapsed = total
+			position = slot.restPos
+			rotation = target
+		elseif slot.elapsed < slot.flightTime then
+			-- IN FLIGHT: the throw and its bounces, integrated.
+			position = flightPosition(slot, slot.elapsed)
+
+			-- The tumble decays across the flight, so the die turns fastest as it
+			-- leaves the hand and has stopped turning exactly as it touches down.
+			-- Reaching zero AT the flight's end is what makes the handover to the
+			-- settle seamless.
+			local a = math.clamp(slot.elapsed / math.max(slot.flightTime, 1e-3), 0, 1)
+			local remaining = (1 - a) * (1 - a)
+			rotation = target * CFrame.fromAxisAngle(
+				slot.spinAxis,
+				remaining * slot.spinTotal * slot.spinDir
+			)
+		else
+			-- THE SETTLE: from wherever the last bounce left the die to its exact
+			-- rest point, rocking off the heavy face on the way.
+			local a = math.clamp((slot.elapsed - slot.flightTime) / SETTLE_TIME, 0, 1)
+			local eased = easeOut(a)
+
+			position = slot.touchdown:Lerp(slot.restPos, eased)
+
+			-- A small hop out of the last contact, dying to nothing. Without it the
+			-- die slides to its rest point, which is the one motion a thrown die
+			-- never makes.
+			local hop = math.sin(a * math.pi) * slot.visual.radius * 0.28 * (1 - a)
+			position = Vector3.new(position.X, position.Y + hop, position.Z)
+
+			-- The lean peaks mid-settle and resolves to zero at both ends, so the
+			-- die rocks off its heavy side and comes down flat -- and, because
+			-- sin(0) and sin(pi) are both zero, it adds nothing at either boundary.
+			rotation = target * CFrame.fromAxisAngle(
+				Vector3.new(0, 0, 1),
+				slot.heavyLean * math.sin(a * math.pi)
+			)
+		end
+
+		-- A non-finite CFrame does not error -- it makes the die vanish, silently
+		-- and permanently. Cheaper to check than to diagnose.
+		if not isFiniteVector(position) then
+			position = slot.restPos
+			rotation = slot.finalRot * REST_TILT
+		end
+
+		model:PivotTo(CFrame.new(position) * rotation)
+
+		-- The weight bar tracks the die, sitting just below it.
+		--
+		-- SHOWN ONLY WHEN THE DIE IS AT REST, which is what FR-1.3 asks for -- it
+		-- is a readout of the die's mass, to be studied, not a part of the throw.
+		-- Bars chasing tumbling dice through the air added motion that competed
+		-- with the dice themselves for attention and told the player nothing they
+		-- could read at that speed.
+		--
+		-- Recomputed from the INTENT every frame rather than latched, so a bar
+		-- hidden for a transient reason comes back when the reason passes.
+		local bar = slot.visual.bar
+		if slot.visual.barShown and not slot.animating then
+			-- Anchored just under the die's own footprint. Uses the measured sit
+			-- height rather than the bounding radius, which for a flat coin would
+			-- have placed the bar several studs below the felt.
+			local anchor = position - Vector3.new(0, slot.visual.sitHeight + 0.5, 0)
+			local at, inFront = project(vp, cam, anchor)
+			bar.Visible = inFront
+			if inFront then
+				bar.Position = at
 			end
-			
-			local restTilt = CFrame.Angles(math.rad(-20), math.rad(25), math.rad(10))
-			local finalRot = slot.finalRot * restTilt
-			local distance = math.max(12, slot.visual.modelRadius * 3.4)
-			
-			local cam = slot.visual.tile:FindFirstChild("Viewport", true).CurrentCamera
-			if cam then
-				cam.CFrame = finalRot * CFrame.new(0, 0, distance)
-			end
+		else
+			bar.Visible = false
 		end
 	end
 end
@@ -947,81 +1262,86 @@ function DiceRenderer.init(net: Net): ()
 		error("[DiceRenderer] BoardView must be initialised first", 0)
 	end
 
-	for i = 1, MAX_DICE do
-		slots[i] = {
-			visual = makeVisual(i),
-			inUse = false,
-			animating = false,
-			elapsed = 0,
-			duration = MIN_DURATION,
-			startPos = UDim2.fromScale(0.5, 0.5),
-			endPos = UDim2.fromScale(0.5, 0.5),
-			spinTotal = 0,
-			spinDir = 1,
-			drift = 0,
-			heavyLean = 0,
-			faceIndex = 1,
-			spinAxis = Vector3.new(0, 1, 0),
-			finalRot = CFrame.identity,
-		}
-	end
+	-- The overlay the weight bars live on. Parented over the viewport, inside the
+	-- same interior, so its scale coordinates and the viewport's projected ones
+	-- refer to the same rectangle.
+	local vp = BoardView.getViewport()
+	local layer = Instance.new("Frame")
+	layer.Name = "DiceOverlay"
+	layer.Size = UDim2.fromScale(1, 1)
+	layer.BackgroundTransparency = 1
+	-- CLIPPED TO THE TRAY. Bars are positioned by projecting a 3D point, and a
+	-- die above the top of the frame projects to a point above the tray -- so
+	-- without this the bars escaped the board entirely and drew across the HUD's
+	-- currency bar. Observed exactly that way in a mid-roll screenshot.
+	layer.ClipsDescendants = true
+	layer.ZIndex = 3
+	layer.Parent = vp.Parent
+	overlay = layer
 
 	-- Redraws every resting die from the last known config. Extracted from the
 	-- StateSync handler so the late-replication watcher can reuse it: a client
-	-- whose first snapshot arrived before the models did needs to be able to
-	-- rebuild its tiles WITHOUT waiting for another state change, which for a
-	-- player who is not rolling may never come.
+	-- whose first snapshot arrived before the models did needs to rebuild WITHOUT
+	-- waiting for another state change, which for a player who is not rolling may
+	-- never come.
 	local function refreshResting(): ()
-		local count = math.clamp(#diceConfig, 0, MAX_DICE)
-		for i = 1, MAX_DICE do
-			local slot = slots[i]
-			if i > count then
-				if slot.inUse then
-					slot.inUse = false
-					slot.animating = false
-					slot.visual.tile.Visible = false
-					slot.visual.tile.Parent = nil
-				end
-				continue
-			end
-			if slot.animating then
-				-- A config change mid-tumble re-skins the die on the next roll
-				-- rather than snapping it while it is in the air.
-				continue
-			end
-			applyConfig(slot.visual, readShape(diceConfig[i]), readFaces(diceConfig[i]))
-			applyScale(slot.visual, count)
-			slot.endPos = BoardView.getAnchor(i, count, slot.visual.extent)
-			slot.visual.tile.Position = slot.endPos
-			slot.visual.tile.Rotation = 0
-			slot.inUse = true
-			slot.visual.tile.Parent = BoardView.getContainer()
-			slot.visual.tile.Visible = true
-			showFace(slot.visual, slot.faceIndex)
-
-			-- Park the solid showing the same face the numeral reports. Without
-			-- this a die at rest sits in whatever orientation it was built in,
-			-- and the 3D face would contradict the label beside it -- two
-			-- readings of the same die disagreeing on screen.
-			local resting = slot.visual.model
-			if resting ~= nil then
-				slot.finalRot = rotationShowingFace(resting, slot.faceIndex)
-				local restTilt = CFrame.Angles(math.rad(-20), math.rad(25), math.rad(10))
-				local finalRot = slot.finalRot * restTilt
-				
-				local targetSize = slot.visual.modelRadius * 2 * CAMERA_FILL
-				local distance = targetSize / (2 * math.tan(math.rad(CAMERA_FOV) * 0.5))
-				
-				local cam = slot.visual.tile:FindFirstChild("Viewport", true).CurrentCamera
-				if cam then
-					cam.CFrame = finalRot * CFrame.new(0, 0, distance)
-				end
-			end
-			if not slot.inUse then
-				slot.inUse = true
-				slot.visual.tile.Parent = BoardView.getContainer()
-			end
+		local count = #diceConfig
+		if count <= 0 then
+			hideFrom(0)
+			BoardView.updateResultSummary(nil)
+			return
 		end
+
+		local radius = BoardView.getDieRadius(count)
+		local taken: { Vector3 } = {}
+
+		for i = 1, count do
+			local slot = ensureSlot(i)
+			if slot.animating then
+				-- A config change mid-flight re-skins the die on the next roll
+				-- rather than snapping it while it is in the air.
+				table.insert(taken, slot.restPos)
+				continue
+			end
+
+			applyConfig(slot.visual, readShape(diceConfig[i]), readFaces(diceConfig[i]))
+			applyRadius(slot.visual, radius)
+
+			local sample = BoardView.sampleRestPoint(radius, taken)
+			table.insert(taken, sample)
+
+			-- Face-up orientation first, because the sit height depends on it.
+			local model = slot.visual.model
+			local sit = 0
+			if model ~= nil then
+				slot.finalRot = rotationShowingFace(model, slot.faceIndex)
+				sit = measureSitHeight(model, slot.finalRot * REST_TILT)
+			end
+			slot.visual.sitHeight = sit
+
+			local rest = Vector3.new(sample.X, BoardView.getFloorY() + sit, sample.Z)
+			slot.restPos = rest
+			slot.touchdown = rest
+			slot.arcs = {}
+			slot.flightTime = 0
+			-- Parked past the end of its own timeline, so the frame step draws it
+			-- at rest without animating it in.
+			slot.elapsed = SETTLE_TIME
+			slot.animating = false
+			slot.inUse = true
+
+			-- Park the solid showing the same face the last roll reported. Without
+			-- this a die at rest sits in whatever orientation it was built in, and
+			-- would contradict the result bar beside it. (`measureSitHeight` left
+			-- it at the origin, so this is also what puts it on the felt.)
+			if model ~= nil then
+				model:PivotTo(CFrame.new(rest) * slot.finalRot * REST_TILT)
+			end
+
+			showFace(slot.visual, slot.faceIndex)
+		end
+
+		hideFrom(count)
 	end
 
 	-- Show the player's dice at rest before they have rolled anything, so the
@@ -1041,9 +1361,8 @@ function DiceRenderer.init(net: Net): ()
 		refreshResting()
 	end))
 
-	-- If the solids replicate after this client has already drawn its tiles,
-	-- redraw them once so the dice appear rather than staying flat until the
-	-- next state change.
+	-- If the solids replicate after this client has already drawn, redraw once so
+	-- the dice appear rather than staying absent until the next state change.
 	onDiceAvailable = refreshResting
 	local watcher = watchForDice()
 	if watcher ~= nil then
@@ -1068,9 +1387,9 @@ function DiceRenderer.init(net: Net): ()
 end
 
 -- Give back everything `init` took: both wire subscriptions, the render step,
--- and the pooled Instances. Symmetric with `HUD.shutdown`.
+-- the overlay and every pooled Instance. Symmetric with `BoardView.shutdown`.
 --
--- Tearing down mid-tumble is safe by construction and always was: the payout was
+-- Tearing down mid-flight is safe by construction and always was: the payout was
 -- credited before this module heard about the roll (FR-2.6), so an animation
 -- that never finishes costs a visual and nothing else.
 function DiceRenderer.shutdown(): ()
@@ -1090,17 +1409,22 @@ function DiceRenderer.shutdown(): ()
 	frameConnection = nil
 
 	-- Destroyed rather than merely unparented: `init` builds a fresh pool, so
-	-- keeping the old one would leak seven tiles on every restart.
-	-- Indexed defensively: `init` errors if BoardView is not ready, which can
-	-- leave the pool half built with `started` already latched.
-	for i = 1, MAX_DICE do
-		local slot: DieSlot? = slots[i]
-		if slot ~= nil then
-			slot.visual.tile:Destroy()
+	-- keeping the old one would leak a solid and a bar per die on every restart.
+	for _, slot in ipairs(slots) do
+		local model = slot.visual.model
+		if model ~= nil then
+			model:Destroy()
 		end
+		slot.visual.bar:Destroy()
 	end
 	slots = {}
 	diceConfig = {}
+
+	local layer = overlay
+	if layer ~= nil then
+		layer:Destroy()
+	end
+	overlay = nil
 
 	-- The late-replication callback closes over `refreshResting`, which closes
 	-- over the slot pool this function just destroyed. Its own connection is

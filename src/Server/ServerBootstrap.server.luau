@@ -439,9 +439,13 @@ end))
 -- SWAP TWO DICE (FR-1.1, operator-requested 2026-08-13: "in forge there has to
 -- be an option for you to select which dice sits on which slot").
 --
--- Position in `d.Dice` IS the board slot -- `BoardView.getAnchor` is indexed by
--- it -- so reordering the array is the whole feature. The data model already
--- supported this; nothing exposed it.
+-- Position in `d.Dice` IS the board slot -- the renderer walks the array in
+-- order and the forge's tabs are indexed by it -- so reordering the array is the
+-- whole feature. The data model already supported this; nothing exposed it.
+--
+-- (The board itself no longer derives a POSITION from the index: dice scatter
+-- organically across a shared felt. Order still decides which die a forge tab
+-- edits, which is what this remote is for.)
 --
 -- CARRIES NO ECONOMIC VALUE. The same dice end up in the player's profile, in a
 -- different order: no mass is created, destroyed or moved between dice, and no
