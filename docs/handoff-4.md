@@ -1,11 +1,103 @@
-# HANDOFF 4 — Economy corrections, tuning, and the Gems sink question
+# HANDOFF 4 — Economy corrections, tuning, and the animation rebuild
 
 **Date:** 2026-08-13
-**Head:** `f44af67` · 21 suites, 3,546 assertions, 0 failing · tree clean
+**Head:** `a43608c` · 21 suites, 3,546 assertions, 0 failing · tree clean
 
-**Status:** S3-a / S3-c / S3-d are DONE. The operator's latest defect list is
-done except the Gems vault-storage feature, which needs a design decision.
-**Animation not started** — deliberately, on the operator's instruction.
+**Status:** S3-a / S3-c / S3-d are DONE. **The animation rebuild (Route A) is
+DONE and verified in Studio** — see §0. Outstanding: the ascension-threshold
+switch (§3b, decided but not built) and the Gems vault-storage feature (§3,
+needs sign-off on one number).
+
+---
+
+## 0. THE ANIMATION REBUILD — DONE (`a43608c`)
+
+Route A as specified in handoff-3 §2.4. Every die used to live in its own
+`ViewportFrame` pinned to a slot from a lookup table; there is now ONE viewport
+over the whole tray, one camera, a real felt plane, and every die is a model at
+real stud coordinates in a shared 3D scene.
+
+### What the operator asked for, and where it stands
+
+| Spec item | Status |
+|---|---|
+| Natural 3D parabolic gravity throw | **Done** — launch velocity is solved, position integrated from it |
+| Two dampened floor bounces | **Done** — each solved from a restitution coefficient, so the second is visibly smaller |
+| 100% dynamic organic scatter, no two rolls alike | **Done** — sampled per throw with a minimum separation |
+| Mixed shapes intermingle rather than cluster | **Done** — one shared floor makes this natural rather than faked |
+| Slim result summary bar | Already existed; now hidden until there IS a result |
+| Maximised, unclipped framing | **Done** — camera solved at runtime; 0 clipped frames in 421 |
+| Must not feel boxed in | The boxes are gone: there is one scene, not seven |
+| Must not cap die count | **Done** — pooled on demand; size curve continues past the cap to 20+ |
+
+### Four defects found by MEASURING, not by looking
+
+Each of these passed a screenshot and would have shipped on visual inspection
+alone. This is L-031 earning its place again.
+
+1. **Dice were floating.** Rest height was `floor + boundingSphereRadius`, which
+   is only right for a sphere. A D2 coin's sphere radius is its full width but
+   it lies barely a fraction of that tall — so it hovered about three studs up,
+   and because the camera is pitched, a hovering die also *projects further
+   out*: a coin well inside the felt was DRAWN overhanging its edge. Rest height
+   is now measured from each die's own geometry in its own resting orientation.
+   Every shape seats at exactly `0.000`, with per-shape pivot heights (D2 0.90,
+   D3 1.45, D10 1.76) — which is the whole point.
+2. **The camera was twice too far away.** The framing solve fitted the felt's 3D
+   bounding *radius* to the vertical half-angle, ignoring that pitch compresses
+   depth on screen and that the frame is 1.75× wider than tall. The felt
+   rendered at about a third of the tray. Both axes are now solved separately,
+   at runtime from the measured frame, so it survives a resize too (NFR-3).
+3. **The settle skated.** Dice were aimed at their rest point for the FIRST
+   contact, so the bounces carried them 5.6 studs past it and the settle dragged
+   them back. The first contact is now solved *backwards* so the bounces deliver
+   the die to its mark.
+4. **The throw was off-screen.** Sampled mid-roll, the felt was EMPTY because
+   every die was above the frame. Arc height and camera headroom are now solved
+   against the frustum.
+
+### Two live bugs fixed on the way
+
+- **`DiceMeshBuilder` was clearing every die's PrimaryPart.** `buildInto` ended
+  with `model.PrimaryPart = pivot`, reading a local that does not exist at that
+  scope — so it evaluated to `nil` and undid `anchorPivot`, whose own comment
+  calls itself "NOT OPTIONAL". Without a PrimaryPart, `PivotTo` orbits instead
+  of spinning. Route A depends on `PivotTo` entirely, so this had to go first.
+- **`DiceRenderer.findDiceFolder` called `Workspace:FindFirstChild` with no
+  `Workspace` local.** Dead by then; removed with the rest of the old path.
+
+### Smaller things
+
+- **Weight bars show only at REST**, which is what FR-1.3 actually asks for.
+  They were chasing tumbling dice through the air, and *escaping the tray* to
+  draw over the HUD's currency bar — the overlay is now clipped.
+- **Per-die airtime jitter.** One shared throw time made six dice rise, peak and
+  land on the same beat, reading as a single clump.
+- **`UITheme.Felt`.** The felt was drawn in `PanelDeep`, six RGB points from the
+  backdrop it sits on, so the table was invisible and the dice looked like they
+  floated in space.
+
+### Evidence
+
+- **FR-1.4 containment holds across 12,600 placements** (1–20 dice), worst case
+  0.25 studs *inside* the boundary — exactly `REST_EPSILON`. Separation never
+  breached. Two 7-die draws share **0** positions.
+- **0 clipped frames in 421**, across four rolls; peak `ndcY` 0.92.
+- **60.6 fps mean, worst 1% frame 18.46 ms** at six dice.
+- Screenshots at rest and mid-tumble across consecutive rolls: dice visibly
+  intermingle, and no two rolls land alike.
+- 21 suites / 3,546 assertions / 0 failing — unchanged baseline.
+
+**NOT verified by eye:** die counts other than 1, 6 and 7 on the live board. The
+count-dependent geometry is swept numerically across 1–20, but only those three
+were actually looked at. Stated per L-040 rather than implied.
+
+### Known, deliberately left alone
+
+`FeedbackFX` payout text (`+6.15K`) now draws over the dice, because the dice
+sit higher in frame than they used to. Pre-existing element, outside this
+change's fence, and it is a positioning tweak rather than a defect — worth a
+look next time that file is open.
 
 ---
 
@@ -309,19 +401,13 @@ it must not go back to all-time cash.
 
 ## 4. STILL OUTSTANDING
 
-### The animation rebuild — Route A, approved, not started
-Full spec and the architectural analysis are in **handoff-3 §2**. Summary:
-every die is currently in its OWN ViewportFrame at a deterministic grid anchor,
-which is both the "restricted box" feeling and the reason organic scatter is
-unreachable. Route A puts all dice in one shared 3D scene.
-
-The operator confirmed the **20-dice figure is a progression ceiling to design
-toward**, not a current requirement — so the new renderer must not cap die count
-architecturally, even though `MAX_DIE_SLOTS` stays 7 until the balance decision
-is made.
-
-**The overlap in the latest screenshots is this same issue** — six dice cannot
-fit the fixed grid without collisions. Not a new defect.
+### The animation rebuild — DONE, see §0
+Landed in `a43608c`. The **overlap the operator reported in earlier screenshots
+was this same issue** and is gone: dice no longer occupy fixed grid slots, so
+there is nothing to collide. The 20-dice progression ceiling is unblocked — the
+renderer pools visuals on demand and the size curve continues past the current
+cap, so raising `MAX_DIE_SLOTS` is now purely a balance decision with no
+rendering work attached to it.
 
 ### Deferred / blocked
 - **Audio** — 9 `DUMMY_ID_*` placeholders; fails closed, Settings says so.
@@ -343,11 +429,17 @@ fit the fixed grid without collisions. Not a new defect.
    subtractive: it DELETES `RunCash` rather than adding anything. Do it before
    the Gems work so nothing new is built on a field that is being removed.
 2. **Gems vault storage** — rate and shape are settled; needs sign-off on the
-   +8h cap in §3, then it is a contained build (profile field, Gems spend path,
-   VAULT panel control)
-3. **Animation rebuild (Route A)** — approved, self-contained, wants its own
-   verification pass per L-031 (screenshots mid-tumble, several consecutive
-   rolls compared, 1/2/4/7 dice, and FR-1.4 containment must hold)
-4. Restore the ascension threshold to `1e6` before any real playtest
+   **+8h cap** in §3, then it is a contained build (profile field, Gems spend
+   path, VAULT panel control).
+3. **Restore `ASCEND_MIN_LIFETIME_CASH` to `1e6`** before any real playtest.
 
-Ledger entries this session: **L-039** … **L-043**.
+~~Animation rebuild~~ — **done**, `a43608c`. See §0.
+
+**Worth an operator play session before anything else.** The animation is
+verified against its numbers and looked at in screenshots, but feel is not
+something a measurement settles: throw speed, bounce liveliness and how big the
+dice read at six-plus are all one-line constants (`GRAVITY`, `RESTITUTION`,
+`THROW_TIME_*` in `DiceRenderer`; `DIE_RADIUS_*` in `BoardView`) and are much
+better tuned against a real opinion than guessed at again.
+
+Ledger entries this session: **L-039** … **L-044**.
