@@ -134,34 +134,61 @@ function V7HUD.new(): V7HUDController
 			-- Subtle rotation
 			cashBase.Rotation = -10
 			
-		elseif iconType == "gems" or iconType == "diamonds" then
-			-- Vector Gem/Diamond
-			local color = iconType == "gems" and Color3.fromRGB(0, 120, 220) or Color3.fromRGB(220, 40, 130)
+		elseif iconType == "gems" then
+			-- Vector Gem (Tall 6-sided Crystal Shard)
+			local gemBase = Instance.new("Frame")
+			gemBase.Size = UDim2.fromScale(0.65, 0.85)
+			gemBase.Position = UDim2.fromScale(0.175, 0.075)
+			gemBase.BackgroundColor3 = UITheme.Colors.Gems
+			gemBase.BorderSizePixel = 0
+			gemBase.ZIndex = 4
+			gemBase.Parent = iconContainer
+			
+			local corner = Instance.new("UICorner")
+			corner.CornerRadius = UDim.new(0.35, 0)
+			corner.Parent = gemBase
+			
+			local innerFacet = Instance.new("Frame")
+			innerFacet.Size = UDim2.fromScale(0.5, 0.7)
+			innerFacet.Position = UDim2.fromScale(0.25, 0.15)
+			innerFacet.BackgroundColor3 = Color3.fromRGB(186, 230, 253)
+			innerFacet.BorderSizePixel = 0
+			innerFacet.ZIndex = 5
+			innerFacet.Parent = gemBase
+			
+			local fCorner = Instance.new("UICorner")
+			fCorner.CornerRadius = UDim.new(0.25, 0)
+			fCorner.Parent = innerFacet
+			
+		elseif iconType == "diamonds" then
+			-- Vector Diamond (Original Rotated Square in Vibrant Pink)
+			local pinkOuter = Color3.fromRGB(244, 114, 182)
+			local pinkInner = Color3.fromRGB(251, 207, 232)
 			
 			local gemBase = Instance.new("Frame")
 			gemBase.Size = UDim2.fromScale(0.7, 0.7)
 			gemBase.Position = UDim2.fromScale(0.15, 0.15)
-			gemBase.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+			gemBase.BackgroundColor3 = pinkOuter
+			gemBase.BorderSizePixel = 0
 			gemBase.Rotation = 45
 			gemBase.ZIndex = 4
 			gemBase.Parent = iconContainer
 			
-			local grad = Instance.new("UIGradient")
-			grad.Color = ColorSequence.new(Color3.fromRGB(255, 255, 255), color)
-			grad.Rotation = 45
-			grad.Parent = gemBase
-			
 			local corner = Instance.new("UICorner")
-			corner.CornerRadius = UDim.new(0.1, 0)
+			corner.CornerRadius = UDim.new(0.12, 0)
 			corner.Parent = gemBase
 			
 			local inner = Instance.new("Frame")
 			inner.Size = UDim2.fromScale(0.5, 0.5)
 			inner.Position = UDim2.fromScale(0.25, 0.25)
-			inner.BackgroundColor3 = color
+			inner.BackgroundColor3 = pinkInner
 			inner.BorderSizePixel = 0
 			inner.ZIndex = 5
 			inner.Parent = gemBase
+			
+			local innerCorner = Instance.new("UICorner")
+			innerCorner.CornerRadius = UDim.new(0.08, 0)
+			innerCorner.Parent = inner
 		end
 
 		local titleLbl = UITheme.label(labelText, UDim2.fromScale(0.6, 0.4), UDim2.fromScale(0.35, 0.1), UITheme.Colors.TextDim)
@@ -231,8 +258,8 @@ function V7HUD.new(): V7HUDController
 	-- being the same dim grey as everything else.
 	local streakStrip = Instance.new("Frame")
 	streakStrip.Name = "StreakStrip"
-	streakStrip.Size = UDim2.fromScale(0.28, 0.032)
-	streakStrip.Position = UDim2.fromScale(0.36, 0.708)
+	streakStrip.Size = UDim2.fromScale(0.32, 0.05)
+	streakStrip.Position = UDim2.fromScale(0.34, 0.725)
 	streakStrip.BackgroundTransparency = 1
 	streakStrip.Parent = gui
 
@@ -240,62 +267,57 @@ function V7HUD.new(): V7HUDController
 	chipLayout.FillDirection = Enum.FillDirection.Horizontal
 	chipLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
 	chipLayout.VerticalAlignment = Enum.VerticalAlignment.Center
-	chipLayout.Padding = UDim.new(0.03, 0)
+	chipLayout.Padding = UDim.new(0.08, 0)
 	chipLayout.SortOrder = Enum.SortOrder.LayoutOrder
 	chipLayout.Parent = streakStrip
 
-	-- A chip is an icon glyph plus a value, sized to its content rather than a
-	-- fixed share of the strip -- "STREAK 128" and "STREAK 1" should not claim
-	-- the same width and leave one of them padded with empty space.
-	local function chip(order: number, name: string, glyph: string, glyphColor: Color3): (Frame, TextLabel, TextLabel)
+	-- A chip is a vertical floating callout (value on top, tag below) with subtle dark outline and no emojis.
+	local function chip(order: number, name: string, tagText: string, valColor: Color3): (Frame, TextLabel, TextLabel)
 		local holder = Instance.new("Frame")
-		-- NAMED, not left as the anonymous "Frame" every sibling here would
-		-- otherwise share (L-037) -- three identically-named chips would make
-		-- `StreakStrip.Frame` ambiguous the same way the HUD's menu buttons once
-		-- were.
 		holder.Name = name
-		holder.AutomaticSize = Enum.AutomaticSize.X
-		holder.Size = UDim2.fromScale(0, 1)
+		holder.Size = UDim2.fromScale(0.26, 1)
 		holder.BackgroundTransparency = 1
 		holder.LayoutOrder = order
+		holder.ZIndex = 15
 		holder.Parent = streakStrip
-
-		local rowLayout = Instance.new("UIListLayout")
-		rowLayout.FillDirection = Enum.FillDirection.Horizontal
-		rowLayout.VerticalAlignment = Enum.VerticalAlignment.Center
-		rowLayout.Padding = UDim.new(0, 3)
-		rowLayout.Parent = holder
-
-		local icon = Instance.new("TextLabel")
-		icon.Name = "Icon"
-		icon.Size = UDim2.fromScale(0, 1)
-		icon.AutomaticSize = Enum.AutomaticSize.X
-		icon.BackgroundTransparency = 1
-		icon.Font = UITheme.FontHeading
-		icon.Text = glyph
-		icon.TextColor3 = glyphColor
-		icon.TextScaled = true
-		icon.LayoutOrder = 1
-		icon.Parent = holder
 
 		local value = Instance.new("TextLabel")
 		value.Name = "Value"
-		value.Size = UDim2.fromScale(0, 1)
-		value.AutomaticSize = Enum.AutomaticSize.X
+		value.Size = UDim2.fromScale(1, 0.65)
+		value.Position = UDim2.fromScale(0, 0)
 		value.BackgroundTransparency = 1
 		value.Font = UITheme.FontHeading
 		value.Text = ""
-		value.TextColor3 = UITheme.Colors.TextPrimary
+		value.TextColor3 = valColor
 		value.TextScaled = true
-		value.LayoutOrder = 2
+		value.ZIndex = 16
 		value.Parent = holder
 
-		return holder, icon, value
+		local stroke = Instance.new("UIStroke")
+		stroke.Name = "Outline"
+		stroke.Color = Color3.fromRGB(12, 10, 8)
+		stroke.Transparency = 0.3
+		stroke.Thickness = 1.2
+		stroke.Parent = value
+
+		local tag = Instance.new("TextLabel")
+		tag.Name = "Tag"
+		tag.Size = UDim2.fromScale(1, 0.3)
+		tag.Position = UDim2.fromScale(0, 0.68)
+		tag.BackgroundTransparency = 1
+		tag.Font = UITheme.Font
+		tag.Text = tagText
+		tag.TextColor3 = UITheme.Colors.TextDim
+		tag.TextScaled = true
+		tag.ZIndex = 16
+		tag.Parent = holder
+
+		return holder, tag, value
 	end
 
-	local _, _, multValue = chip(1, "MultChip", "x", UITheme.Colors.Gems)
-	local _, _, streakValue = chip(2, "StreakChip", "\u{1F525}", UITheme.Colors.Cash) -- fire glyph
-	local _, riskIcon, riskValue = chip(3, "RiskChip", "\u{26A0}", UITheme.Colors.TextDim) -- warning glyph
+	local _, _, multValue = chip(1, "MultChip", "MULT", UITheme.Colors.Gems)
+	local _, _, streakValue = chip(2, "StreakChip", "STREAK", UITheme.Colors.Cash)
+	local _, riskIcon, riskValue = chip(3, "RiskChip", "RISK", UITheme.Colors.TextDim)
 
 	-- A one-shot "+$14.8M" that rises and fades on a payout, floating ABOVE the
 	-- chip row rather than replacing it -- the chips are the resting readout and
@@ -451,28 +473,21 @@ end
 -- distribution -- shown as "--" rather than a guessed 0%, because a die that has
 -- not been examined yet has an unknown risk, not a safe one.
 function V7HUD:updateStreak(multiplier: number, streak: number, voidRiskPct: number?)
-	self.multValue.Text = string.format("%.2f", math.max(1, multiplier))
+	self.multValue.Text = "x" .. string.format("%.2f", math.max(1, multiplier))
 
 	local streakN = math.max(0, math.floor(streak))
 	self.streakValue.Text = tostring(streakN)
-	self.streakValue.TextColor3 = if streakN > 0 then UITheme.Colors.TextPrimary else UITheme.Colors.TextDim
+	self.streakValue.TextColor3 = if streakN > 0 then UITheme.Colors.Cash else UITheme.Colors.TextDim
 
-	-- RISK IS COLOUR-CODED, which a flat grey number cannot be. Bands chosen to
-	-- match how a player reads "safe / getting risky / about to void" rather
-	-- than an even split of 0-100 -- most of a build's dice sit well under 30%,
-	-- so the boundaries are where the feeling actually changes.
+	-- RISK percentage font is Red, while the RISK tag word matches MULT and STREAK (TextDim).
+	self.riskIcon.TextColor3 = UITheme.Colors.TextDim
 	if voidRiskPct == nil then
 		self.riskValue.Text = "--"
 		self.riskValue.TextColor3 = UITheme.Colors.TextDim
-		self.riskIcon.TextColor3 = UITheme.Colors.TextDim
 	else
 		local pct = math.clamp(voidRiskPct, 0, 100)
 		self.riskValue.Text = string.format("%.0f%%", pct)
-		local riskColor = if pct < 15 then UITheme.Colors.Positive
-			elseif pct < 40 then UITheme.Colors.TextGold
-			else UITheme.Colors.Negative
-		self.riskValue.TextColor3 = riskColor
-		self.riskIcon.TextColor3 = riskColor
+		self.riskValue.TextColor3 = UITheme.Colors.Negative
 	end
 end
 

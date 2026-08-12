@@ -20,7 +20,7 @@ UITheme.Colors = {
 	-- Accents
 	Cash           = Color3.fromRGB(249, 115, 22),
 	Gems           = Color3.fromRGB(56, 189, 248),
-	Diamonds       = Color3.fromRGB(234, 179, 8),
+	Diamonds       = Color3.fromRGB(244, 114, 182),
 	Positive       = Color3.fromRGB(249, 115, 22),
 	Negative       = Color3.fromRGB(248, 113, 113),
 	VoidFace       = Color3.fromRGB(90, 78, 70),
