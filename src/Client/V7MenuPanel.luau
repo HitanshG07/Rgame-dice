@@ -217,6 +217,17 @@ function V7MenuPanel.new(): V7MenuController
 		throttled = "Slow down a moment",
 	}
 
+	-- Refusals specific to buying ANOTHER die of a shape, which fails for
+	-- different reasons than switching to one.
+	local ADD_DIE_REFUSAL: { [string]: string } = {
+		insufficient_funds = "Not enough Cash",
+		invalid_request = "At your die limit -- ascend to raise it",
+		not_unlocked = "Unlock this shape first",
+		profile_unavailable = "Still loading -- try again",
+		rate_limited = "Slow down a moment",
+		throttled = "Slow down a moment",
+	}
+
 	for rung, shapeId in ipairs(DiceCatalog.getUnlockOrder()) do
 		local def = DiceCatalog.getShape(shapeId)
 		if def ~= nil then
@@ -259,9 +270,42 @@ function V7MenuPanel.new(): V7MenuController
 			status.Parent = card
 
 			local btnContainer, btn = UITheme.neumorphicButton("", UITheme.Colors.Cash,
-				UDim2.fromScale(0.26, 0.56), UDim2.fromScale(0.70, 0.22))
+				UDim2.fromScale(0.20, 0.56), UDim2.fromScale(0.585, 0.22))
 			btnContainer.Name = "Action"
 			btnContainer.Parent = card
+
+			-- BUY ANOTHER DIE OF THIS SHAPE (operator decision, 2026-08-13: "in
+			-- shape we need to add options to buy multiple of the same dice - this
+			-- helps progression").
+			--
+			-- Deliberately NOT a schema change. Ownership stays a boolean per
+			-- shape; what a repeat purchase buys is another DIE on the board. The
+			-- alternative -- turning `Diamond.Shapes` into counts -- would have
+			-- meant migrating every live profile to represent something the player
+			-- cannot see, since what they actually want is more dice.
+			--
+			-- Shares the SLOT price curve and the ascension cap rather than having
+			-- its own: "buy a second D6" and "buy one more die" are the same
+			-- transaction, and two price tables would drift (L-025).
+			local addC, addBtn = UITheme.neumorphicButton("", UITheme.Colors.Positive,
+				UDim2.fromScale(0.185, 0.56), UDim2.fromScale(0.80, 0.22))
+			addC.Name = "AddDie"
+			addC.Visible = false
+			addC.Parent = card
+
+			UITheme.onPressed(addBtn, function()
+				local entry = shapeCards[shapeId]
+				UITheme.setEnabled(addBtn, false)
+				task.spawn(function()
+					local result = NetClient.addDieSlot(shapeId)
+					if not result.ok and entry ~= nil then
+						entry.status.Text = ADD_DIE_REFUSAL[tostring(result.reason)]
+							or "Cannot add a die right now."
+						entry.status.TextColor3 = UITheme.Colors.Negative
+					end
+					UITheme.setEnabled(addBtn, true)
+				end)
+			end)
 
 			UITheme.onPressed(btn, function()
 				local entry = shapeCards[shapeId]
@@ -292,6 +336,7 @@ function V7MenuPanel.new(): V7MenuController
 
 			shapeCards[shapeId] = {
 				card = card, status = status, button = btn,
+				addContainer = addC, addButton = addBtn,
 				owned = false, rung = rung,
 			}
 		end
@@ -310,8 +355,32 @@ function V7MenuPanel.new(): V7MenuController
 		local diamonds = tonumber(state.diamonds) or 0
 		local switchCost = DiceCatalog.SHAPE_CHANGE_DIAMOND_COST
 
+		-- Buying another die of an owned shape uses the SLOT price and the SLOT
+		-- cap, so the figures here are the same ones the SLOTS panel shows.
+		local slots = tonumber(state.dieSlots) or 1
+		local ascensions = tonumber(state.ascensions) or 0
+		local addCost = DiceCatalog.dieSlotCost(slots, ascensions)
+
 		for shapeId, entry in pairs(shapeCards) do
 			local owned = ownedMap[shapeId] == true
+
+			-- The +1 DIE button appears only on shapes the player OWNS, since the
+			-- server refuses a shape they have not unlocked.
+			if entry.addContainer ~= nil then
+				entry.addContainer.Visible = owned
+				if owned then
+					if addCost == nil then
+						-- At the die limit. Shown rather than hidden, so the ceiling
+						-- is legible and the player knows ascending raises it.
+						UITheme.setButtonText(entry.addButton, "MAX")
+						UITheme.setEnabled(entry.addButton, false)
+					else
+						UITheme.setButtonText(entry.addButton,
+							"+1  $" .. Format.formatNumber(addCost))
+						UITheme.setEnabled(entry.addButton, cash >= addCost)
+					end
+				end
+			end
 			entry.owned = owned
 			local cost = DiceCatalog.getUnlockCost(shapeId) or 0
 			local allowed = DiceCatalog.canUnlock(shapeId, ownedMap)

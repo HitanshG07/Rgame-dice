@@ -55,7 +55,14 @@ local ARITY: { [string]: number } = {
 	SetElement = 3,
 	SetShape = 2,
 	BuyUpgrade = 1,
-	AddDieSlot = 0,
+	-- One argument: the shape for the new die, or the empty string for "the
+	-- starting shape".
+	--
+	-- AN EMPTY STRING RATHER THAN nil, because the arity check above is EXACT --
+	-- deliberately, since a call with the wrong shape is a caller not speaking
+	-- our protocol (F-4A-1). Loosening it to a maximum for one optional argument
+	-- would weaken that check for every remote, so the sentinel travels instead.
+	AddDieSlot = 1,
 	Ascend = 0,
 	BuyDiamondNode = 1,
 	SetAutoRoll = 1,

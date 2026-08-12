@@ -189,7 +189,11 @@ local function run(): (boolean, string?, number)
 	-- Spot-check the values against API_DATA_CONTRACT §1.1 directly, so a typo in
 	-- the table is caught rather than merely being present.
 	e = e or check(RemoteGateway.arityFor("Roll") == 0, "Roll must be declared zero-arity")
-	e = e or check(RemoteGateway.arityFor("AddDieSlot") == 0, "AddDieSlot must be declared zero-arity")
+	-- AddDieSlot takes ONE argument as of 2026-08-13: the shape for the new die,
+	-- or the empty string for the starting shape (API_DATA_CONTRACT §1.1). It was
+	-- zero-arity when it could only ever create the starting shape.
+	e = e or check(RemoteGateway.arityFor("AddDieSlot") == 1,
+		"AddDieSlot must take one argument -- the shape id, or \"\" for the default")
 	e = e or check(RemoteGateway.arityFor("Ascend") == 0, "Ascend must be declared zero-arity")
 	e = e or check(RemoteGateway.arityFor("DailySpin") == 0, "DailySpin must be declared zero-arity")
 	e = e or check(RemoteGateway.arityFor("ClaimGroupReward") == 0, "ClaimGroupReward must be declared zero-arity")

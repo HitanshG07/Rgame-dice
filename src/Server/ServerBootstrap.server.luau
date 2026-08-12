@@ -321,10 +321,51 @@ RemoteGateway.register("BuyDiamondNode", announcing(function(player: Player, nod
 	return true, nil
 end))
 
-RemoteGateway.register("AddDieSlot", announcing(function(player: Player)
+-- BUYS ANOTHER DIE, optionally of a chosen shape.
+--
+-- `shapeId` is OPTIONAL (operator decision, 2026-08-13: "in shape we need to add
+-- options to buy multiple of the same dice - this helps progression"). Omitted,
+-- the new die is the starting shape, which is what the SLOTS panel has always
+-- asked for. Supplied, the player gets another die of a shape they already own,
+-- so SHAPE becomes a second route to growing the board.
+--
+-- ONE HANDLER, ONE PRICE, ONE CAP. Buying "a second D6" and buying "one more
+-- die" are the same transaction with a different starting shape, so they share
+-- the slot price curve and the ascension cap rather than getting a parallel set
+-- that could drift out of step (L-025).
+--
+-- OWNERSHIP STAYS BOOLEAN. Nothing in the saved schema changes: `Diamond.Shapes`
+-- still records whether a shape is unlocked, and the repeat purchase is what
+-- adds the die. Turning that set into counts would have meant migrating every
+-- live profile for no gain the player can see.
+RemoteGateway.register("AddDieSlot", announcing(function(player: Player, shapeId: string)
 	local data = PlayerProfile.get(player)
 	if not data then
 		return false, Remotes.Notice.ProfileUnavailable
+	end
+
+	-- The shape for the new die. THE EMPTY STRING means "the starting shape",
+	-- which is what the SLOTS panel asks for and the safe default. A sentinel
+	-- rather than nil because the gateway's arity check is exact -- see ARITY.
+	if type(shapeId) ~= "string" then
+		return false, Remotes.Notice.InvalidRequest
+	end
+	local chosen = DiceCatalog.STARTING_SHAPE
+	if shapeId ~= "" then
+		local okShape, shapeReason = RemoteGateway.V.boundedString(shapeId, RemoteGateway.MAX_STRING_ID)
+		if not okShape then
+			return false, shapeReason
+		end
+		-- MUST BE OWNED. Without this, `AddDieSlot("D20")` would hand a new player
+		-- the top of the ladder for the price of a slot -- the die array is written
+		-- directly and never passes through `SetShape`'s ownership check.
+		if data.Diamond.Shapes[shapeId] ~= true then
+			return false, Remotes.Notice.NotUnlocked
+		end
+		if DiceCatalog.getShape(shapeId) == nil then
+			return false, Remotes.Notice.InvalidRequest
+		end
+		chosen = shapeId
 	end
 	-- THE CAP RISES WITH ASCENSIONS (operator decision, 2026-08-13). A player at
 	-- zero ascensions tops out at 3 dice; each prestige adds one, to a hard
@@ -353,21 +394,25 @@ RemoteGateway.register("AddDieSlot", announcing(function(player: Player)
 	if not spent then
 		return false, Remotes.Notice.InsufficientFunds
 	end
-	-- THE NEW DIE IS THE STARTING SHAPE, from the shared factory.
+	-- THE NEW DIE, built from the shared factory at the chosen shape.
 	--
-	-- This hardcoded a D6 with six 10-mass faces. Once the Cash ladder landed and
-	-- the starting shape became D2, buying a slot handed the player a D6 -- three
-	-- rungs up a ladder they were meant to climb, and a shape they very likely did
-	-- not own. Nothing refused it, because a die written straight into the profile
-	-- never passes through `SetShape`'s ownership check.
-	if DiceCatalog.newStartingDie() == nil then
+	-- This used to hardcode a D6 with six 10-mass faces. Once the Cash ladder
+	-- landed and the starting shape became D2, buying a slot handed the player a
+	-- D6 -- three rungs up a ladder they were meant to climb, and a shape they
+	-- very likely did not own. Nothing refused it, because a die written straight
+	-- into the profile never passes through `SetShape`'s ownership check, which
+	-- is also why `chosen` is validated against ownership above.
+	local makeDie = function()
+		return DiceCatalog.newDie(chosen)
+	end
+	if makeDie() == nil then
 		return false, Remotes.Notice.ServerError
 	end
 	-- Through the shared helper, so all THREE grant paths -- this, the +2 Die
 	-- Slots pass and the Starter Bundle -- increment the counter and create the
 	-- die by the same code. Two of the three used to write the counter alone.
 	PlayerProfile.mutate(player, function(d)
-		PlayerProfile.grantDieSlots(d, 1, slotCap, DiceCatalog.newStartingDie)
+		PlayerProfile.grantDieSlots(d, 1, slotCap, makeDie)
 	end)
 	return true, nil
 end))

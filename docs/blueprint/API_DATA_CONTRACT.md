@@ -22,7 +22,7 @@ All remotes live under `ReplicatedStorage.Remotes`, are created by the server, a
 | `SetElement` | `dieIndex: number`, `faceIndex: number`, `elementId: string` | `ok, reason?` | `elementId` resolved against the server catalog ∩ player's unlocked set. Never used as a table index. |
 | `SetShape` | `dieIndex: number`, `shapeId: string` | `ok, reason?` | `shapeId` allowlisted; Diamond cost checked server-side. |
 | `BuyUpgrade` | `upgradeId: string` | `ok, newLevel?, reason?` | `upgradeId` allowlisted. **Price is resolved server-side and never accepted from the client.** |
-| `AddDieSlot` | *(none)* | `ok, slots?, reason?` | Cap is `5`, or `7` with the +2 Dice Slots gamepass, verified against server-held entitlements. |
+| `AddDieSlot` | `shapeId: string` | `ok, slots?, reason?` | Buys one more die. `shapeId` names its shape and **must be one the player already owns**; the **empty string** means the starting shape. Cap is `3 + ascensions`, hard maximum `7`, verified server-side. |
 | `Ascend` | *(none)* | `ok, diamondsGained?, reason?` | Minimum lifetime-earnings threshold enforced server-side (SRS FR-9.5). |
 | `BuyDiamondNode` | `nodeId: string` | `ok, reason?` | `nodeId` allowlisted; Diamond cost server-resolved. Includes the Streak Strength tree. |
 | `SetAutoRoll` | `enabled: boolean` | `ok, reason?` | Strict boolean. The **interval** is server-owned and is never a parameter. |
@@ -80,6 +80,17 @@ Every inbound handler runs, in this order: **rate limit → arity → type → f
 | `GetLeaderboard` | 0.5/s | 2 |
 | `RedeemCode` | 0.2/s | 3 |
 | all others | 2/s | 5 |
+
+**Amended 2026-08-13 — `AddDieSlot` takes a shape.** It was zero-arity and always
+created the starting shape. SHAPE can now sell another die of a shape the player
+already owns (operator: *"in shape we need to add options to buy multiple of the
+same dice - this helps progression"*), which is the same transaction with a
+different starting shape — so it shares the slot price curve and the ascension
+cap rather than getting a parallel set that could drift. The **empty string** is
+the sentinel for "starting shape" rather than `nil`, because §2's arity check is
+deliberately EXACT and loosening it to a maximum for one optional argument would
+weaken that check for every remote. Ownership is unchanged: `Diamond.Shapes`
+remains a boolean set, and a repeat purchase buys a **die**, not a count.
 
 **Amended 2026-08-13 — manual rolling is slower than auto-roll.** The `Roll`
 bucket was a flat 5/s, identical to the FR-2.4 auto-roll ceiling. Two

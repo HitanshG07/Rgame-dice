@@ -153,8 +153,14 @@ function NetClient.buyDiamondNode(nodeId: string): Result
 	return call("BuyDiamondNode", nodeId)
 end
 
-function NetClient.addDieSlot(): Result
-	return call("AddDieSlot")
+-- Buys one more die. `shapeId` names the shape for the new die and must be one
+-- the player already owns; omitted, the server uses the starting shape.
+--
+-- THE EMPTY STRING IS THE SENTINEL for "starting shape", not nil: the gateway
+-- enforces arity EXACTLY, so an omitted argument would be rejected as a caller
+-- not speaking the protocol. Sending "" keeps the arity at one either way.
+function NetClient.addDieSlot(shapeId: string?): Result
+	return call("AddDieSlot", if type(shapeId) == "string" then shapeId else "")
 end
 
 function NetClient.ascend(): Result
