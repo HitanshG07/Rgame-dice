@@ -24,8 +24,12 @@ export type V7HUDController = {
 	riskValue: TextLabel,
 	payoutLabel: TextLabel,
 	autoBtn: TextButton,
+	-- The LAST SERVER-CONFIRMED auto-roll state. Not flipped optimistically:
+	-- Auto-Roll is a gamepass entitlement the server can refuse.
+	autoEnabled: boolean,
 	rollBtn: TextButton,
 	menuCallbacks: { (menuId: string) -> () },
+	setAutoState: (self: V7HUDController, enabled: boolean) -> (),
 	updateBalances: (self: V7HUDController, cash: number, gems: number, diamonds: number) -> (),
 	-- `voidRiskPct` is the CURRENT die's void probability, computed client-side
 	-- from its own mass distribution -- never sent by the server, which would be
@@ -395,6 +399,16 @@ function V7HUD.new(): V7HUDController
 	autoWrapper.Name = "AutoButton"
 	autoWrapper.Parent = rollStationBody
 
+	-- An outline that lights up when auto-roll is running. A second, redundant
+	-- signal on purpose: colour alone is a poor state indicator, and this is a
+	-- toggle a player leaves running and needs to confirm at a glance.
+	local autoGlow = Instance.new("UIStroke")
+	autoGlow.Name = "AutoGlow"
+	autoGlow.Color = UITheme.Colors.Gems
+	autoGlow.Thickness = 2
+	autoGlow.Enabled = false
+	autoGlow.Parent = autoBtn
+
 	gui.Parent = playerGui
 
 	local self: V7HUDController = setmetatable({
@@ -408,6 +422,7 @@ function V7HUD.new(): V7HUDController
 		riskValue = riskValue,
 		payoutLabel = payoutLabel,
 		autoBtn = autoBtn,
+		autoEnabled = false,
 		rollBtn = rollBtn,
 		menuCallbacks = menuCallbacks,
 	}, V7HUD) :: any
@@ -512,25 +527,76 @@ function V7HUD:onRollClicked(callback: () -> ())
 	self.rollBtn.Activated:Connect(trigger)
 end
 
-function V7HUD:onAutoToggled(callback: (enabled: boolean) -> ())
-	local active = false
-	local function trigger()
-		active = not active
-		
-		local wrapper = self.autoBtn.Parent :: Frame
-		local body = wrapper:FindFirstChildOfClass("Frame")
-		if body then
-			local lbl = body:FindFirstChildOfClass("TextLabel")
-			if lbl then
-				lbl.TextColor3 = if active then UITheme.Colors.Positive else UITheme.Colors.TextDim
-			end
-		end
+-- Paints the AUTO button to match a KNOWN state. Separate from the toggle so the
+-- same rendering runs whether the change came from a press or from the server
+-- correcting us.
+function V7HUD:setAutoState(enabled: boolean)
+	self.autoEnabled = enabled
 
-		pcall(callback, active)
+	-- Through `setButtonText`, which knows the caption lives on a child named
+	-- "Label". The old code did `wrapper:FindFirstChildOfClass("Frame")` and then
+	-- looked for a TextLabel inside it -- but `neumorphicButton` parents its two
+	-- SHADOW frames before the body, so that call returned `shadowDark`, which
+	-- has no label. The colour assignment therefore never ran and AUTO looked
+	-- identical on and off, which is exactly what the operator reported.
+	UITheme.setButtonText(self.autoBtn, if enabled then "AUTO ON" else "AUTO")
+
+	local lbl = self.autoBtn:FindFirstChild("Label")
+	if lbl ~= nil and lbl:IsA("TextLabel") then
+		-- Gems (cyan) rather than Positive: `Positive` is the same orange as Cash
+		-- in this palette, so an "on" state painted with it reads as just more
+		-- amber against an amber UI.
+		lbl.TextColor3 = if enabled then UITheme.Colors.Gems else UITheme.Colors.TextDim
 	end
-	
-	self.autoBtn.MouseButton1Click:Connect(trigger)
-	self.autoBtn.Activated:Connect(trigger)
+
+	-- A filled backing so the state is legible at a glance, not only by reading
+	-- the caption colour.
+	self.autoBtn.BackgroundColor3 = if enabled
+		then UITheme.Colors.PanelMaroon else UITheme.Colors.BaseCream
+
+	local glow = self.autoBtn:FindFirstChild("AutoGlow")
+	if glow ~= nil and glow:IsA("UIStroke") then
+		glow.Enabled = enabled
+	end
+end
+
+-- THE TOGGLE IS SERVER-CONFIRMED, not optimistic.
+--
+-- This used to flip a local `active` and repaint immediately, then fire the
+-- callback and ignore its result. Auto-Roll is a GAMEPASS entitlement (FR-7.1)
+-- and `SetAutoRoll` refuses when the player does not own it -- so a player
+-- without the pass saw the button turn on, stay on, and never roll. The button
+-- claimed a state the server had explicitly declined to grant.
+--
+-- Now the request goes first and the paint happens only on success; a refusal
+-- leaves the button showing the truth and says why.
+function V7HUD:onAutoToggled(callback: (enabled: boolean) -> boolean?)
+	local inFlight = false
+	local function trigger()
+		if inFlight then
+			return
+		end
+		inFlight = true
+		local desired = not self.autoEnabled
+
+		task.spawn(function()
+			local ok, accepted = pcall(callback, desired)
+			-- `accepted` is nil for a caller that returns nothing, which is
+			-- treated as success -- the callback contract only promises to report
+			-- a REFUSAL, and an older caller that returns nothing must not have
+			-- every toggle silently rejected.
+			if ok and accepted ~= false then
+				self:setAutoState(desired)
+			else
+				-- Repaint the state we still hold, so a failed toggle visibly
+				-- snaps back rather than sitting ambiguous.
+				self:setAutoState(self.autoEnabled == true)
+			end
+			inFlight = false
+		end)
+	end
+
+	UITheme.onPressed(self.autoBtn, trigger)
 end
 
 return V7HUD

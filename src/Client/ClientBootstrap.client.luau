@@ -196,8 +196,13 @@ if type(V7HUDModule) == "table" and type(V7HUDModule.new) == "function" then
 		NetClient.roll()
 	end)
 
-	hudCtrl:onAutoToggled(function(enabled: boolean)
-		NetClient.setAutoRoll(enabled)
+	-- RETURNS THE SERVER'S ANSWER. The HUD paints the button only when the toggle
+	-- was accepted -- Auto-Roll is a gamepass entitlement and `SetAutoRoll`
+	-- refuses without it, so an optimistic flip would show a player ON while the
+	-- server never rolled for them.
+	hudCtrl:onAutoToggled(function(enabled: boolean): boolean
+		local result = NetClient.setAutoRoll(enabled)
+		return result.ok
 	end)
 
 	-- VOID RISK, computed here rather than sent by the server.

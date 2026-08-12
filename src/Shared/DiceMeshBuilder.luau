@@ -2,10 +2,11 @@
 -- DiceMeshBuilder.luau
 -- Mathematical low-poly dice geometry, generated rather than modelled.
 --
--- Builds the five shapes `DiceCatalog` defines -- D4, D6, D8, D12, D20 -- as
--- real 3D solids assembled from wedges, each face carrying its own numeral.
--- Builders for D2, D3 and D10 remain below but are not generated; see
--- CATALOG_SHAPES for why.
+-- Builds EVERY shape `DiceCatalog` defines -- currently D2, D3, D4, D6, D8, D10,
+-- D12 and D20 -- as real 3D solids assembled from wedges, each face carrying its
+-- own numeral. The generated set is DERIVED from the catalog rather than listed
+-- here, so a shape added to the catalog cannot be silently missing a model; see
+-- CATALOG_SHAPES.
 --
 -- WHY THESE EXIST IN A 2D GAME. The board is a flat ScreenGui, but each die tile
 -- is a `ViewportFrame` -- a 2D UI element that renders a real 3D model inside
@@ -30,6 +31,10 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
+
+-- Sibling module: this file lives alongside DiceCatalog in Shared. Required so
+-- the generated set can be derived from the catalog rather than hand-listed.
+local DiceCatalog = require(script.Parent:WaitForChild("DiceCatalog"))
 
 local DiceMeshBuilder = {}
 
@@ -658,24 +663,47 @@ end
 -- actually drive, and each step exists because the first generation lacked it.
 --------------------------------------------------------------------------------
 
--- ONLY THE SHAPES THE GAME HAS RULES FOR.
+-- ONLY THE SHAPES THE GAME HAS RULES FOR -- and now ALL of them.
 --
--- The generator can build D2, D3 and D10 as well, and they are real dice. But
--- `DiceCatalog` defines five shapes -- D4, D6, D8, D12, D20 -- with per-shape
--- mass floors, diamond ceilings and Void probabilities, and a die the catalog
--- has never heard of has no mass floor, so `assertDieInvariant` cannot validate
--- it and the forge cannot price it. Generating a D10 the player can never own
--- would put an asset in ReplicatedStorage that looks like a feature.
+-- A die the catalog has never heard of has no mass floor, so
+-- `assertDieInvariant` cannot validate it and the forge cannot price it;
+-- generating one would put an asset in ReplicatedStorage that looks like a
+-- feature. That reasoning is unchanged. What changed is the catalog.
 --
--- The builders for the other three are deliberately left in place: adding a
--- shape later is a catalog change plus one row here, not a geometry problem.
-local CATALOG_SHAPES: { { name: string, build: () -> Model } } = {
-	{ name = "D4",  build = function() return buildD4(1.4, DICE_COLORS.D4) end },
-	{ name = "D6",  build = function() return buildD6(1.2, DICE_COLORS.D6) end },
-	{ name = "D8",  build = function() return buildD8(1.5, DICE_COLORS.D8) end },
-	{ name = "D12", build = function() return buildD12(1.5, DICE_COLORS.D12) end },
-	{ name = "D20", build = function() return buildD20(1.5, DICE_COLORS.D20) end },
+-- THE DEFECT THIS FIXES. This list was hand-written when `DiceCatalog` held five
+-- shapes (D4, D6, D8, D12, D20), and the comment above it promised that adding a
+-- shape later was "a catalog change plus one row here". The catalog then grew to
+-- eight with the unlock ladder -- D2, D3, D4, D6, D8, D10, D12, D20 -- and the
+-- row was never added for the three new ones. D2 BECAME THE STARTING SHAPE, so
+-- every new player's board rendered EMPTY, with `DiceRenderer applyModel failed:
+-- source model D2 not found!` spamming the log once per frame.
+--
+-- So the list is no longer hand-written. It is DERIVED from the catalog, and a
+-- shape the catalog defines with no builder here is a loud startup warning
+-- rather than a silently missing model. Adding a shape is now a catalog change
+-- and nothing else, which is what the old comment claimed and could not deliver.
+local BUILDERS: { [string]: () -> Model } = {
+	D2  = function() return buildD2(1.5, DICE_COLORS.D2) end,
+	D3  = function() return buildD3(1.3, 1.6, DICE_COLORS.D3) end,
+	D4  = function() return buildD4(1.4, DICE_COLORS.D4) end,
+	D6  = function() return buildD6(1.2, DICE_COLORS.D6) end,
+	D8  = function() return buildD8(1.5, DICE_COLORS.D8) end,
+	D10 = function() return buildD10(1.5, DICE_COLORS.D10) end,
+	D12 = function() return buildD12(1.5, DICE_COLORS.D12) end,
+	D20 = function() return buildD20(1.5, DICE_COLORS.D20) end,
 }
+
+local CATALOG_SHAPES: { { name: string, build: () -> Model } } = {}
+for _, def in ipairs(DiceCatalog.getAllShapes()) do
+	local build = BUILDERS[def.id]
+	if build ~= nil then
+		table.insert(CATALOG_SHAPES, { name = def.id, build = build })
+	else
+		warn(string.format(
+			"[DiceMeshBuilder] catalog defines shape '%s' with no geometry builder"
+			.. " -- its board tile will render empty", def.id))
+	end
+end
 
 -- Every die is normalised to this bounding-sphere diameter, in studs.
 --
@@ -819,7 +847,10 @@ function DiceMeshBuilder.buildInto(parent: Instance): { Model }
 			end
 		end
 
-		local expected = ({ D4 = 4, D6 = 6, D8 = 8, D12 = 12, D20 = 20 })[entry.name]
+		-- Expected face count comes from the CATALOG, not a second hardcoded map
+		-- that listed only the original five and would silently skip the check
+		-- for any shape added later.
+		local expected = DiceCatalog.getFaceCount(entry.name)
 		if expected ~= nil and faces ~= expected then
 			warn(string.format(
 				"[DiceMeshBuilder] %s recovered %d face normals, expected %d",

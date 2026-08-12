@@ -290,7 +290,16 @@ end
 -- The panel previously hardcoded "+450 Diamonds" regardless of the player's
 -- actual lifetime cash -- a fabricated reward figure attached to the single most
 -- destructive button in the game.
-DiceCatalog.ASCEND_MIN_LIFETIME_CASH = 1e6
+-- !! TEMPORARY TEST VALUE -- REVERT TO 1e6 BEFORE SHIPPING !!
+--
+-- Lowered to 100_000 on 2026-08-12 at the operator's request, purely so the
+-- ascension flow can be exercised end to end without grinding to $1M. The
+-- shipping value is ONE MILLION and this line is the only thing to change back.
+--
+-- Leaving this in would let a player ascend ten times sooner than the economy
+-- was tuned for, which inflates Diamond income by roughly 3x per unit of cash
+-- (the reward is sqrt-scaled, so ten cheap ascensions beat one expensive one).
+DiceCatalog.ASCEND_MIN_LIFETIME_CASH = 100000 -- TEST VALUE; ship 1e6
 
 -- Diamonds a reset would grant at a given lifetime cash. Sub-linear on purpose:
 -- doubling a run's earnings does not double its prestige payout, so a player is
@@ -306,7 +315,15 @@ function DiceCatalog.ascensionDiamonds(lifetimeCash: number): number
 	if earned ~= earned or earned < 0 then
 		return 0
 	end
-	return earned
+	-- AT LEAST ONE DIAMOND once the threshold is met.
+	--
+	-- The curve divides by 1e6 independently of the threshold, so any threshold
+	-- below $1M produced `floor(sqrt(<1))` = 0 -- a player who had met the
+	-- requirement was told they would earn nothing and the button stayed
+	-- disabled. That was invisible while the two numbers happened to be equal,
+	-- and it is a real edge case at the shipping value too: crossing $1M exactly
+	-- must never grant zero for having qualified.
+	return math.max(1, earned)
 end
 
 -- DIE SLOTS (FR-1.1: one to seven dice).
