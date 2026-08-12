@@ -31,19 +31,38 @@ export type Setting = {
 	-- Shown under the label. Says what the toggle DOES, in the player's terms.
 	blurb: string,
 	default: boolean,
+	-- WHAT THIS SETTING NEEDS IN ORDER TO DO ANYTHING, or nil if it is
+	-- self-contained.
+	--
+	-- Music and Sound Effects control `AudioDirector`, whose nine asset ids are
+	-- all `DUMMY_ID_*` placeholders -- no Sound instance is ever created, so both
+	-- toggles saved a preference that reached nothing audible. A switch that
+	-- controls nothing is mock UI, and the panel must not present one as live.
+	--
+	-- Declared here rather than hardcoded in the panel so that when the operator
+	-- supplies real audio ids, the rows come alive on their own with no client
+	-- change: the panel asks whether the capability is present and renders
+	-- accordingly.
+	requires: string?,
 }
 
 local SETTINGS: { [string]: Setting } = {
+	-- BOTH VISUAL SETTINGS ARE LIVE TODAY and need no assets. They are built from
+	-- TextLabels, not from ParticleEmitters or a BlurEffect: sparks are four "+"
+	-- labels thrown outward, and the "motion blur" is a lagging translucent copy
+	-- of the payout number -- a deliberate stand-in, because a real blur pass is
+	-- not available to a ScreenGui. The blurbs below describe what the player
+	-- actually sees, not what the names might suggest.
 	Particles = {
 		key = "Particles",
 		label = "Particles",
-		blurb = "Floating payout numbers and burst effects when a die lands.",
+		blurb = "Little sparks that burst from a payout when a die pays out.",
 		default = true,
 	},
 	MotionBlur = {
 		key = "MotionBlur",
-		label = "Motion Blur",
-		blurb = "Trails on a rolling die. Turn off if the board feels busy.",
+		label = "Motion Trail",
+		blurb = "A soft trailing copy behind the payout number as it rises.",
 		default = true,
 	},
 	Music = {
@@ -51,14 +70,26 @@ local SETTINGS: { [string]: Setting } = {
 		label = "Music",
 		blurb = "Background ambience.",
 		default = true,
+		requires = "audio",
 	},
 	SFX = {
 		key = "SFX",
 		label = "Sound Effects",
 		blurb = "Roll, land, streak and interface sounds.",
 		default = true,
+		requires = "audio",
 	},
 }
+
+-- Player-facing explanation for a capability that is not present. Keyed by the
+-- same string `requires` uses, so adding a capability means adding one line.
+local MISSING: { [string]: string } = {
+	audio = "No sounds are installed yet",
+}
+
+function SettingsCatalog.missingReason(capability: string): string
+	return MISSING[capability] or "Not available yet"
+end
 
 -- Display order. Fixed rather than derived from `pairs`, because pairs order is
 -- unspecified and a settings list that reshuffles between sessions is a bug the

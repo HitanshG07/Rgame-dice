@@ -30,6 +30,8 @@ export type V7MenuController = {
 	vaultRefresh: ((any) -> ())?,
 	slotsRefresh: ((any) -> ())?,
 	settingsRefresh: ((any) -> ())?,
+	setCapability: (self: V7MenuController, name: string, present: boolean) -> (),
+	_capabilities: { [string]: boolean },
 	lastState: any,
 }
 
@@ -498,6 +500,18 @@ function V7MenuPanel.new(): V7MenuController
 
 	local settingRows: { [string]: any } = {}
 
+	-- WHICH CLIENT CAPABILITIES ARE ACTUALLY PRESENT.
+	--
+	-- Filled by the composition root through `setCapability`, never by this module
+	-- reaching sideways into AudioDirector. A view module that requires another
+	-- view module turns the UI layer into a graph instead of a tree, and
+	-- ClientBootstrap already holds both -- so it is the one place that can answer
+	-- without adding an edge.
+	--
+	-- Absent means UNAVAILABLE, which is the right default: a capability that has
+	-- not reported in has not proven it exists.
+	local capabilities: { [string]: boolean } = {}
+
 	for order, def in ipairs(SettingsCatalog.ordered()) do
 		local row = UITheme.panel(UDim2.fromScale(1, 0), UDim2.fromScale(0, 0))
 		-- NAMED PER SETTING. Every row is otherwise an anonymous "Frame", so all
@@ -538,7 +552,10 @@ function V7MenuPanel.new(): V7MenuController
 			NetClient.setSetting(key, not current)
 		end)
 
-		settingRows[key] = { set = setToggle, value = def.default, button = toggleBtn }
+		settingRows[key] = {
+			set = setToggle, value = def.default, button = toggleBtn,
+			blurb = blurb, requires = def.requires, baseBlurb = def.blurb,
+		}
 	end
 
 	-- PROMO CODES (FR-10.6). The server already had `RedeemCode` wired to a real
@@ -642,6 +659,25 @@ function V7MenuPanel.new(): V7MenuController
 			local value = SettingsCatalog.read(settings, key)
 			entry.value = value
 			entry.set(value)
+
+			-- A SETTING WHOSE FEATURE DOES NOT EXIST IS SHOWN AS UNAVAILABLE.
+			--
+			-- The preference is still stored and still honoured -- it is the
+			-- CONTROL that is disabled, not the value -- so when the missing
+			-- capability arrives the player's saved choice is already correct and
+			-- the row simply becomes live. Nothing here is a placeholder; it is a
+			-- true statement about the current build.
+			local available = entry.requires == nil
+				or capabilities[entry.requires] == true
+			UITheme.setEnabled(entry.button, available)
+			if available then
+				entry.blurb.Text = entry.baseBlurb
+				entry.blurb.TextColor3 = UITheme.Colors.TextDim
+			else
+				entry.blurb.Text = string.format("%s - %s", entry.baseBlurb,
+					SettingsCatalog.missingReason(entry.requires))
+				entry.blurb.TextColor3 = UITheme.Colors.VoidFace
+			end
 		end
 	end
 
@@ -696,6 +732,7 @@ function V7MenuPanel.new(): V7MenuController
 		vaultRefresh = refreshVault,
 		slotsRefresh = refreshSlots,
 		settingsRefresh = refreshSettings,
+		_capabilities = capabilities,
 		lastState = nil,
 	}, V7MenuPanel) :: any
 
@@ -723,6 +760,20 @@ function V7MenuPanel:applyState(state: any)
 			if not ok then
 				warn("[V7MenuPanel] overlay refresh failed: " .. tostring(err))
 			end
+		end
+	end
+end
+
+-- Declares whether a client capability is present, from the composition root.
+-- Repaints immediately from the last snapshot so the answer takes effect without
+-- waiting for the next StateSync.
+function V7MenuPanel:setCapability(name: string, present: boolean)
+	self._capabilities[name] = present
+	local last = self.lastState
+	if last ~= nil and type(self.settingsRefresh) == "function" then
+		local ok, err = pcall(self.settingsRefresh, last)
+		if not ok then
+			warn("[V7MenuPanel] settings refresh failed: " .. tostring(err))
 		end
 	end
 end

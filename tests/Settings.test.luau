@@ -75,7 +75,32 @@ local function run(): (boolean, string?, number)
 				.. " what it does", def.key))
 		e = e or check(type(def.default) == "boolean",
 			string.format("setting '%s' has a non-boolean default", def.key))
+
+		-- A DECLARED DEPENDENCY MUST BE EXPLAINABLE.
+		--
+		-- `requires` names a capability the setting needs in order to do
+		-- anything, and the panel renders the row disabled with
+		-- `missingReason(capability)` when it is absent. A capability with no
+		-- message would show the generic fallback, which tells the player
+		-- nothing about WHY the switch is dead -- the exact ambiguity the
+		-- unavailable state exists to remove.
+		if def.requires ~= nil then
+			e = e or check(type(def.requires) == "string" and #def.requires > 0,
+				string.format("setting '%s' has a malformed `requires`", def.key))
+			local reason = SettingsCatalog.missingReason(def.requires)
+			e = e or check(type(reason) == "string" and #reason > 0,
+				string.format("capability '%s' (required by %s) has no player-facing"
+					.. " explanation", tostring(def.requires), def.key))
+			e = e or check(reason ~= SettingsCatalog.missingReason("__no_such_capability__"),
+				string.format("capability '%s' falls through to the generic message"
+					.. " -- add a line to MISSING", tostring(def.requires)))
+		end
 	end
+
+	-- The fallback still answers for an unknown capability rather than erroring
+	-- or returning nil into a string.format.
+	e = e or check(type(SettingsCatalog.missingReason("__no_such_capability__")) == "string",
+		"missingReason must always return a string, even for an unknown capability")
 
 	-- `defaults()` must hand back a COPY. Returning the internal table would let
 	-- any caller rewrite the defaults for every player on the server.

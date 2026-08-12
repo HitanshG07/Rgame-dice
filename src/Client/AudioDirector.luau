@@ -313,6 +313,28 @@ end
 -- produced no sound. Nothing in the shipped surfaces depends on it; it exists
 -- because "silent because muted" and "silent because unresolved" are different
 -- facts and the difference should be answerable.
+-- WHETHER ANY AUDIO ACTUALLY EXISTS.
+--
+-- Every asset id is currently a `DUMMY_ID_*` placeholder, so `isPlayable`
+-- rejects all of them, no Sound is ever built, and the Music and SFX settings
+-- control silence. The settings panel asks this so it can present those two
+-- toggles as unavailable rather than as live controls that do nothing.
+--
+-- It reports the REAL state rather than a hardcoded "audio is not ready yet",
+-- so the day real ids are dropped into ASSET_IDS the panel corrects itself with
+-- no further change -- which is the whole point of asking rather than assuming.
+function AudioDirector.hasAudio(): boolean
+	if musicSound ~= nil then
+		return true
+	end
+	for _, pool in pairs(voices) do
+		if #pool > 0 then
+			return true
+		end
+	end
+	return false
+end
+
 function AudioDirector.isCueAvailable(cue: Cue): boolean
 	local pool = voices[cue]
 	return pool ~= nil and #pool > 0

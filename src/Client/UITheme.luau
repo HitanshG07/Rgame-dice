@@ -478,6 +478,18 @@ function UITheme.setEnabled(button: TextButton, enabled: boolean): ()
 	button.Active = enabled
 	button.Interactable = enabled
 
+	-- A TOGGLE HAS NO CAPTION, so the label branch below could not dim it and the
+	-- fallback recoloured `TextColor3` on a button whose Text is empty -- meaning
+	-- `setEnabled(false)` on a switch changed NOTHING visible. A disabled toggle
+	-- was pixel-identical to an enabled one sitting in the off position, so
+	-- "you cannot change this" and "this is currently off" looked the same.
+	local knob = button:FindFirstChild("Knob")
+	if knob ~= nil and knob:IsA("Frame") then
+		knob.BackgroundTransparency = if enabled then 0 else 0.6
+		button.BackgroundTransparency = if enabled then 0 else 0.5
+		return
+	end
+
 	local lbl = button:FindFirstChild("Label")
 	if lbl ~= nil and lbl:IsA("TextLabel") then
 		lbl.TextTransparency = if enabled then 0 else 0.55

@@ -150,6 +150,27 @@ if type(V7HUDModule) == "table" and type(V7HUDModule.new) == "function" then
 			local menuCtrl = V7MenuModule.new()
 			menuController = menuCtrl
 
+			-- CAPABILITY REPORTING, from the one place that holds both modules.
+			--
+			-- The settings panel must not offer a live-looking switch over a
+			-- feature that does not exist. Every audio asset id is still a
+			-- `DUMMY_ID_*` placeholder, so no Sound is ever built and the Music
+			-- and SFX toggles control silence; the panel shows them disabled
+			-- with an honest note instead.
+			--
+			-- ASKED rather than assumed, so dropping real ids into
+			-- `AudioDirector.ASSET_IDS` is the ONLY change needed to bring both
+			-- rows to life -- nothing here and nothing in the panel needs
+			-- revisiting. A hardcoded "audio is not ready" would have to be
+			-- remembered and removed, and would not be.
+			local audioModule = loaded["AudioDirector"]
+			local hasAudio = false
+			if type(audioModule) == "table" and type(audioModule.hasAudio) == "function" then
+				local okAudio, result = pcall(audioModule.hasAudio)
+				hasAudio = okAudio and result == true
+			end
+			menuCtrl:setCapability("audio", hasAudio)
+
 			hudCtrl:onMenuClicked(function(menuId: string)
 				if menuId == "forge" then
 					menuCtrl:closeAll()
