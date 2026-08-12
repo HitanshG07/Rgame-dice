@@ -48,6 +48,19 @@ local function defaultEmit(player: Player, payload: any): ()
 	Remotes.getEvent("StateSync"):FireClient(player, payload)
 end
 
+-- Roblox Premium, read from the platform. Duplicated from OfflineService rather
+-- than imported ON PURPOSE: StateSyncService is required by nearly everything,
+-- so every edge added here is a future module cycle waiting for one more import
+-- (L-035). This is a one-line read of a platform property with no game logic in
+-- it, which is the only kind of duplication worth accepting -- the EFFECT of
+-- Premium still lives in exactly one place, `VaultCatalog`.
+local function isPremium(player: Player): boolean
+	local ok, result = pcall(function()
+		return player.MembershipType == Enum.MembershipType.Premium
+	end)
+	return ok and result == true
+end
+
 local emitState: (Player, any) -> () = defaultEmit
 
 function StateSyncService._setEmitterForTesting(fn: ((Player, any) -> ())?): ()
@@ -173,6 +186,14 @@ function StateSyncService.buildSnapshot(data: PlayerProfile.Profile, streak: num
 				capacitySeconds = status.capacitySeconds,
 				elapsedSeconds = status.elapsedSeconds,
 				ratePerSec = status.ratePerSec,
+				-- The player's TIER, so the panel can say what they get and what a
+				-- better tier would give. Efficiency is the server's computed
+				-- value, not a client re-derivation, and the two flags are
+				-- entitlement FACTS the server has already verified -- the client
+				-- renders them, it never asserts them.
+				efficiency = status.efficiency,
+				hasVip = PurchaseService.ownsPass(player, "VipVault"),
+				hasPremium = isPremium(player),
 				-- Whether the vault is FULL, so the panel can say "stopped
 				-- earning" rather than leaving the player to compare two numbers.
 				atCapacity = status.claimableSeconds >= status.capacitySeconds,

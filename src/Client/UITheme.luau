@@ -482,6 +482,35 @@ function UITheme.onPressed(button: TextButton, handler: () -> ()): ()
 	button.MouseButton1Click:Connect(trigger)
 end
 
+-- SMALL PRINT. A fine, dim, non-scaling line for tier and entitlement notes
+-- (operator-directed 2026-08-13: "every detail which differentiates standard vip
+-- and premium users is mentioned in a small font wherever its needed").
+--
+-- DELIBERATELY NOT `TextScaled`. Every other label in this UI scales to fill its
+-- box, which is right for figures the player is meant to read at a glance and
+-- wrong for a footnote -- scaled small print grows to shout on a large screen
+-- and shrinks to nothing on a phone. A fixed size keeps it subordinate to the
+-- number it is annotating at every resolution.
+--
+-- One helper rather than each panel inventing its own, so "small print" stays
+-- one visual weight across the game instead of five near-misses.
+function UITheme.smallPrint(text: string, size: UDim2, position: UDim2, colour: Color3?): TextLabel
+	local label = Instance.new("TextLabel")
+	label.Text = text
+	label.Size = size
+	label.Position = position
+	label.BackgroundTransparency = 1
+	label.Font = UITheme.Font
+	label.TextSize = 12
+	label.TextScaled = false
+	label.TextWrapped = true
+	label.TextColor3 = colour or UITheme.Colors.TextDim
+	label.TextXAlignment = Enum.TextXAlignment.Left
+	label.TextYAlignment = Enum.TextYAlignment.Top
+	label.ZIndex = 5
+	return label
+end
+
 -- The sanctioned way to change a neumorphic button's caption at runtime.
 --
 -- Falls back to the button's own Text for any button not built by

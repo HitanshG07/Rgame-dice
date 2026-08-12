@@ -10,6 +10,7 @@ local Shared = ReplicatedStorage:WaitForChild("Shared")
 local MonetisationCatalog = require(Shared:WaitForChild("MonetisationCatalog"))
 local DiceCatalog = require(Shared:WaitForChild("DiceCatalog"))
 local SettingsCatalog = require(Shared:WaitForChild("SettingsCatalog"))
+local VaultCatalog = require(Shared:WaitForChild("VaultCatalog"))
 local Format = require(Shared:WaitForChild("Format"))
 local UITheme = require(script.Parent:WaitForChild("UITheme"))
 local NetClient = require(script.Parent:WaitForChild("NetClient"))
@@ -93,6 +94,23 @@ function V7MenuPanel.new(): V7MenuController
 	-- is not.
 	local passCards: { [string]: any } = {}
 
+	-- Exact figures for the passes whose worth is a RATE. Built from the shared
+	-- catalogs, never typed as prose, so a card cannot promise something the
+	-- server does not deliver (L-025). Entries absent here simply show no small
+	-- print -- a pass that grants a concrete thing ("+2 die slots") is already
+	-- self-explanatory in its blurb.
+	local SHOP_TIER_DETAIL: { [string]: string } = {
+		VipVault = string.format(
+			"Vault: +%d%% of your earning rate, capacity raised to %dh.\n"
+			.. "Standard is %d%% and %dh. Stacks with Roblox Premium.",
+			math.floor(VaultCatalog.VIP_EFFICIENCY_BONUS * 100 + 0.5),
+			math.floor(VaultCatalog.VIP_CAPACITY_SEC / 3600),
+			math.floor(VaultCatalog.BASE_EFFICIENCY * 100 + 0.5),
+			math.floor(VaultCatalog.BASE_CAPACITY_SEC / 3600)),
+		AutoRoll = "Rolls for you. Manual rolling is capped lower than auto.",
+		UltraAutoRoll = "Raises the auto-roll speed ceiling above the standard pass.",
+	}
+
 	for _, entry in ipairs(sellableItems) do
 		local card = UITheme.panel(UDim2.fromScale(1, 1), UDim2.fromScale(0, 0))
 		card.Name = "Item_" .. entry.key
@@ -117,6 +135,19 @@ function V7MenuPanel.new(): V7MenuController
 		blurbLbl.TextColor3 = UITheme.Colors.TextPrimary
 		blurbLbl.TextScaled = true
 		blurbLbl.Parent = card
+
+		-- EXACT NUMBERS IN SMALL PRINT for the passes whose value is a rate rather
+		-- than a thing (operator-directed 2026-08-13). "A far higher ceiling on
+		-- offline earnings" is not something a player can evaluate against a
+		-- Robux price; "+25% rate, 24h capacity" is. Read from the shared catalog
+		-- so the card cannot advertise a number the server does not grant.
+		local detail = SHOP_TIER_DETAIL[entry.key]
+		if detail ~= nil then
+			local fine = UITheme.smallPrint(detail, UDim2.fromScale(0.9, 0.16),
+				UDim2.fromScale(0.05, 0.545))
+			fine.Name = "TierDetail"
+			fine.Parent = card
+		end
 
 		local buyContainer, buyBtn = UITheme.neumorphicButton("BUY", UITheme.Colors.Gems, UDim2.fromScale(0.8, 0.25), UDim2.fromScale(0.1, 0.7))
 		buyContainer.Name = "BuyButton"
@@ -1019,6 +1050,17 @@ function V7MenuPanel.new(): V7MenuController
 	vaultStatus.TextScaled = true
 	vaultStatus.Parent = vaultBody
 
+	-- TIER SMALL PRINT (operator-directed 2026-08-13). The panel stated capacity
+	-- in hours and NOTHING about efficiency or tier -- so a player banking 50% of
+	-- their rate and one banking 100% saw identical screens, with no way to learn
+	-- that the difference existed. Rendered from the server's own computed
+	-- efficiency and verified entitlement flags, via the shared catalog, so it
+	-- cannot claim a rate the player does not have.
+	local vaultTier = UITheme.smallPrint("", UDim2.fromScale(0.94, 0.12),
+		UDim2.fromScale(0.03, 0.855))
+	vaultTier.Name = "TierNote"
+	vaultTier.Parent = vaultBody
+
 	-- Server refusal codes as sentences. The server sends a code, never prose.
 	local VAULT_REFUSAL: { [string]: string } = {
 		vault_empty = "Nothing has built up yet -- come back later.",
@@ -1078,9 +1120,16 @@ function V7MenuPanel.new(): V7MenuController
 			vaultAmount.TextColor3 = UITheme.Colors.TextDim
 			vaultBarFill.Size = UDim2.fromScale(0, 1)
 			vaultInfo.Text = "Waiting for your vault figures..."
+			vaultTier.Text = ""
 			UITheme.setEnabled(claimVaultBtn, false)
 			return
 		end
+
+		-- The tier line, from the server's computed efficiency and the
+		-- entitlements it verified.
+		vaultTier.Text = VaultCatalog.describeTier(
+			tonumber(v.efficiency) or VaultCatalog.BASE_EFFICIENCY,
+			v.hasVip == true, v.hasPremium == true)
 
 		local unclaimed = tonumber(v.unclaimed) or 0
 		local claimable = tonumber(v.claimableSeconds) or 0

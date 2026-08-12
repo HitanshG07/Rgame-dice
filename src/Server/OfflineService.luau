@@ -7,6 +7,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local ForgeMath = require(Shared:WaitForChild("ForgeMath"))
+local VaultCatalog = require(Shared:WaitForChild("VaultCatalog"))
 
 local PlayerProfile = require(script.Parent:WaitForChild("PlayerProfile"))
 local EconomyService = require(script.Parent:WaitForChild("EconomyService"))
@@ -42,16 +43,19 @@ local OfflineService = {}
 -- The additive shape is what makes all three purchases matter at once. A tiered
 -- "VIP overrides everything" model, which is what this replaced, made the Cash
 -- upgrades worthless the moment the pass was bought.
-local BASE_CAPACITY_SEC = 4 * 3600        -- 4 hours
-local BASE_EFFICIENCY = 0.5               -- 50%
-local UPGRADE_CAPACITY_PER_LEVEL = 2880   -- +0.8h per level (10 levels = +8h)
-local UPGRADE_EFFICIENCY_PER_LEVEL = 0.05 -- +5% per level (5 levels = +25%)
+-- READ FROM THE SHARED CATALOG. These were locals here, which is why the VAULT
+-- panel could not state the player's efficiency or their tier -- the client had
+-- no way to reach the numbers. Both sides now read one declaration (L-025).
+local BASE_CAPACITY_SEC = VaultCatalog.BASE_CAPACITY_SEC
+local BASE_EFFICIENCY = VaultCatalog.BASE_EFFICIENCY
+local UPGRADE_CAPACITY_PER_LEVEL = VaultCatalog.UPGRADE_CAPACITY_PER_LEVEL_SEC
+local UPGRADE_EFFICIENCY_PER_LEVEL = VaultCatalog.UPGRADE_EFFICIENCY_PER_LEVEL
 
-OfflineService.PREMIUM_EFFICIENCY_BONUS = 0.15
-OfflineService.PREMIUM_CAPACITY_BONUS_SEC = 4 * 3600
-OfflineService.VIP_EFFICIENCY_BONUS = 0.25
-OfflineService.VIP_CAPACITY_SEC = 24 * 3600
-OfflineService.MAX_EFFICIENCY = 1.0
+OfflineService.PREMIUM_EFFICIENCY_BONUS = VaultCatalog.PREMIUM_EFFICIENCY_BONUS
+OfflineService.PREMIUM_CAPACITY_BONUS_SEC = VaultCatalog.PREMIUM_CAPACITY_BONUS_SEC
+OfflineService.VIP_EFFICIENCY_BONUS = VaultCatalog.VIP_EFFICIENCY_BONUS
+OfflineService.VIP_CAPACITY_SEC = VaultCatalog.VIP_CAPACITY_SEC
+OfflineService.MAX_EFFICIENCY = VaultCatalog.MAX_EFFICIENCY
 
 -- Roblox Premium, read from the platform rather than from anything the client
 -- says. `MembershipType` is server-authoritative.

@@ -96,43 +96,81 @@ not a balance value — `BoardView` has layouts for exactly 1–7 and
 
 ---
 
-## 3. THE GEMS VAULT-STORAGE IDEA — NEEDS A DECISION
+## 3. THE GEMS VAULT-STORAGE FEATURE — SPECIFIED, NOT BUILT
 
 > *"the vault capacity is something users can buy through gems … 5 gems means 1m
 > of storage or something — it should not be pay to win"*
+> *"yeah sure it can be hour based for gems"*
+> *"we will be making codes / quests - which give diamonds and gems aswell in
+> future right"*
 
-### The finding that makes this attractive
+**RESOLVED: hour-based.** `5 Gems = 1 hour` of vault capacity.
 
-**Gems currently have NO sink.** They can be earned (promo codes, daily spin,
-quests) and bought (two Robux products), and there is **nowhere to spend them**.
-Grep confirms: no handler anywhere debits Gems. So a vault-storage exchange
-would be the currency's first real use, which is a good fit rather than a bolt-on.
+### Gems have no sink — but they DO have earn paths
 
-### The "not pay to win" tension, stated honestly
+**Nothing anywhere debits Gems.** Grep confirms no spend path exists, so this
+feature would be the currency's first real use. That is a good fit rather than a
+bolt-on.
 
-Vault capacity **is** an economic advantage — more hours banked is more Cash.
-Gems are purchasable with Robux. So a naive "Gems buy capacity" is pay-to-win by
-construction. Three ways to keep it fair, and this is the decision needed:
+Correcting something stated loosely earlier: Gem **earning** is already
+implemented and shipping, not future work. Every source below exists in code
+today:
 
-1. **Cap the purchasable capacity.** Gems buy hours up to the same ceiling a
-   Cash player reaches (12h), so paying only buys *speed*, never a higher
-   ceiling. This is the standard non-P2W shape.
-2. **Make Gems generously earnable.** If quests and the daily spin pay enough
-   Gems that a regular player reaches the cap in reasonable time, buying them is
+| Source | Gems | Notes |
+|---|---|---|
+| Quest `roll500` | 40 | daily rotation |
+| Quest `streak15` | 30 | daily rotation |
+| Quest `forge10` | 25 | daily rotation |
+| Playtime chest, Tier 3 | 35 | 45 min of session time |
+| Daily spin | 150 | one outcome on the wheel |
+| Promo code `DICEFORGE` | 100 | once per player |
+
+Three of the seven daily quests pay Gems, and the day's three are rolled from
+that pool — so a typical active day yields roughly **25–105 Gems**, plus 35 from
+the Tier-3 chest, plus the spin when it lands on Gems.
+
+Diamonds are likewise already earnable outside ascension: the daily spin can pay
+15, and `FORGE2026` pays 10.
+
+So the answer to *"we will be making codes / quests which give diamonds and gems
+as well in future, right?"* is **that already works** — `PROMO_CODES` and the
+quest table both support `Cash | Gems | Diamonds` and already use all three.
+Adding more is a one-line entry in either table, not a feature.
+
+### The pay-to-win question, and why it is manageable here
+
+Vault capacity **is** an economic advantage — more hours banked is more Cash —
+and Gems are purchasable with Robux. A naive "Gems buy capacity" is therefore
+pay-to-win by construction.
+
+Two properties together defuse it, and both should ship at once:
+
+1. **Cap the purchasable capacity at the same ceiling Cash reaches.** Paying
+   buys *speed to the cap*, never a higher cap. This is the standard non-P2W
+   shape and the single most important constraint.
+2. **The earn rate above is already real.** At ~60 Gems on an average active day
+   and `5 Gems = 1 hour`, a free player adds roughly **12 hours of capacity per
+   day of play** — so the cap is reachable without spending, and buying Gems is
    a shortcut rather than an advantage.
-3. **Both** — a cap plus a real earn rate. Strongest position.
 
-### What I would need from the operator
+### Proposed numbers (needs operator sign-off before building)
 
-- Which of the three above.
-- **The exchange rate.** "5 gems = 1m of storage" is ambiguous — 1 million what?
-  Capacity is measured in *seconds of offline time*, not currency. Likely
-  readings: 5 Gems = 1 hour of capacity, or 5 Gems = enough capacity to bank
-  $1M at the player's current rate (which would vary per player and is probably
-  not what is wanted).
-- Whether Gems should also buy **efficiency**, or capacity only.
+- **Rate:** `5 Gems = 1 hour` (3600s) of vault capacity. Operator-confirmed.
+- **Cap:** purchased capacity stops at **+8h**, the same total a maxed
+  `VaultCapacity` Cash upgrade reaches. Combined with base 4h that is 12h,
+  matching a fully Cash-upgraded player exactly.
+- **Stacking:** adds into the existing capacity sum alongside Cash upgrades,
+  Premium and VIP — so it cannot push past the VIP 24h floor either.
+- **Capacity only, not efficiency.** Efficiency is the dial that decides whether
+  offline can rival live play; leaving it purely Cash/Premium/VIP keeps the
+  100% ceiling meaningful and avoids a second P2W surface.
 
-**Nothing has been built for this.** It is specified here and waiting.
+### What is still needed
+
+- Sign-off on the **+8h cap** specifically. It is the whole anti-P2W property,
+  so it should be a deliberate choice rather than my default.
+- A new `PurchasedVaultHours` profile field, a Gems spend path (the first one in
+  the game), and a VAULT panel control. **None of this is built.**
 
 ---
 
@@ -168,7 +206,9 @@ fit the fixed grid without collisions. Not a new defect.
 
 ## 5. SUGGESTED ORDER
 
-1. **Gems vault storage** — needs the three answers in §3 first
+1. **Gems vault storage** — rate and shape are settled; needs sign-off on the
+   +8h cap in §3, then it is a contained build (profile field, Gems spend path,
+   VAULT panel control)
 2. **Animation rebuild (Route A)** — approved, self-contained, wants its own
    verification pass per L-031 (screenshots mid-tumble, several consecutive
    rolls compared, 1/2/4/7 dice, and FR-1.4 containment must hold)

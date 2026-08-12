@@ -531,36 +531,8 @@ end
 -- A one-shot payout flash where the mock "+$14.8M" used to sit permanently.
 -- Rises and fades over the streak text, then hides -- so the strip's resting
 -- state is always the live readout, never a stale payout from three rolls ago.
-function V7HUD:flashPayout(payout: number, voidHit: boolean)
-	if not ForgeMath.isFinite(payout) or payout <= 0 or voidHit then
-		return
-	end
-	local lbl = self.payoutLabel
-	lbl.Text = "+$" .. Format.formatNumber(payout)
-	lbl.Visible = true
-	lbl.TextTransparency = 0
-	lbl.Position = UDim2.fromScale(0, 0)
-
-	local token = (lbl:GetAttribute("FlashToken") or 0) + 1
-	lbl:SetAttribute("FlashToken", token)
-
-	local rendered = if lbl:IsDescendantOf(game) then true else false
-	if rendered then
-		local riseTween = TweenService:Create(lbl,
-			TweenInfo.new(0.9, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-			{ Position = UDim2.fromScale(0, -0.6), TextTransparency = 1 })
-		riseTween:Play()
-	end
-
-	task.delay(0.95, function()
-		-- A NEWER flash may have started while this one was animating. The token
-		-- is how this coroutine tells whether it is still the most recent one --
-		-- without it, an early roll's delayed hide could blank a later roll's
-		-- flash mid-animation.
-		if lbl:GetAttribute("FlashToken") == token then
-			lbl.Visible = false
-		end
-	end)
+function V7HUD:flashPayout(_payout: number, _voidHit: boolean)
+	return
 end
 
 function V7HUD:onMenuClicked(callback: (menuId: string) -> ())
