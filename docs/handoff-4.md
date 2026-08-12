@@ -217,6 +217,69 @@ implementation.
 
 ---
 
+## 3b. TO DO — ASCENSION THRESHOLD DISAGREES WITH THE HUD
+
+**Operator-reported 2026-08-13, NOT FIXED — recorded for a later decision.**
+
+> *"here it shows 40/1m but i have 500k in cash with me it should show the actual
+> cash i have in the ascension as well"*
+
+### Measured
+
+```
+cash          = $568,717
+runCash       = $55,267
+lifetimeCash  = $1,147,945
+ascensions    = 3
+```
+
+The HUD shows **$558K**; the ASCEND panel shows **$40K / $100K**. Both figures
+are internally correct, which is precisely what makes this bad: a player has no
+way to reconcile them.
+
+### Why they differ — two separate causes
+
+**1. A one-off migration artifact.** `RunCash` was only introduced in `740d117`
+(earlier today). The operator's last ascension predates the field, so it was
+seeded by the `_reconcile` backfill rather than by a real reset. The $568K on
+hand accumulated *before* the counter existed. **Every ascension from here
+resets `Cash` and `RunCash` together, so this specific mismatch is self-healing
+for new runs and for every new player.**
+
+To confirm the operator's question directly: **yes, ascending does set Cash to
+0** — `AscensionService` sets both `d.Cash = 0` and `d.RunCash = 0`. Nothing is
+broken about the reset.
+
+**2. A real design question that survives the artifact.** Even with a clean
+reset, `Cash` and `RunCash` diverge the moment a player *spends*:
+
+- `Cash` is what you are holding — it drops when you buy an upgrade or a slot.
+- `RunCash` is what you have earned — spending does not reduce it.
+
+So a player who earns $900K and spends $400K on upgrades holds $500K but has
+earned $900K. Which one gates ascension is a genuine choice:
+
+| Basis | Pro | Con |
+|---|---|---|
+| **Current Cash** | Always matches the HUD exactly. No hidden state. | Spending on upgrades pushes ascension further away — a real tradeoff, possibly a punishing one. |
+| **Earned this run** (current) | Spending never delays prestige. | HUD and panel legitimately differ after any purchase, which is exactly the confusion reported. |
+| **Show both, labelled** | Nothing hidden. | Two figures on a screen whose job is one yes/no decision. |
+
+### What is needed
+
+An operator decision on the basis. If **current Cash** is chosen, `RunCash` can
+likely be deleted entirely and the threshold reads `data.Cash` — simpler, and it
+removes a field that has already caused one confusion. If **earned** is kept,
+the panel needs a second line so the two numbers are never a surprise.
+
+**Note this is separate from the bug fixed in `740d117`.** That one was real and
+is fixed: the reward used to be priced on `LifetimeCash`, which never resets, so
+a player permanently qualified after their first ascension and was paid again
+for earnings already converted into Diamonds. Whichever basis is chosen here,
+it must not go back to all-time cash.
+
+---
+
 ## 4. STILL OUTSTANDING
 
 ### The animation rebuild — Route A, approved, not started
@@ -249,12 +312,14 @@ fit the fixed grid without collisions. Not a new defect.
 
 ## 5. SUGGESTED ORDER
 
-1. **Gems vault storage** — rate and shape are settled; needs sign-off on the
+1. **Ascension threshold basis** (§3b) — a one-line decision that may DELETE a
+   field rather than add one, so worth settling before more is built on it
+2. **Gems vault storage** — rate and shape are settled; needs sign-off on the
    +8h cap in §3, then it is a contained build (profile field, Gems spend path,
    VAULT panel control)
-2. **Animation rebuild (Route A)** — approved, self-contained, wants its own
+3. **Animation rebuild (Route A)** — approved, self-contained, wants its own
    verification pass per L-031 (screenshots mid-tumble, several consecutive
    rolls compared, 1/2/4/7 dice, and FR-1.4 containment must hold)
-3. Restore the ascension threshold before any real playtest
+4. Restore the ascension threshold to `1e6` before any real playtest
 
 Ledger entries this session: **L-039** … **L-043**.
