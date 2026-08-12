@@ -34,7 +34,11 @@ function AscensionService.canAscend(player: Player): (boolean, number)
 	if not data then
 		return false, 0
 	end
-	local diamonds = AscensionService.calculateDiamonds(data.LifetimeCash)
+	-- RUN cash, not lifetime. `LifetimeCash` never resets -- it is what the
+	-- NetWorth leaderboard ranks on -- so reading it here meant a player
+	-- permanently qualified after their first ascension and the reward was
+	-- computed from earnings they had already spent.
+	local diamonds = AscensionService.calculateDiamonds(data.RunCash or 0)
 	return diamonds > 0, diamonds
 end
 
@@ -49,6 +53,10 @@ function AscensionService.ascend(player: Player): (boolean, string?, number)
 		d.Gems = 0
 		d.Diamonds += diamondsEarned
 		d.Ascensions += 1
+		-- THE RUN IS OVER. Without this the next ascension would be priced against
+		-- earnings already converted into Diamonds -- each prestige paying out for
+		-- the same cash again. `LifetimeCash` is deliberately untouched.
+		d.RunCash = 0
 
 		-- Reset Cash upgrades only
 		d.Upgrades.AutoRollSpeed = 0

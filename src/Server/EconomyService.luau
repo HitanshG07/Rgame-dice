@@ -91,6 +91,18 @@ function EconomyService.credit(player: Player, currency: Currency, amount: numbe
 		if currency == "Cash" then
 			local lifetime = data.LifetimeCash + amount
 			data.LifetimeCash = if lifetime > MAX_CURRENCY then MAX_CURRENCY else lifetime
+
+			-- RUN CASH, reset by each ascension. `LifetimeCash` is all-time and is
+			-- what the NetWorth leaderboard ranks on, so it must NOT reset -- but
+			-- the ascension reward was reading it as though it were per-run.
+			--
+			-- The effect was that after one ascension a player permanently met the
+			-- threshold and the projected reward only ever grew, computed from
+			-- earnings they had already cashed in. The panel said "Earned $1.09M
+			-- this run" to a player who had not earned that this run at all
+			-- (operator-reported 2026-08-13).
+			local run = (data.RunCash or 0) + amount
+			data.RunCash = if run > MAX_CURRENCY then MAX_CURRENCY else run
 		end
 	end)
 end

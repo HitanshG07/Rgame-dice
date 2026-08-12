@@ -544,9 +544,19 @@ end
 --------------------------------------------------------------------------------
 
 -- Seconds between automatic rolls at each upgrade level, and the floors.
+--
+-- RETUNED 2026-08-13 (operator): auto-roll tops out at 8 rolls per 5 seconds --
+-- 0.625s apart -- against manual rolling's 5 per 5 seconds. That 1.6x is what
+-- the Auto-Roll gamepass actually buys.
+--
+-- THE FLOOR MUST STAY BELOW THE MANUAL RATE. It was 1.0s, which after the manual
+-- retune to 1/sec would have made the pass worth exactly nothing: a player
+-- tapping steadily would match a fully-upgraded auto-roll. `PassEffects` asserts
+-- the relationship rather than the literal, so a future retune of either number
+-- cannot quietly close the gap again.
 RollService.AUTO_BASE_INTERVAL = 3.0
 RollService.AUTO_INTERVAL_PER_LEVEL = 0.2
-RollService.AUTO_FLOOR = 1.0        -- FR-7.2, with Cash upgrades alone
+RollService.AUTO_FLOOR = 0.625      -- FR-7.2, with Cash upgrades alone: 8 per 5s
 RollService.AUTO_FLOOR_ULTRA = 0.4  -- FR-7.3, with the Ultra gamepass
 
 -- The interval this player is entitled to, from server-held state only.

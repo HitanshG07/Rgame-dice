@@ -73,8 +73,8 @@ Every inbound handler runs, in this order: **rate limit → arity → type → f
 
 | Remote | Sustained | Burst |
 |---|---|---|
-| `Roll` (manual, via the remote) | 2.5/s | 5 |
-| `Roll` (server-driven auto-roll) | server-known auto-roll tier, max 5/s | n/a |
+| `Roll` (manual, via the remote) | 1/s | 3 |
+| `Roll` (server-driven auto-roll) | server-known auto-roll tier, best 1.6/s | n/a |
 | `Forge`, `SetElement`, `SetShape` | 4/s | 8 |
 | `BuyUpgrade`, `BuyDiamondNode`, `AddDieSlot` | 4/s | 8 |
 | `GetLeaderboard` | 0.5/s | 2 |
@@ -97,7 +97,12 @@ bucket was a flat 5/s, identical to the FR-2.4 auto-roll ceiling. Two
 consequences, both reported from play: holding the button spammed the server as
 fast as the input could fire, and the Auto-Roll **gamepass bought nothing** —
 a paying player got the same rate as someone tapping. Manual invocation is now
-capped at 2.5/s so auto-roll retains a real 2x advantage. The auto-roll loop is
+capped at **1/s** (5 rolls per 5 seconds, operator-set) against auto-roll's best
+of **1.6/s** (8 per 5 seconds), so auto-roll retains a real advantage.
+`RollService.AUTO_FLOOR` was lowered to `0.625` in the same change: it had been
+`1.0`, which after the manual retune would have left the two IDENTICAL and made
+the gamepass worth nothing. UT-6 asserts the *relationship* rather than the
+literals, so a future retune of either cannot silently close the gap. The auto-roll loop is
 server-driven and does not pass through the remote, so its own ceiling is
 unchanged. The client shows a cooldown sweep on the ROLL button; that is
 **presentation only** and an exploiter's client will not run it — the bucket

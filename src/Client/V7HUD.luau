@@ -567,11 +567,12 @@ function V7HUD:onMenuClicked(callback: (menuId: string) -> ())
 	table.insert(self.menuCallbacks, callback)
 end
 
--- The manual roll cooldown, in seconds. Deliberately a touch LOOSER than the
--- server's 2.5/sec bucket (0.40s), so a press that clears this gate is one the
--- server will honour -- a client stricter than the server makes the game feel
--- broken, and one looser than it produces silent refusals.
-local ROLL_COOLDOWN = 0.42
+-- The manual roll cooldown, in seconds. Matches the server's 1/sec bucket
+-- (5 rolls per 5 seconds, operator-set 2026-08-13) with a hair of slack, so a
+-- press that clears this gate is one the server will honour -- a client stricter
+-- than the server makes the game feel broken, and one looser produces silent
+-- refusals the player cannot explain.
+local ROLL_COOLDOWN = 1.02
 
 function V7HUD:onRollClicked(callback: () -> ())
 	local lastTrigger = 0

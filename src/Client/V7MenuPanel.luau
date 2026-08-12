@@ -783,7 +783,7 @@ function V7MenuPanel.new(): V7MenuController
 				-- with the authoritative figures; this only removes the window in
 				-- which the screen contradicts itself.
 				local ok, err = pcall(refreshAscend, {
-					lifetimeCash = 0,
+					runCash = 0,
 					ascensions = (tonumber(lastAscensions) or 0) + 1,
 				})
 				if not ok then
@@ -799,7 +799,11 @@ function V7MenuPanel.new(): V7MenuController
 	end)
 
 	refreshAscend = function(state: any)
-		local lifetime = if type(state) == "table" then tonumber(state.lifetimeCash) or 0 else 0
+		-- RUN cash, not lifetime. This read `lifetimeCash`, which never resets --
+		-- so the panel told a player "Earned $1.09M this run" when they had earned
+		-- nothing of the sort this run, and the projected reward only ever grew
+		-- (operator-reported 2026-08-13).
+		local lifetime = if type(state) == "table" then tonumber(state.runCash) or 0 else 0
 		local ascensions = if type(state) == "table" then tonumber(state.ascensions) or 0 else 0
 		lastAscensions = ascensions
 		local projected = DiceCatalog.ascensionDiamonds(lifetime)
@@ -808,19 +812,24 @@ function V7MenuPanel.new(): V7MenuController
 		if projected > 0 then
 			ascendReward.Text = string.format("+%s \u{2666}", Format.formatNumber(projected))
 			ascendReward.TextColor3 = UITheme.Colors.PurpleAscend
+			-- EARNED / TARGET (operator-requested). Showing the target even once it
+			-- is met keeps the two numbers comparable across the whole run rather
+			-- than the label changing shape at the threshold.
 			ascendProgress.Text = string.format(
-				"Earned $%s this run  \u{00B7}  %d ascension%s so far",
-				Format.formatNumber(lifetime), ascensions,
-				if ascensions == 1 then "" else "s")
+				"$%s / $%s this run  \u{00B7}  %d ascension%s so far",
+				Format.formatNumber(lifetime), Format.formatNumber(threshold),
+				ascensions, if ascensions == 1 then "" else "s")
 			UITheme.setEnabled(ascendBtn, true)
 		else
 			-- Below the threshold: say how far off, rather than showing a reward
 			-- that is not available or a button that silently refuses.
 			ascendReward.Text = "+0 \u{2666}"
 			ascendReward.TextColor3 = UITheme.Colors.TextDim
+			-- Same earned / target shape as above, so the numbers do not move
+			-- around when the threshold is crossed.
 			ascendProgress.Text = string.format(
-				"Earn $%s in a run to ascend. You are at $%s.",
-				Format.formatNumber(threshold), Format.formatNumber(lifetime))
+				"$%s / $%s this run  \u{00B7}  keep rolling to ascend",
+				Format.formatNumber(lifetime), Format.formatNumber(threshold))
 			UITheme.setEnabled(ascendBtn, false)
 			-- Arming state must not survive the reward going away.
 			if ascendArmed then

@@ -43,7 +43,7 @@ export type Result = { ok: boolean, reason: string? }
 -- server's buckets. A client-side limit tighter than the server's would make the
 -- UI feel broken while the server was still happy to answer.
 local MIN_INTERVAL: { [string]: number } = {
-	Roll = 0.15,
+	Roll = 0.95,
 	Forge = 0.25,
 	SetElement = 0.25,
 	SetShape = 0.25,

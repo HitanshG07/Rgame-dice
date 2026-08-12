@@ -33,6 +33,13 @@ local function run(): (boolean, string?, number)
 	-- Pre-ascension setup
 	fakeData.Cash = 50000000000 -- Give enough cash to ascend (threshold varies, typically 10B+ depending on rules)
 	fakeData.LifetimeCash = 50000000000
+	-- THE REWARD IS PRICED ON RUN CASH, not lifetime (2026-08-13). `LifetimeCash`
+	-- is all-time and never resets -- it is what the NetWorth leaderboard ranks
+	-- on -- so reading it meant a player permanently qualified after their first
+	-- ascension and was paid again for earnings already converted to Diamonds.
+	-- Setting only LifetimeCash here now correctly yields NO reward, which is how
+	-- this fixture caught the change.
+	fakeData.RunCash = 50000000000
 	fakeData.Gems = 500
 	fakeData.Diamonds = 10
 	fakeData.Ascensions = 1
@@ -100,6 +107,16 @@ local function run(): (boolean, string?, number)
 		e = e or check(postData.Diamonds > 10, "Diamonds MUST be preserved and granted")
 		e = e or check(postData.Ascensions == 2, "Ascensions MUST be incremented (was 1, now 2)")
 		e = e or check(postData.LifetimeCash == 50000000000, "LifetimeCash MUST be preserved")
+
+		-- RUN CASH IS CONSUMED. Without this the next ascension would be priced
+		-- against earnings already converted into Diamonds -- each prestige
+		-- paying out for the same cash over and over.
+		e = e or check(postData.RunCash == 0,
+			"RunCash MUST reset on ascension, or the same earnings pay out again")
+
+		-- And the two must be distinguishable: lifetime survives, run does not.
+		e = e or check(postData.LifetimeCash > postData.RunCash,
+			"LifetimeCash and RunCash must be separate figures after an ascension")
 		
 		e = e or check(postData.Diamond.Elements["Fire"] == true, "Diamond Tree Elements MUST be preserved")
 		e = e or check(postData.Diamond.Shapes["D8"] == true, "Diamond Tree Shapes MUST be preserved")

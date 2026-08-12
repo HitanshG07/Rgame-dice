@@ -17,31 +17,85 @@ local OfflineService = {}
 -- Constants & Calculations (SRS FR-8.3)
 --------------------------------------------------------------------------------
 
+--------------------------------------------------------------------------------
+-- VAULT TIERS (operator-set 2026-08-13)
+--
+-- EFFICIENCY is the fraction of the player's own recent earning rate the vault
+-- pays for time spent away. 0.50 means "half what you would have made playing".
+--
+-- EVERY SOURCE ADDS, AND THE TOTAL IS CAPPED AT 1.0.
+--
+--   base                    50%
+--   Cash upgrades   +5%/lvl  -> +25% at level 5
+--   Roblox Premium         +15%
+--   VIP Vault pass         +25%
+--                          ----
+--   fully stacked          100%
+--
+-- WHY THE CAP IS 1.0 AND NOT HIGHER. The operator's first instinct was VIP 1.25x
+-- and Premium 1.5x, which multiply out past 100% -- and anything above 100% means
+-- the vault pays MORE than playing does. In an idle game that inverts the whole
+-- proposition: the optimal move becomes closing the game, and every session a
+-- player does play is time they lost money. Capping at parity keeps offline
+-- generous without ever beating live play.
+--
+-- The additive shape is what makes all three purchases matter at once. A tiered
+-- "VIP overrides everything" model, which is what this replaced, made the Cash
+-- upgrades worthless the moment the pass was bought.
 local BASE_CAPACITY_SEC = 4 * 3600        -- 4 hours
 local BASE_EFFICIENCY = 0.5               -- 50%
-local UPGRADE_CAPACITY_PER_LEVEL = 2880   -- +0.8h per level (10 levels = +8h -> 12h max)
-local UPGRADE_EFFICIENCY_PER_LEVEL = 0.05 -- +5% per level (5 levels = +25% -> 75% max)
-local VIP_CAPACITY_SEC = 24 * 3600        -- 24 hours for VIP
-local VIP_EFFICIENCY = 1.0                -- 100% for VIP
+local UPGRADE_CAPACITY_PER_LEVEL = 2880   -- +0.8h per level (10 levels = +8h)
+local UPGRADE_EFFICIENCY_PER_LEVEL = 0.05 -- +5% per level (5 levels = +25%)
+
+OfflineService.PREMIUM_EFFICIENCY_BONUS = 0.15
+OfflineService.PREMIUM_CAPACITY_BONUS_SEC = 4 * 3600
+OfflineService.VIP_EFFICIENCY_BONUS = 0.25
+OfflineService.VIP_CAPACITY_SEC = 24 * 3600
+OfflineService.MAX_EFFICIENCY = 1.0
+
+-- Roblox Premium, read from the platform rather than from anything the client
+-- says. `MembershipType` is server-authoritative.
+local function hasPremium(player: Player): boolean
+	local ok, result = pcall(function()
+		return player.MembershipType == Enum.MembershipType.Premium
+	end)
+	return ok and result == true
+end
+
+OfflineService._hasPremium = hasPremium
 
 function OfflineService.getCapacity(player: Player): number
 	local PurchaseService = require(script.Parent:WaitForChild("PurchaseService"))
-	if PurchaseService.ownsPass(player, "VipVault") then
-		return VIP_CAPACITY_SEC
-	end
 	local data = PlayerProfile.get(player)
 	local level = if data ~= nil then (data.Upgrades.VaultCapacity or 0) else 0
-	return BASE_CAPACITY_SEC + (level * UPGRADE_CAPACITY_PER_LEVEL)
+
+	local capacity = BASE_CAPACITY_SEC + (level * UPGRADE_CAPACITY_PER_LEVEL)
+	if hasPremium(player) then
+		capacity += OfflineService.PREMIUM_CAPACITY_BONUS_SEC
+	end
+	-- VIP SETS A FLOOR rather than overriding. It used to return 24h outright,
+	-- which meant a player with maxed Cash upgrades plus Premium could have been
+	-- entitled to more and been silently cut back to 24 by buying the pass.
+	if PurchaseService.ownsPass(player, "VipVault") then
+		capacity = math.max(capacity, OfflineService.VIP_CAPACITY_SEC)
+	end
+	return capacity
 end
 
 function OfflineService.getEfficiency(player: Player): number
 	local PurchaseService = require(script.Parent:WaitForChild("PurchaseService"))
-	if PurchaseService.ownsPass(player, "VipVault") then
-		return VIP_EFFICIENCY
-	end
 	local data = PlayerProfile.get(player)
 	local level = if data ~= nil then (data.Upgrades.VaultEfficiency or 0) else 0
-	return math.min(0.75, BASE_EFFICIENCY + (level * UPGRADE_EFFICIENCY_PER_LEVEL))
+
+	local efficiency = BASE_EFFICIENCY + (level * UPGRADE_EFFICIENCY_PER_LEVEL)
+	if hasPremium(player) then
+		efficiency += OfflineService.PREMIUM_EFFICIENCY_BONUS
+	end
+	if PurchaseService.ownsPass(player, "VipVault") then
+		efficiency += OfflineService.VIP_EFFICIENCY_BONUS
+	end
+	-- The cap is the whole safety property -- see the header.
+	return math.min(OfflineService.MAX_EFFICIENCY, efficiency)
 end
 
 --------------------------------------------------------------------------------

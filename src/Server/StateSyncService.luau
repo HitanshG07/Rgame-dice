@@ -273,6 +273,9 @@ function StateSyncService.buildSnapshot(data: PlayerProfile.Profile, streak: num
 		-- Stats the HUD and the Statistics panel read. Present here rather than
 		-- in a second event because they change on the same cadence.
 		lifetimeCash = data.LifetimeCash,
+		-- Earned since the last ascension. The ASCEND panel shows progress toward
+		-- the threshold from this, not from `lifetimeCash`, which never resets.
+		runCash = data.RunCash or 0,
 		highestRoll = data.HighestRoll,
 		ascensions = data.Ascensions,
 		totalRolls = data.TotalRolls,

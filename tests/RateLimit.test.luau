@@ -52,16 +52,27 @@ local function run(): (boolean, string?, number)
 	-- rate for free -- and let the button be spammed. The auto-roll loop is
 	-- server-driven and never passes through this bucket, so lowering the remote
 	-- does not slow auto-roll down.
+	-- Retuned again 2026-08-13 (operator): 5 manual rolls per 5 seconds.
 	local rollLimit = RateLimiter.limitFor("Roll")
-	e = e or check(rollLimit.sustained == 2.5 and rollLimit.burst == 5,
-		"manual Roll must be sustained=2.5 burst=5 per API_DATA_CONTRACT §2.2")
+	e = e or check(rollLimit.sustained == 1.0 and rollLimit.burst == 3,
+		"manual Roll must be sustained=1 burst=3 per API_DATA_CONTRACT §2.2")
 
-	-- THE RELATIONSHIP, not just the number. The point of the change is that
-	-- manual is strictly slower than the paid auto ceiling; asserting only the
-	-- literal would let a future edit raise it back to parity and stay green.
-	e = e or check(rollLimit.sustained < 5,
-		"manual Roll must stay BELOW the 5/s auto-roll ceiling, or the Auto-Roll"
-		.. " gamepass confers no advantage")
+	-- THE RELATIONSHIP, not just the number, and this is the assertion that
+	-- matters. Auto-roll's best interval must beat the manual rate, or the
+	-- Auto-Roll gamepass is worth nothing -- a player tapping steadily would
+	-- match it. Both numbers were retuned on 2026-08-13 (manual 2.5/s -> 1/s,
+	-- auto floor 1.0s -> 0.625s) and the first pass at it left them EQUAL,
+	-- which is exactly the failure this catches.
+	local RollService = require(Server:WaitForChild("RollService"))
+	local autoBestRate = 1 / RollService.AUTO_FLOOR
+	e = e or check(autoBestRate > rollLimit.sustained, string.format(
+		"auto-roll's best rate (%.2f/s) must EXCEED the manual limit (%.2f/s),"
+		.. " or the Auto-Roll gamepass confers no advantage",
+		autoBestRate, rollLimit.sustained))
+
+	-- And the Ultra pass must beat plain auto-roll, for the same reason.
+	e = e or check(RollService.AUTO_FLOOR_ULTRA < RollService.AUTO_FLOOR,
+		"Ultra Auto-Roll must be faster than the standard auto-roll floor")
 
 	local forgeLimit = RateLimiter.limitFor("Forge")
 	e = e or check(forgeLimit.burst == 8 and forgeLimit.sustained == 4,
