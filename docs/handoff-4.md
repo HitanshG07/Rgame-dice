@@ -217,9 +217,10 @@ implementation.
 
 ---
 
-## 3b. TO DO — ASCENSION THRESHOLD DISAGREES WITH THE HUD
+## 3b. TO DO — ASCENSION THRESHOLD: SWITCH TO CASH ON HAND
 
-**Operator-reported 2026-08-13, NOT FIXED — recorded for a later decision.**
+**Operator-reported 2026-08-13. DECIDED, NOT IMPLEMENTED** — the operator asked
+for it to be recorded rather than fixed in the moment.
 
 > *"here it shows 40/1m but i have 500k in cash with me it should show the actual
 > cash i have in the ascension as well"*
@@ -265,12 +266,38 @@ earned $900K. Which one gates ascension is a genuine choice:
 | **Earned this run** (current) | Spending never delays prestige. | HUD and panel legitimately differ after any purchase, which is exactly the confusion reported. |
 | **Show both, labelled** | Nothing hidden. | Two figures on a screen whose job is one yes/no decision. |
 
-### What is needed
+### DECIDED — use current Cash on hand
 
-An operator decision on the basis. If **current Cash** is chosen, `RunCash` can
-likely be deleted entirely and the threshold reads `data.Cash` — simpler, and it
-removes a field that has already caused one confusion. If **earned** is kept,
-the panel needs a second line so the two numbers are never a surprise.
+> *"holding — because after ascension I'm holding 0 so it would anyways be
+> showing 0 in the ascension tab as well"*
+
+**Operator decision, 2026-08-13. Not yet implemented.**
+
+The reasoning is sound and is the whole argument for this option: ascension sets
+`Cash = 0`, so the panel reads `$0 / $1.00M` immediately afterwards — the same
+thing the HUD shows. **The two can never disagree again**, which removes the
+entire class of confusion rather than papering over this instance of it.
+
+### The work, when it is picked up
+
+1. `AscensionService.ascend` reads `data.Cash` instead of `data.RunCash`.
+2. The snapshot's `runCash` field is replaced by the existing `cash` field —
+   the ASCEND panel already has `state.cash` available and needs no new data.
+3. **DELETE `RunCash` entirely**: the profile field, the template default, the
+   `_reconcile` backfill, the credit in `EconomyService`, the reset in
+   `AscensionService`, and the two assertions in `Integration_Ascension`. This
+   removal is the point — it is a field that existed for one day and caused one
+   confusion, and keeping it "just in case" is how a schema accumulates ghosts.
+4. UT-5's ascension assertions move to asserting against `Cash`.
+
+**The tradeoff being accepted, stated plainly:** spending Cash on upgrades now
+pushes ascension further away, because the threshold measures what you hold
+rather than what you earned. That is a real gameplay consequence — upgrade-vs-
+prestige becomes a genuine decision — and it is the cost of the two numbers
+always agreeing. Worth revisiting if it turns out to feel punishing in play.
+
+**Whichever way this lands, it must NOT go back to `LifetimeCash`** — see the
+note below.
 
 **Note this is separate from the bug fixed in `740d117`.** That one was real and
 is fixed: the reward used to be priced on `LifetimeCash`, which never resets, so
@@ -312,8 +339,9 @@ fit the fixed grid without collisions. Not a new defect.
 
 ## 5. SUGGESTED ORDER
 
-1. **Ascension threshold basis** (§3b) — a one-line decision that may DELETE a
-   field rather than add one, so worth settling before more is built on it
+1. **Ascension threshold → Cash on hand** (§3b) — decided, not built. Small and
+   subtractive: it DELETES `RunCash` rather than adding anything. Do it before
+   the Gems work so nothing new is built on a field that is being removed.
 2. **Gems vault storage** — rate and shape are settled; needs sign-off on the
    +8h cap in §3, then it is a contained build (profile field, Gems spend path,
    VAULT panel control)
