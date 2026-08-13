@@ -386,12 +386,12 @@ local function addEngravedPips(
 	end
 
 	for _, c in ipairs(coords) do
-		local pipPos = faceCenter - n * 0.02 + right * c[1] + up * c[2]
+		local pipPos = faceCenter + n * 0.001 + right * c[1] + up * c[2]
 		local p = Instance.new("Part")
 		p.Name = "Pip"
 		p.Shape = Enum.PartType.Cylinder
 		p.Size = Vector3.new(pipThickness, pipDiameter, pipDiameter)
-		p.CFrame = CFrame.fromMatrix(pipPos, n, up, right)
+		p.CFrame = CFrame.fromMatrix(pipPos, n, up)
 		p.Color = Color3.fromRGB(255, 255, 255)
 		p.Material = Enum.Material.Neon
 		p.Anchored = true

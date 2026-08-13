@@ -327,4 +327,19 @@ LEDGER GOVERNANCE LAWS
   4. **D4 Corner Numerals:** Emitted 3 corner glyphs per triangular face (12 glyph clusters total) pointing outward toward respective apex vertices.
   5. **D6 Authentic Pips:** Emitted 21 recessed pips in standard casino configurations across all 6 faces summing opposite pairs to 7. All 12 shapes pass all 6 assertion suites in Studio. -- Last Verified: 2026-08-14
 
+### L-048: Trapezohedron Kite Planarity Condition, Cylinder Pip Alignment, and Closed Polyhedral Topology
+- **Encountered State:** Dice Forge, 2026-08-14. Close-up visual verification of D4, D6, D10, D14, and D16 uncovered subtle topological and rendering defects invisible in wide row previews.
+- **Root Cause Breakdown:**
+  1. **Trapezohedron Equatorial Trench (D10, D14):** Kites were non-planar because arbitrary ring height ($h_{ring} / h_{apex} = 0.33$) violated the exact geometric planarity constraint $h_{ring} / h_{apex} = \tan^2(\frac{\pi}{2n})$. Quad triangulation of warped kites caused inset chamfer strips to tear apart along the equator.
+  2. **D4 Flat Sheet Collapse & Corner Glyph Noise:** Emitting degenerate face windings collapsed the solid into a flat folded sheet, while 3 unconstrained corner glyphs per face created visual clutter.
+  3. **Cylinder Pip Orientation in Roblox:** `Enum.PartType.Cylinder` parts have their circular faces along the local X axis (`RightVector`). Supplying an inverted third axis in `CFrame.fromMatrix` caused left-handed matrix flipping and occluded the pips inside the facet.
+  4. **D16 Seam Smearing:** Two-digit numerals (10..16) with standard font scaling exceeded the narrow triangular facet inradius on 16-bipyramids, crossing equatorial chamfers.
+- **Definitive Fix Action:**
+  1. **Planar Trapezohedron Formula:** Locked ring height to $h_{ring} = h_{apex} \cdot \tan^2(\frac{\pi}{2n})$ ($n=5$ for D10, $n=7$ for D14), ensuring 100.0% planar kite faces that seal seamlessly without trenches or holes (`assertClosedSolid` boundary edges = 0).
+  2. **Closed Tetrahedron with Centered Numerals:** Built D4 with 4 closed faces `{1,3,2}, {1,2,4}, {1,4,3}, {2,3,4}` enclosing non-zero volume with 1 centered numeral per face.
+  3. **3-Arg Matrix Pip Alignment:** Oriented cylinder pips via `CFrame.fromMatrix(pipPos, n, up)` with `RightVector = n` and `normalOffset = 0.001`, producing glowing circular casino pips.
+  4. **Proportional Facet Kerning on D16:** Scaled D16 glyphs to `dieScale * 0.70` oriented along apex vectors, fitting all 16 numerals strictly inside their triangular boundaries. All 12 shapes pass `assertClosedSolid`, `assertBevelled`, `assertGlyphsEngraved`, `assertNormalised`, `assertOrthogonality`, `assertFaceNormalRoundTrip`, and `assertPartBudget`. -- Last Verified: 2026-08-14
+
+
+
 
