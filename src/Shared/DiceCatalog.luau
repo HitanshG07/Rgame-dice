@@ -79,9 +79,25 @@ local SHAPES: { [string]: ShapeDef } = {
 		cashBudgetCap = SHARED_CASH_CAP,
 		diamondCeiling = SHARED_DIAMOND_CEILING,
 	},
+	D5 = {
+		id = "D5",
+		faceCount = 5,
+		massFloor = 1,
+		defaultBudget = SHARED_DEFAULT_BUDGET,
+		cashBudgetCap = SHARED_CASH_CAP,
+		diamondCeiling = SHARED_DIAMOND_CEILING,
+	},
 	D6 = {
 		id = "D6",
 		faceCount = 6,
+		massFloor = 1,
+		defaultBudget = SHARED_DEFAULT_BUDGET,
+		cashBudgetCap = SHARED_CASH_CAP,
+		diamondCeiling = SHARED_DIAMOND_CEILING,
+	},
+	D7 = {
+		id = "D7",
+		faceCount = 7,
 		massFloor = 1,
 		defaultBudget = SHARED_DEFAULT_BUDGET,
 		cashBudgetCap = SHARED_CASH_CAP,
@@ -106,6 +122,22 @@ local SHAPES: { [string]: ShapeDef } = {
 	D12 = {
 		id = "D12",
 		faceCount = 12,
+		massFloor = 1,
+		defaultBudget = SHARED_DEFAULT_BUDGET,
+		cashBudgetCap = SHARED_CASH_CAP,
+		diamondCeiling = SHARED_DIAMOND_CEILING,
+	},
+	D14 = {
+		id = "D14",
+		faceCount = 14,
+		massFloor = 1,
+		defaultBudget = SHARED_DEFAULT_BUDGET,
+		cashBudgetCap = SHARED_CASH_CAP,
+		diamondCeiling = SHARED_DIAMOND_CEILING,
+	},
+	D16 = {
+		id = "D16",
+		faceCount = 16,
 		massFloor = 1,
 		defaultBudget = SHARED_DEFAULT_BUDGET,
 		cashBudgetCap = SHARED_CASH_CAP,
@@ -195,7 +227,7 @@ end
 -- is FALSE for this game. The UI must therefore present later shapes as
 -- DIFFERENT rather than STRONGER, or the ladder will teach players a wrong
 -- model of their own build.
-local UNLOCK_ORDER: { string } = { "D2", "D3", "D4", "D6", "D8", "D10", "D12", "D20" }
+local UNLOCK_ORDER: { string } = { "D2", "D3", "D4", "D5", "D6", "D7", "D8", "D10", "D12", "D14", "D16", "D20" }
 
 DiceCatalog.STARTING_SHAPE = "D2"
 
@@ -216,10 +248,14 @@ local UNLOCK_COST: { [string]: number } = {
 	D2 = 0,        -- owned from the start; listed so every shape has an entry
 	D3 = 500,
 	D4 = 2500,
+	D5 = 6000,
 	D6 = 12000,
+	D7 = 25000,
 	D8 = 55000,
 	D10 = 240000,
 	D12 = 1000000,
+	D14 = 2200000,
+	D16 = 3200000,
 	D20 = 4200000,
 }
 
