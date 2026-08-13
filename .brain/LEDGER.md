@@ -312,3 +312,19 @@ LEDGER GOVERNANCE LAWS
   2. **Strict Orthogonal Projection:** All face up vectors are strictly projected via $\text{up} = (\vec{u}_{init} - \hat{n}(\vec{u}_{init} \cdot \hat{n})).\text{Unit}$, guaranteeing $|n \cdot \text{up}| < 10^{-6}$ across all 112 faces.
   3. **Zero-Centered Normalisation:** Scale normalisation measures true radial corner-to-corner extent around `Vector3.zero`, clamping all 12 shapes to exactly `TARGET_EXTENT = 6.0` studs and keeping part counts between 33 and 240 (well under 250 budget). -- Last Verified: 2026-08-14
 
+### L-047: Mathematical Chamfer Strips, Flush-Inlaid Glyphs & Authentic D2/D4/D6 Topology
+- **Encountered State:** Dice Forge, 2026-08-14. Procedural dice redesign under strict falsifiable assertions (`assertBevelled`, `assertGlyphsEngraved`, `assertNormalised`, `assertFaceNormalRoundTrip`, `assertOrthogonality`, `assertPartBudget`).
+- **Root Cause Breakdown:**
+  1. **Missing Chamfers (Unbevelled Polyhedra):** Prior procedural code claimed bevels in comments but emitted flat single quad/triangle planes with zero transition geometry bridging adjacent faces.
+  2. **Proud Glyphs vs Buried Inlays:** Glyphs positioned with positive offsets protruded proud of the shell (+0.27 studs), while glyphs placed too deep (-0.095 studs) were occluded behind opaque facet wedges.
+  3. **D2 Lens Distortion:** 2-sided solids built as sharp bipyramid lenses lacked flat planes for engraving, distorting numerals on the rim.
+  4. **D4 Single Face Numeral:** Standard D4 dice cannot show a single centered number because the landing face is on the table; authentic D4 dice print the number at each of the 3 corners.
+  5. **D6 Digit vs Pip Topology:** Six-sided dice historically use casino pips summing opposite faces to 7 ($1+6, 2+5, 3+4$).
+- **Definitive Fix Action:**
+  1. **Mathematical Inset & Chamfer Quad Engine:** For every polygon face $F_i$, vertices are inset towards centroid $C_i$ by `CHAMFER_RATIO = 0.08..0.12`. For every shared edge between adjacent faces $F_A$ and $F_B$, real quad chamfer strips bridging $(U_{A,1}, U_{A,2})$ to $(U_{B,2}, U_{B,1})$ are emitted with outward normal $\frac{\hat{n}_A + \hat{n}_B}{|\hat{n}_A + \hat{n}_B|}$ and a 20% darker tone.
+  2. **Flush-Inlaid Neon Glyphs:** Positioned glyph/pip strokes flush with the facet surface (`normalOffset = 0.001`, `maxProud <= 0.00`) using `Enum.Material.Neon` pure white (`#FFFFFF`) for self-illuminating readability.
+  3. **D2 Cylindrical Coin:** Rebuilt D2 as a flat circular coin with 12-sided perimeter, 45° top/bottom chamfer rims, and flush engraved numerals "1" and "2".
+  4. **D4 Corner Numerals:** Emitted 3 corner glyphs per triangular face (12 glyph clusters total) pointing outward toward respective apex vertices.
+  5. **D6 Authentic Pips:** Emitted 21 recessed pips in standard casino configurations across all 6 faces summing opposite pairs to 7. All 12 shapes pass all 6 assertion suites in Studio. -- Last Verified: 2026-08-14
+
+
