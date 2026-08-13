@@ -369,27 +369,36 @@ end
 -- drift from the renderer's (L-025); these cannot, because they are the same
 -- three values.
 --
--- IN THE BOTTOM-LEFT WEDGE, OUTSIDE THE FELT -- which took two tries to find.
+-- IN THE TOP-LEFT WEDGE, OUTSIDE THE FELT. This took four attempts and the three
+-- failures are worth recording, because each was defeated by a different thing.
 --
--- Top-left is empty at REST and is exactly where the throw arc passes; at six
--- dice that was occasional, at thirty the dice fly straight through it. Directly
--- under the felt is clear in flight but is where dice LAND, and two of them came
--- to rest on the heading. Neither phase's empty space is empty in the other.
+-- Under the felt is clear in flight but is where dice LAND. Top-left CENTRED
+-- vertically is where the throw arc passes. And the bottom-left wedge -- which
+-- looked right and which one screenshot appeared to confirm -- is the WRONG
+-- wedge: the felt is a perspective trapezoid whose NEAR edge is the wide one, so
+-- going downward the felt spreads outward and the wedge closes. Measured, the
+-- tray runs x=204..1035 while the felt's near-left corner sits at x=266 and the
+-- leftmost resting die at x=302, leaving about 60px. The far-left corner sits at
+-- x=405, leaving 201px -- more than three times as much.
 --
--- The felt is drawn in perspective, so it narrows toward the far edge and leaves
--- a triangular wedge at each bottom corner that is outside the playable surface
--- entirely. A die can never rest there, because it is not the felt, and can
--- never fly through it, because the throw travels from the far edge inward. It
--- is the only region of the tray that is unreachable in both phases.
+-- I placed it in the narrow one and called it verified off a single clean frame.
+-- The operator said the dice still touched it, and instrumenting the overlap
+-- rather than looking again showed 102 of 150 frames intersecting and 8 dice
+-- coming to rest on it. THE LESSON IS L-031's: a screenshot proves the frame it
+-- was taken in. Geometry this cheap to measure should never be eyeballed.
 --
--- Stacked vertically to fit the wedge's shape, and small print by construction
--- -- fixed 11px, dim -- because it is a key: read once, then ignored, and it
--- must never compete with the dice.
+-- The top wedge is also safe in flight, despite being "the top": dice enter
+-- across the felt's FAR edge, x=405..834, which is inside the felt and to the
+-- right of this. Both phases are excluded by measurement, not by assumption.
+--
+-- Stacked vertically to fit the wedge, and small print by construction -- fixed
+-- 11px, dim -- because it is a key: read once, then ignored, and it must never
+-- compete with the dice.
 local function buildMassLegend(parent: Instance): ()
 	local legend = Instance.new("Frame")
 	legend.Name = "MassLegend"
 	legend.Size = UDim2.new(0, 150, 0, 62)
-	legend.Position = UDim2.fromScale(0.012, 0.735)
+	legend.Position = UDim2.fromScale(0.012, 0.045)
 	legend.BackgroundTransparency = 1
 	legend.ZIndex = 6
 	legend.Parent = parent
