@@ -2,10 +2,9 @@
   "mcpServers": {
     "Roblox_Studio": {
       "type": "stdio",
-      "command": "cmd.exe",
+      "command": "node",
       "args": [
-        "/c",
-        "cd /d %LOCALAPPDATA%\\Roblox && .\\mcp.bat"
+        "C:\\Users\\Hitansh Gogri\\.gemini\\config\\roblox_studio_mcp_proxy.js"
       ],
       "env": {}
     }

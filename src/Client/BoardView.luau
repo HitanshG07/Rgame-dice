@@ -349,6 +349,166 @@ local function solveCamera(vp: ViewportFrame, cam: Camera): ()
 	cam.CFrame = CFrame.lookAt(eye, Vector3.new(0, 0, 0))
 end
 
+-- THE MASS LEGEND -- what the bar under each die means.
+--
+-- WHY THIS EXISTS. Every resting die carries a small bar showing how much of the
+-- die's mass sits on the face that is showing (FR-1.3). The operator, who
+-- commissioned the mechanic, asked "what is that bar below the dice what does it
+-- mean" -- which settles the question of whether it was discoverable. It was
+-- rendering the game's CENTRAL rule and reading as decoration.
+--
+-- The rule it is trying to convey is counter-intuitive on purpose (FR-2): mass
+-- makes a face land LESS often. Nobody derives that from an unlabelled bar, and
+-- a player who does not know it cannot tell a deliberately-forged die from bad
+-- luck -- which is the entire game.
+--
+-- SWATCHES RATHER THAN PROSE, and real ones: each sample is drawn with the same
+-- fill and the same colour `showFace` gives a bar in that state, so the player
+-- matches what they see on a die to what they see here. A sentence describing
+-- "grey means void" would be a second declaration of the colour rule and would
+-- drift from the renderer's (L-025); these cannot, because they are the same
+-- three values.
+--
+-- IN THE BOTTOM-LEFT WEDGE, OUTSIDE THE FELT -- which took two tries to find.
+--
+-- Top-left is empty at REST and is exactly where the throw arc passes; at six
+-- dice that was occasional, at thirty the dice fly straight through it. Directly
+-- under the felt is clear in flight but is where dice LAND, and two of them came
+-- to rest on the heading. Neither phase's empty space is empty in the other.
+--
+-- The felt is drawn in perspective, so it narrows toward the far edge and leaves
+-- a triangular wedge at each bottom corner that is outside the playable surface
+-- entirely. A die can never rest there, because it is not the felt, and can
+-- never fly through it, because the throw travels from the far edge inward. It
+-- is the only region of the tray that is unreachable in both phases.
+--
+-- Stacked vertically to fit the wedge's shape, and small print by construction
+-- -- fixed 11px, dim -- because it is a key: read once, then ignored, and it
+-- must never compete with the dice.
+local function buildMassLegend(parent: Instance): ()
+	local legend = Instance.new("Frame")
+	legend.Name = "MassLegend"
+	legend.Size = UDim2.new(0, 150, 0, 62)
+	legend.Position = UDim2.fromScale(0.012, 0.735)
+	legend.BackgroundTransparency = 1
+	legend.ZIndex = 6
+	legend.Parent = parent
+
+	-- THE RULE ITSELF, stated once and plainly.
+	--
+	-- The swatches say what each colour IS; this says why anyone should care.
+	-- "Heavier faces land less often" is the inverted-mass mechanic (FR-2) in
+	-- five words, and it is the one thing no amount of looking at the board will
+	-- teach a player -- a face that rarely appears is indistinguishable from bad
+	-- luck unless you already know the die is loaded against it.
+	-- Wrapped over two lines: the wedge is tall and narrow, not wide.
+	local rule = Instance.new("TextLabel")
+	rule.Name = "Rule"
+	rule.Size = UDim2.new(1, 0, 0, 24)
+	rule.Position = UDim2.fromScale(0, 0)
+	rule.BackgroundTransparency = 1
+	rule.Font = UITheme.FontHeading
+	rule.Text = "MASS \u{2013} heavier faces\nland less often"
+	rule.TextSize = 11
+	rule.TextScaled = false
+	rule.LineHeight = 1.1
+	rule.TextColor3 = UITheme.Colors.TextDim
+	rule.TextXAlignment = Enum.TextXAlignment.Left
+	rule.TextYAlignment = Enum.TextYAlignment.Top
+	rule.ZIndex = 6
+	rule.Parent = legend
+
+	local swatches = Instance.new("Frame")
+	swatches.Name = "Swatches"
+	swatches.Size = UDim2.new(1, 0, 0, 36)
+	swatches.Position = UDim2.new(0, 0, 0, 27)
+	swatches.BackgroundTransparency = 1
+	swatches.ZIndex = 6
+	swatches.Parent = legend
+
+	local row = Instance.new("UIListLayout")
+	row.FillDirection = Enum.FillDirection.Vertical
+	row.HorizontalAlignment = Enum.HorizontalAlignment.Left
+	row.Padding = UDim.new(0, 1)
+	-- SORTED BY LayoutOrder, EXPLICITLY. `UIListLayout` defaults to sorting by
+	-- NAME, so the swatches came out FAIR, HEAVY, VOID -- alphabetical -- and the
+	-- key read as though it ran lightest-to-heaviest while doing nothing of the
+	-- sort. A legend in a misleading order is worse than none, because the reader
+	-- infers a scale from the sequence.
+	row.SortOrder = Enum.SortOrder.LayoutOrder
+	row.Parent = swatches
+
+	-- FILL AND COLOUR MUST MATCH `DiceRenderer.showFace`. These three are the
+	-- same values that function paints, which is what lets a player match a bar
+	-- on a die to a row here.
+	local states = {
+		{ id = "VOID", label = "never lands", fill = 0.0, colour = UITheme.Colors.VoidFace },
+		{ id = "FAIR", label = "even odds", fill = 0.45, colour = UITheme.Colors.TextDim },
+		{ id = "HEAVY", label = "rare, pays big", fill = 1.0, colour = UITheme.Colors.TextGold },
+	}
+
+	for index, state in ipairs(states) do
+		-- CELLS ARE PIXEL-WIDTH, NOT A FRACTION OF THE TRAY.
+		--
+		-- At 0.31 scale each the captions ran past their cell and "HEAVY · rare,
+		-- pays big" overprinted the swatch beside it. The captions are fixed 10px
+		-- text -- they do not scale -- so sizing their container as a fraction of a
+		-- variable-width tray was always going to collide at some window size. A
+		-- fixed cell wide enough for the longest caption cannot.
+		local cell = Instance.new("Frame")
+		cell.Name = "Swatch_" .. state.id
+		cell.Size = UDim2.new(1, 0, 0, 11)
+		cell.BackgroundTransparency = 1
+		cell.LayoutOrder = index
+		cell.ZIndex = 6
+		cell.Parent = swatches
+
+		local track = Instance.new("Frame")
+		track.Name = "Track"
+		track.Size = UDim2.new(0, 24, 0, 4)
+		track.Position = UDim2.new(0, 0, 0.5, -2)
+		track.BackgroundColor3 = UITheme.Colors.PanelDeep
+		track.BorderSizePixel = 0
+		track.ZIndex = 6
+		track.Parent = cell
+
+		local trackCorner = Instance.new("UICorner")
+		trackCorner.CornerRadius = UDim.new(1, 0)
+		trackCorner.Parent = track
+
+		-- A void face's real bar is EMPTY, so a faithful swatch would be a blank
+		-- track and read as "no bar" rather than as the void STATE. It is drawn
+		-- as a sliver in the void colour instead -- the one place this key departs
+		-- from the renderer, because a swatch showing nothing teaches nothing.
+		local fill = Instance.new("Frame")
+		fill.Name = "Fill"
+		fill.Size = UDim2.fromScale(math.max(state.fill, 0.18), 1)
+		fill.BackgroundColor3 = state.colour
+		fill.BorderSizePixel = 0
+		fill.ZIndex = 7
+		fill.Parent = track
+
+		local fillCorner = Instance.new("UICorner")
+		fillCorner.CornerRadius = UDim.new(1, 0)
+		fillCorner.Parent = fill
+
+		local caption = Instance.new("TextLabel")
+		caption.Name = "Caption"
+		caption.Size = UDim2.new(1, -30, 1, 0)
+		caption.Position = UDim2.new(0, 30, 0, 0)
+		caption.BackgroundTransparency = 1
+		caption.Font = UITheme.Font
+		caption.Text = state.id .. " \u{00B7} " .. state.label
+		caption.TextSize = 10
+		caption.TextScaled = false
+		caption.TextColor3 = UITheme.Colors.TextDim
+		caption.TextXAlignment = Enum.TextXAlignment.Left
+		caption.TextYAlignment = Enum.TextYAlignment.Center
+		caption.ZIndex = 6
+		caption.Parent = cell
+	end
+end
+
 -- The tray, the shared viewport, and the scene inside it.
 local function build(): (ScreenGui, Frame, ViewportFrame, Folder)
 	local player = Players.LocalPlayer
@@ -466,6 +626,11 @@ local function build(): (ScreenGui, Frame, ViewportFrame, Folder)
 	rbLayout.VerticalAlignment = Enum.VerticalAlignment.Center
 	rbLayout.Padding = UDim.new(0.01, 0)
 	rbLayout.Parent = resultBar
+
+	-- Built last so it sits above the scene in sibling ZIndex order, and parented
+	-- to the interior rather than into the viewport -- it is a key to the board,
+	-- not an object on the table.
+	buildMassLegend(interior)
 
 	if player ~= nil then
 		gui.Parent = player:WaitForChild("PlayerGui")

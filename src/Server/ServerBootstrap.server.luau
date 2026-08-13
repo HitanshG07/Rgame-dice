@@ -37,6 +37,7 @@
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 local ServerScriptService = game:GetService("ServerScriptService")
 
 --------------------------------------------------------------------------------
@@ -136,6 +137,54 @@ end)
 ForgeService.setForgeObserver(function(player: Player)
 	ProgressionService.advanceQuests(player, "forges", 1, false)
 end)
+
+--------------------------------------------------------------------------------
+-- STUDIO-ONLY PLAYTEST DIE COUNT
+--
+-- Sets the player's die count to exactly this on join, so the board can be felt
+-- at populations the normal progression takes a long time to reach. Requested by
+-- the operator 2026-08-13 to try thirty dice rolling together.
+--
+-- ZERO DISABLES IT, AND ZERO IS WHAT SHIPS. **SET THIS BACK TO 0 BEFORE
+-- RELEASE** -- it is listed in the handoff's housekeeping alongside the
+-- ascension threshold, the other constant currently carrying a test value.
+--
+-- WHY A GUARD AND NOT JUST A COMMENT. `RunService:IsStudio()` is false in every
+-- live server, so this cannot touch a real player's profile even if it ships set
+-- to thirty. A comment saying "remember to turn this off" protects nobody; the
+-- guard does. It is also why this is not a remote: a client-triggerable "give me
+-- thirty dice" is an economic exploit surface, and there is no reason to build
+-- one when the playtest runs in Studio anyway.
+--
+-- EXACT, NOT ADDITIVE. It trims as well as grants, so lowering the number gives
+-- a smaller board on the next join rather than stranding the profile at whatever
+-- the high-water mark was. Without that this would be a one-way door.
+local PLAYTEST_DIE_COUNT = 30
+
+local function applyPlaytestDieCount(player: Player): ()
+	if PLAYTEST_DIE_COUNT <= 0 or not RunService:IsStudio() then
+		return
+	end
+
+	local target = math.floor(PLAYTEST_DIE_COUNT)
+	local applied = 0
+
+	PlayerProfile.mutate(player, function(d)
+		while #d.Dice > target do
+			table.remove(d.Dice)
+		end
+		while #d.Dice < target do
+			table.insert(d.Dice, DiceCatalog.newStartingDie())
+		end
+		d.DieSlots = #d.Dice
+		applied = #d.Dice
+	end)
+
+	warn(string.format(
+		"[Bootstrap] STUDIO PLAYTEST: die count forced to %d for UserId=%d."
+		.. " PLAYTEST_DIE_COUNT must be 0 before release.",
+		applied, player.UserId))
+end
 
 -- How long a new player's starter offer stays open. 48 hours: long enough to
 -- span a weekend and see the game properly, short enough to mean something.
@@ -618,6 +667,10 @@ admitPlayer = function(player: Player)
 		end
 		return
 	end
+
+	-- STUDIO-ONLY PLAYTEST DIE COUNT. Applied before validation so the dice it
+	-- creates are checked like any other.
+	applyPlaytestDieCount(player)
 
 	-- Validate the loaded profile against the die contract BEFORE the session
 	-- starts, so the first roll cannot be resolved against an illegal die. The

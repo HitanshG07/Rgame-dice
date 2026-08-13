@@ -15,8 +15,15 @@
 --   3. The in-memory profile is the single source of truth during play.
 
 local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local ServerScriptService = game:GetService("ServerScriptService")
+
+-- Required for ONE constant: the die-slot ceiling. `_reconcile` used to hardcode
+-- it, which is the mirror-drift defect L-041 records -- and here it was worse
+-- than drift, because the hardcoded value also inverted a `math.clamp` range and
+-- would throw. See the clamp itself for the full account.
+local DiceCatalog = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("DiceCatalog"))
 
 local PlayerProfile = {}
 
@@ -282,7 +289,28 @@ function PlayerProfile._reconcile(raw: any): Profile
 	if type(data.DieSlots) ~= "number" or data.DieSlots ~= data.DieSlots then
 		data.DieSlots = #data.Dice
 	end
-	data.DieSlots = math.clamp(math.floor(data.DieSlots), #data.Dice, 7)
+	-- THE CEILING COMES FROM THE CATALOG, AND THE RANGE CANNOT INVERT.
+	--
+	-- This was `math.clamp(math.floor(data.DieSlots), #data.Dice, 7)`, and the
+	-- literal 7 was two bugs wearing one coat.
+	--
+	-- FIRST, it mirrored `DiceCatalog.MAX_DIE_SLOTS` by hand, which is the drift
+	-- L-041 records: raising the catalog's ceiling would have left this clamp
+	-- quietly holding every profile at 7.
+	--
+	-- SECOND, AND MUCH WORSE: `math.clamp` THROWS when its minimum exceeds its
+	-- maximum. The minimum here is `#data.Dice`. So any profile holding more than
+	-- seven dice did not get trimmed -- it errored on load, on the profile path,
+	-- for that player, every time. The operator's stated 20-dice progression
+	-- ceiling was therefore unreachable no matter what the renderer could draw,
+	-- and nothing would have reported why.
+	--
+	-- The ceiling now rises to admit whatever is genuinely stored. Trimming is
+	-- deliberately NOT the behaviour: the counter is never lowered to match a
+	-- short array (see above), and by the same reasoning a legitimately larger
+	-- array must not be confiscated by a constant that has since moved.
+	local slotCeiling = math.max(DiceCatalog.MAX_DIE_SLOTS, #data.Dice)
+	data.DieSlots = math.clamp(math.floor(data.DieSlots), #data.Dice, slotCeiling)
 	for _ = #data.Dice + 1, data.DieSlots do
 		table.insert(data.Dice, deepCopy(TEMPLATE.Dice[1]))
 	end
