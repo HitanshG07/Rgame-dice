@@ -107,10 +107,39 @@ function V7ForgePanel.new(): V7ForgeController
 	local ELEMENT_ORDER = { "None", "Fire", "Freeze", "Gold", "Multiplier" }
 
 	-- DIE TABS (operator-directed). One row across the top; a tab per owned slot.
-	local tabRow = Instance.new("Frame")
-	tabRow.Size = UDim2.fromScale(0.96, 0.055)
+	-- THE TAB STRIP SCROLLS, AND ITS TABS ARE BUILT ON DEMAND.
+	--
+	-- TWO SEPARATE CEILINGS USED TO LIVE HERE, and both were real bugs the moment
+	-- a player ascended past a few slots.
+	--
+	-- FIRST, the tabs were created ONCE at construction, `MAX_DIE_SLOTS` of them,
+	-- and merely hidden or shown. That constant is 7 today and the operator
+	-- intends it to reach 20+ with ascensions -- but `new()` runs at join, so a
+	-- player who ascended DURING a session kept whatever count was baked in when
+	-- they logged in, and any die past it was unreachable. The forge would show
+	-- seven tabs for twenty dice with no way to select the rest.
+	--
+	-- SECOND, a fixed-width row cannot hold twenty tabs. At `0.12` scale each,
+	-- seven already fill it; twenty would need `0.048` -- an unreadable sliver on
+	-- a phone (NFR-3), and unhittable with a thumb.
+	--
+	-- So the row is a ScrollingFrame, tabs keep a readable fixed width, and the
+	-- strip scrolls horizontally with the active tab brought into view. Tabs are
+	-- created lazily by `ensureTabs` as the die count grows, and never destroyed
+	-- -- a player's count only moves up within a session, and reusing them keeps
+	-- the pool stable across snapshots (NFR-1).
+	local tabRow = Instance.new("ScrollingFrame")
+	tabRow.Name = "TabStrip"
+	tabRow.Size = UDim2.fromScale(0.96, 0.062)
 	tabRow.Position = UDim2.fromScale(0.02, 0.005)
 	tabRow.BackgroundTransparency = 1
+	tabRow.BorderSizePixel = 0
+	tabRow.ScrollingDirection = Enum.ScrollingDirection.X
+	tabRow.HorizontalScrollBarInset = Enum.ScrollBarInset.None
+	tabRow.ScrollBarThickness = 3
+	tabRow.ScrollBarImageColor3 = UITheme.Colors.BorderDim
+	tabRow.CanvasSize = UDim2.new(0, 0, 0, 0)
+	tabRow.ClipsDescendants = true
 	tabRow.Parent = bodyFrame
 
 	local tabLayout = Instance.new("UIListLayout")
@@ -119,25 +148,55 @@ function V7ForgePanel.new(): V7ForgeController
 	tabLayout.SortOrder = Enum.SortOrder.LayoutOrder
 	tabLayout.Parent = tabRow
 
+	-- Fixed PIXEL width, not a fraction of the strip. A fraction would shrink
+	-- every tab as more dice arrive, which is the failure being fixed.
+	local TAB_WIDTH_PX = 62
+
+	-- The canvas has to grow with the content or the strip cannot scroll to it.
+	tabLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+		tabRow.CanvasSize = UDim2.new(0, tabLayout.AbsoluteContentSize.X, 0, 0)
+	end)
+
 	local selectDie: (number) -> ()
 
-	-- Tab count comes from the CATALOG, not a literal 7. The slot ceiling is a
-	-- balance/progression value that the operator intends to raise (up to 20 as
-	-- ascensions accumulate), and a hardcoded loop here would silently cap the
-	-- forge at seven tabs while the player owned more dice -- the same class of
-	-- drift as the hand-listed dice models (L-041).
-	local MAX_TABS = DiceCatalog.MAX_DIE_SLOTS
-	for i = 1, MAX_TABS do
-		local tc, tb = UITheme.neumorphicButton("D" .. tostring(i), UITheme.Colors.TextGold,
-			UDim2.fromScale(0.12, 1), UDim2.fromScale(0, 0))
-		tc.Name = "DieTab" .. tostring(i)
-		tc.LayoutOrder = i
-		tc.Visible = false
-		tc.Parent = tabRow
-		UITheme.onPressed(tb, function()
-			selectDie(i)
-		end)
-		table.insert(dieTabs, { container = tc, button = tb })
+	-- Creates tabs up to `count`, reusing any that already exist. Called from the
+	-- snapshot handler, so the strip tracks the live die count rather than
+	-- whatever it was at join.
+	local function ensureTabs(count: number): ()
+		for i = #dieTabs + 1, count do
+			local tc, tb = UITheme.neumorphicButton("D" .. tostring(i), UITheme.Colors.TextGold,
+				UDim2.new(0, TAB_WIDTH_PX, 1, 0), UDim2.fromScale(0, 0))
+			tc.Name = "DieTab" .. tostring(i)
+			tc.LayoutOrder = i
+			tc.Visible = false
+			tc.Parent = tabRow
+			local index = i
+			UITheme.onPressed(tb, function()
+				selectDie(index)
+			end)
+			table.insert(dieTabs, { container = tc, button = tb })
+		end
+	end
+
+	-- Brings the active tab into view, so selecting a die the strip has scrolled
+	-- past does not leave the highlight off screen.
+	local function revealTab(index: number): ()
+		local tab = dieTabs[index]
+		if tab == nil or not tab.container.Visible then
+			return
+		end
+		local left = (index - 1) * (TAB_WIDTH_PX + 6)
+		local right = left + TAB_WIDTH_PX
+		local window = tabRow.AbsoluteWindowSize.X
+		if window <= 0 then
+			return
+		end
+		local at = tabRow.CanvasPosition.X
+		if left < at then
+			tabRow.CanvasPosition = Vector2.new(left, 0)
+		elseif right > at + window then
+			tabRow.CanvasPosition = Vector2.new(right - window, 0)
+		end
 	end
 
 	local slotNote = UITheme.label("", UDim2.fromScale(0.34, 0.05), UDim2.fromScale(0.64, 0.008),
@@ -490,6 +549,9 @@ function V7ForgePanel.new(): V7ForgeController
 				UITheme.setEnabled(tab.button, i ~= activeDie)
 			end
 		end
+		-- Scroll the active tab into view. Without this, a player on die 15 of 20
+		-- sees the strip's first few tabs and no highlight anywhere.
+		revealTab(activeDie)
 
 		-- The move arrows are only meaningful with somewhere to move TO. Hidden
 		-- rather than greyed for a single die: with one die there is no ordering
@@ -689,13 +751,25 @@ function V7ForgePanel.new(): V7ForgeController
 			-- die's numbers on screen under the new tab's header. The player was
 			-- then editing what looked like an empty slot and was really editing
 			-- nothing.
+			-- NO HARDCODED CEILING. This clamped slots to a literal 7 -- a third
+			-- copy of `MAX_DIE_SLOTS`, and one that would have quietly discarded
+			-- every slot past the seventh the moment ascensions raised the cap.
+			-- The floor of 1 is kept because a die count below one is nonsense;
+			-- the upper bound is whatever the server actually reports, since the
+			-- server is the authority on entitlement and the panel only draws it.
 			local owned = if type(state.dice) == "table" then #state.dice else 1
-			local slots = math.clamp(tonumber(state.dieSlots) or 1, 1, 7)
-			dieCount = math.clamp(owned, 1, slots)
+			local slots = math.max(1, math.floor(tonumber(state.dieSlots) or 1))
+			dieCount = math.max(1, math.min(owned, slots))
 			emptySlots = math.max(0, slots - owned)
 			if activeDie > dieCount then
 				activeDie = 1
 			end
+
+			-- Grow the strip to match. Built here rather than at construction
+			-- because a player can ascend mid-session and gain slots without
+			-- rejoining -- tabs baked in at join would leave the new dice
+			-- permanently unreachable.
+			ensureTabs(dieCount)
 			dieShapes = {}
 			if type(state.dice) == "table" then
 				for i, d in ipairs(state.dice) do

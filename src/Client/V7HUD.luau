@@ -203,7 +203,7 @@ function V7HUD.new(): V7HUDController
 		return pod, valLbl
 	end
 
-	local _, cashLabel = createCurrency("cash", "CASH", 0.3)
+	local cashPod, cashLabel = createCurrency("cash", "CASH", 0.3)
 	local _, gemsLabel = createCurrency("gems", "GEMS", 0.25)
 	local _, diamondsLabel = createCurrency("diamonds", "DIAMONDS", 0.25)
 
@@ -320,22 +320,42 @@ function V7HUD.new(): V7HUDController
 	local _, _, streakValue = chip(2, "StreakChip", "STREAK", UITheme.Colors.Cash)
 	local _, riskIcon, riskValue = chip(3, "RiskChip", "RISK", UITheme.Colors.TextDim)
 
-	-- A one-shot "+$14.8M" that rises and fades on a payout, floating ABOVE the
-	-- chip row rather than replacing it -- the chips are the resting readout and
-	-- must never blank out mid-roll while a flash plays.
+	-- THE PAYOUT FLASH, ATTACHED TO THE CASH READOUT.
+	--
+	-- WHERE THIS USED TO BE, TWICE, AND WHY BOTH WERE WRONG.
+	--
+	-- It began as floating text over the BOARD, anchored to the tray's centre and
+	-- scaled up to a third of the screen on a big win. That put the number
+	-- directly on top of the dice it was reporting -- and once thirty dice could
+	-- roll at once, several payouts a second stacked into an unreadable pile over
+	-- the whole board. It was then moved here, onto the streak strip, where it
+	-- covered the MULT/STREAK/RISK chips instead; `flashPayout` was stubbed to a
+	-- no-op rather than fixed (L-044), so the feature has been dead since.
+	--
+	-- The mistake both times was treating the payout as something that belongs
+	-- near the DICE. It does not: it is a change to the player's cash, and the
+	-- place a player looks to see their cash is the cash readout. Anchoring the
+	-- flash there means the number rises from the figure it just changed, which
+	-- explains itself with no text and no space of its own.
+	--
+	-- SIZED TO THE POD, so it cannot grow over anything. The old version scaled
+	-- with the win, which is exactly how a jackpot ended up covering the arena.
+	-- Magnitude is carried by COLOUR and by a brief lift instead -- neither of
+	-- which can collide with another element.
 	local payoutLabel = Instance.new("TextLabel")
 	payoutLabel.Name = "PayoutFlash"
-	payoutLabel.Size = UDim2.fromScale(1, 1)
-	payoutLabel.Position = UDim2.fromScale(0, 0)
+	payoutLabel.Size = UDim2.fromScale(0.75, 0.42)
+	payoutLabel.Position = UDim2.fromScale(0.25, 0.30)
+	payoutLabel.AnchorPoint = Vector2.new(0, 0.5)
 	payoutLabel.BackgroundTransparency = 1
 	payoutLabel.Font = UITheme.FontHeading
 	payoutLabel.Text = ""
 	payoutLabel.TextColor3 = UITheme.Colors.Cash
-	payoutLabel.TextXAlignment = Enum.TextXAlignment.Center
+	payoutLabel.TextXAlignment = Enum.TextXAlignment.Left
 	payoutLabel.TextScaled = true
 	payoutLabel.Visible = false
-	payoutLabel.ZIndex = 5
-	payoutLabel.Parent = streakStrip
+	payoutLabel.ZIndex = 8
+	payoutLabel.Parent = cashPod
 
 	-- ==========================================
 	-- 3. LEFT & RIGHT NEUMORPHIC PANELS
