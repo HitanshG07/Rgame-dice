@@ -1,12 +1,15 @@
 # HANDOFF 4 — Economy corrections, tuning, and the animation rebuild
 
 **Date:** 2026-08-13
-**Head:** `a43608c` · 21 suites, 3,546 assertions, 0 failing · tree clean
+**Head:** `9be3737` · 21 suites, 3,546 assertions, 0 failing · tree clean
 
 **Status:** S3-a / S3-c / S3-d are DONE. **The animation rebuild (Route A) is
-DONE and verified in Studio** — see §0. Outstanding: the ascension-threshold
-switch (§3b, decided but not built) and the Gems vault-storage feature (§3,
-needs sign-off on one number).
+DONE and verified in Studio** — see §0. The mass legend, the Forge tab
+adaptivity and the `>7 dice` profile crash are done — see §0b.
+
+**PAUSED, deliberately.** The operator is running a parallel Antigravity session
+to rebuild every dice model, and both would otherwise fight over the same Studio
+instance and Rojo connection. The queue below resumes when that lands (§6).
 
 ---
 
@@ -95,9 +98,125 @@ were actually looked at. Stated per L-040 rather than implied.
 ### Known, deliberately left alone
 
 `FeedbackFX` payout text (`+6.15K`) now draws over the dice, because the dice
-sit higher in frame than they used to. Pre-existing element, outside this
-change's fence, and it is a positioning tweak rather than a defect — worth a
-look next time that file is open.
+sit higher in frame than they used to. **Addressed in §0b.**
+
+---
+
+## 0b. WHAT LANDED AFTER THE ANIMATION (`e9aead5` … `9be3737`)
+
+### The mass legend — `e9aead5`, repositioned in `2d1a95d`
+
+The operator asked *"what is that bar below the dice what does it mean"*. Since
+they commissioned the mechanic, that settles the discoverability question: the
+board was rendering the game's central rule (FR-2, mass makes a face land LESS
+often) as unlabelled decoration.
+
+A legend now states the rule and shows three swatches drawn with the same fill
+and colour `showFace` paints, so a bar on a die can be matched to a row in the
+key rather than described in prose that could drift from it (L-025).
+
+**Placing it took four attempts and is worth reading before moving it.** Top-left
+centred is where the throw arc passes. Under the felt is where dice land. The
+bottom-left wedge *looks* right and one screenshot appeared to confirm it — but
+the felt is a perspective trapezoid whose NEAR edge is the wide one, so going
+down the felt spreads outward and the wedge closes. Measured: tray `x=204..1035`,
+felt near-left corner `x=266`, leftmost resting die `x=302` — about 60px. The
+far-left corner is `x=405`, leaving 201px.
+
+**The operator caught this.** I had signed it off from one clean frame;
+instrumenting the overlap found 102 of 150 frames intersecting and 8 dice resting
+on the legend. It now sits top-left, re-verified the way it was falsified: 30
+dice, 10 rolls, 429 frames, **0 overlaps**.
+
+### The clamp that made the 20-dice ceiling impossible — `e9aead5`
+
+`PlayerProfile._reconcile` had `math.clamp(math.floor(data.DieSlots), #data.Dice, 7)`.
+Two bugs in one line. The literal `7` mirrored `DiceCatalog.MAX_DIE_SLOTS` by
+hand (L-041); worse, **`math.clamp` throws when its minimum exceeds its
+maximum**, and the minimum is `#data.Dice`. Any profile holding more than seven
+dice did not get trimmed — it **errored on load, for that player, every time**.
+The operator's 20-dice progression ceiling was unreachable no matter what the
+renderer could draw, and nothing would have said why.
+
+### Forge tab adaptivity — `9be3737`
+
+> *"the forge and slots need to be able to adapt as the user progresses ascends
+> and unlocks more slots for dice"*
+
+Three ceilings, all real once ascensions raise the cap: tabs built **once at
+join** (so ascending mid-session left new dice unreachable), a third hand-copy of
+`MAX_DIE_SLOTS` as a literal `7`, and a fixed-width row that physically cannot
+hold 20 readable tabs. Now a scrolling strip with fixed 62px tabs created on
+demand and auto-scrolled into view. Verified at 30 dice: 30 tabs, 2034px canvas
+in a 971px window, all reachable.
+
+**SLOTS was already correct** and is untouched — it derives from
+`dieSlotCapFor(ascensions)` with no hardcoded ceiling. Checked rather than
+assumed, because the report named both panels.
+
+### Payout flash — moved, NOT yet animated
+
+Repositioned from the board (where it printed over the dice, and stacked
+unreadably at 30) onto the **cash readout**. Both previous placements assumed the
+payout belongs near the dice; it does not — it is a change to the player's cash,
+and that is where a player looks for it.
+
+**`flashPayout` is still the L-044 no-op.** The label is positioned and parented;
+nothing drives it. Finishing this is item 1 of the queue.
+
+### 30-dice playtest hook
+
+`PLAYTEST_DIE_COUNT = 30` in `ServerBootstrap`, guarded on
+`RunService:IsStudio()` so it cannot touch a live profile. Exact rather than
+additive — set it to `6` and rejoin to get a normal board.
+**MUST return to 0 before release.**
+
+---
+
+## 0c. UI QUALITY — THE PANELS READ AS AI-GENERATED
+
+**Operator-reported 2026-08-13, and correct:**
+
+> *"i dont like how the forge ui is made it has emojies and everything making it
+> look as if it was made by an ai - and not a proper developer"*
+
+**This is not confined to the Forge.** Every one of the nine overlays opens with
+an emoji, and the emoji is the smaller half of the problem:
+
+| Surface | Current title |
+|---|---|
+| Forge | `🔨 THE FORGE` |
+| Shop | `🛒 MONETIZATION SHOP (GAMEPASSES & PRODUCTS)` |
+| Shapes | `🎲 DICE SHAPES & BUILD CHOICE` |
+| Boards | `🏆 GLOBAL LEADERBOARDS` |
+| Ascend | `🌌 ASCENSION & DIAMOND TREE` |
+| Quests | `📜 DAILY QUESTS & REWARDS` |
+| Vault | `⏳ OFFLINE VAULT` |
+| Settings | `⚙️ SETTINGS & PROMO CODES` |
+| Slots | `⚡ DIE SLOTS` |
+
+**The deeper tell is the wording.** `MONETIZATION SHOP (GAMEPASSES & PRODUCTS)`
+is a specification heading, not a product label — it names the implementation
+category and the parenthetical enumerates the SRS. A shipped game says `SHOP`.
+Likewise `DICE SHAPES & BUILD CHOICE` and `ASCENSION & DIAMOND TREE`: each is two
+concepts joined by an ampersand because the requirement listed two things.
+**Titles were transcribed from the spec rather than written for a player.**
+
+Three things to fix together, since they share a cause:
+
+1. **Drop every emoji from the overlay titles.** If an icon is wanted, draw it —
+   `UITheme.createProgrammaticIcon` already exists and every HUD currency uses
+   it. A vector glyph is art direction; an emoji is a font fallback that renders
+   differently on every platform.
+2. **Retitle for players, not for the spec.** One or two words: `FORGE`, `SHOP`,
+   `SHAPES`, `LEADERBOARDS`, `ASCEND`, `QUESTS`, `VAULT`, `SETTINGS`, `SLOTS`.
+3. **Then the layout work below.** The titles are the symptom; the panels behind
+   them also want real hierarchy, spacing and alignment rather than stacked rows
+   of controls.
+
+**This supersedes the narrower "remake shop / forge / shape" ask** — the same
+treatment now applies to all nine, and the retitle pass is cheap and should land
+in one commit across the lot.
 
 ---
 
@@ -423,23 +542,69 @@ rendering work attached to it.
 
 ---
 
-## 5. SUGGESTED ORDER
+## 5. ~~SUGGESTED ORDER~~ — superseded by §6
 
-1. **Ascension threshold → Cash on hand** (§3b) — decided, not built. Small and
-   subtractive: it DELETES `RunCash` rather than adding anything. Do it before
-   the Gems work so nothing new is built on a field that is being removed.
-2. **Gems vault storage** — rate and shape are settled; needs sign-off on the
-   **+8h cap** in §3, then it is a contained build (profile field, Gems spend
-   path, VAULT panel control).
-3. **Restore `ASCEND_MIN_LIFETIME_CASH` to `1e6`** before any real playtest.
+---
 
-~~Animation rebuild~~ — **done**, `a43608c`. See §0.
+## 6. THE QUEUE — PAUSED FOR THE DICE REBUILD
 
-**Worth an operator play session before anything else.** The animation is
-verified against its numbers and looked at in screenshots, but feel is not
-something a measurement settles: throw speed, bounce liveliness and how big the
-dice read at six-plus are all one-line constants (`GRAVITY`, `RESTITUTION`,
-`THROW_TIME_*` in `DiceRenderer`; `DIE_RADIUS_*` in `BoardView`) and are much
-better tuned against a real opinion than guessed at again.
+**Why it is paused.** The operator is running a parallel Antigravity session to
+rebuild every dice model as professional-grade geometry (and to add D5, D7, D14,
+D16, taking the set from 8 shapes to 12). Both efforts drive the same Studio
+instance and the same Rojo connection, so they cannot run at once.
+
+**File overlap to reconcile on resume.** Antigravity owns
+`Shared/DiceMeshBuilder.luau` and adds four entries to `Shared/DiceCatalog.luau`.
+Item 2 below also touches `DiceCatalog`. Both are additive and in different
+regions of the file — **commit the Antigravity work first and rebase onto it**,
+not the reverse.
+
+### Order, and why
+
+1. **Finish the payout flash animation.** Half-built: the label is parented to
+   the cash pod, `flashPayout` is still the L-044 no-op. Smallest item, and it
+   closes something currently in a half state.
+
+2. **Ascension threshold → Cash on hand** (§3b). Decided by the operator, not
+   built. Subtractive — it DELETES `RunCash`. Do it before the Gems work so
+   nothing new is built on a field being removed.
+
+3. **Gems → vault capacity** (§3). **+8h cap APPROVED by the operator
+   2026-08-13** — that sign-off was the only thing blocking it. Needs
+   `PurchasedVaultHours`, the game's first Gems spend path, and a VAULT control.
+   **Treat it as an economic surface, not a UI feature:** the cap must be
+   enforced SERVER-side, the spend must go through the gateway with its own rate
+   limit, and the panel must render a server-confirmed result rather than an
+   optimistic one (L-042).
+
+4. **The UI-quality pass (§0c).** Emoji removal and retitling first, in one
+   commit across all nine overlays — cheap, and it is the most visible half of
+   the complaint. Then the layout rebuilds, in this order:
+   - **SHOP** — the money screen, so it earns the most from the work
+   - **FORGE** — the deepest screen mechanically, and the one the operator named
+   - **SHAPES** — smallest of the three
+   The **rotating 3D die preview** on the shape/shop cards is deliberately LAST,
+   and only after the new models exist: framing a camera against geometry that is
+   about to change means doing it twice. The renderer already provides a working
+   ViewportFrame/camera/model path to reuse, so it is cheap once the models land.
+
+### Housekeeping before release — both carry test values
+
+- **`ASCEND_MIN_LIFETIME_CASH` → `1e6`** (currently `100000`).
+- **`PLAYTEST_DIE_COUNT` → `0`** (currently `30`). Studio-gated, so it cannot
+  reach a live game, but it must not ship set.
+
+### Still blocked on the operator
+
+Audio asset IDs (9 `DUMMY_ID_*`), Roblox group ID (`GROUP_ID = 0`), element
+unlocks (built server-side, no unlock path), `src/Client/LegacyUI/` deletion.
+
+### Worth a play session
+
+The animation is verified against its numbers, but **feel is not something a
+measurement settles**. Throw speed, bounce liveliness and how big the dice read
+at six-plus are one-line constants — `GRAVITY`, `RESTITUTION`, `THROW_TIME_*` in
+`DiceRenderer`; `DIE_RADIUS_*` in `BoardView` — and are far better tuned against
+a real opinion than guessed at again.
 
 Ledger entries this session: **L-039** … **L-044**.
