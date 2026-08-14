@@ -340,6 +340,11 @@ LEDGER GOVERNANCE LAWS
   3. **3-Arg Matrix Pip Alignment:** Oriented cylinder pips via `CFrame.fromMatrix(pipPos, n, up)` with `RightVector = n` and `normalOffset = 0.001`, producing glowing circular casino pips.
   4. **Proportional Facet Kerning on D16:** Scaled D16 glyphs to `dieScale * 0.70` oriented along apex vectors, fitting all 16 numerals strictly inside their triangular boundaries. All 12 shapes pass `assertClosedSolid`, `assertBevelled`, `assertGlyphsEngraved`, `assertNormalised`, `assertOrthogonality`, `assertFaceNormalRoundTrip`, and `assertPartBudget`. -- Last Verified: 2026-08-14
 
-
-
-
+### L-049: Bidirectional Edge-Walk for Mixed-Valence Polyhedral Corner Fills in Procedural Solids
+- **Encountered State:** Dice Forge, 2026-08-14. Construction of independent procedural dice set `DiceMeshBuilderB.luau`. While regular Platonic solids (D4, D6, D8, D12, D20) and trapezohedra (D10, D14) passed `assertClosedSolid` with 0 boundary edges, prism barrel solids (D3, D5, D7) reported boundary edge counts proportional to their ring vertex count ($N \times 7$ boundary edges).
+- **Root Cause Breakdown:**
+  1. **Single-Direction Edge Walk on Mixed Valence Vertices:** At equatorial ring vertices on prism barrels, quads and cap triangles meet with mixed winding order and valence 4. A naive single-direction edge walk `cf[cj + 1]` from the shared vertex got stuck whenever the candidate face's winding shared the incoming rather than outgoing half-edge.
+  2. **Truncated Corner Polygons:** The incomplete cyclic order caused corner fill generation to abort at 2 faces instead of 4, leaving unstitched gaps between adjacent chamfer strips ($N \times 7$ missing edges).
+- **Definitive Fix Action:**
+  1. **Bidirectional Edge Adjacency Walk:** In `buildChamferedSolid`, the cyclic face ordering loop inspects both forward (`nextVert = cf[cj + 1]`) and backward (`prevVert = cf[cj - 1]`) candidate edges around the shared vertex `sharedV`. This guarantees discovery of all $k$ meeting faces regardless of face winding convention.
+  2. **100% Closed Watertight Polyhedra:** With bidirectional walking, D3, D5, and D7 achieve 0 boundary edges and 0 overlap, bringing the entire 12-die set to 84/84 assertions passed across all 7 verification functions in Studio. -- Last Verified: 2026-08-14
