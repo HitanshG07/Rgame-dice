@@ -941,7 +941,7 @@ local function buildD16(scale: number, color: Color3): Model
 		table.insert(faces, { 2, 2 + nxt, 2 + i })
 	end
 
-	local model, centroids, normals = buildChamferedSolid("D16", verts, faces, color, 0.08)
+	local model, centroids, normals = buildChamferedSolid("D16", verts, faces, color, 0.16)
 	local baseRatio = 0.25
 	for i = 1, 8 do
 		local nxt = if i == 8 then 1 else i + 1
