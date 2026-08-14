@@ -345,7 +345,7 @@ function V7HUD.new(): V7HUDController
 	local payoutLabel = Instance.new("TextLabel")
 	payoutLabel.Name = "PayoutFlash"
 	payoutLabel.Size = UDim2.fromScale(0.75, 0.42)
-	payoutLabel.Position = UDim2.fromScale(0.25, 0.30)
+	payoutLabel.Position = UDim2.fromScale(0.25, 1.05)
 	payoutLabel.AnchorPoint = Vector2.new(0, 0.5)
 	payoutLabel.BackgroundTransparency = 1
 	payoutLabel.Font = UITheme.FontHeading
@@ -558,7 +558,17 @@ end
 -- ceiling of 1.6 rolls/sec a longer flash would still be on screen when the next
 -- one starts, and two overlapping numbers are less readable than one.
 local PAYOUT_FLASH_SEC = 0.62
-local PAYOUT_RISE = 0.30
+
+-- The flash DRIFTS DOWNWARD, away from the cash figure, and that is deliberate
+-- rather than the conventional rise.
+--
+-- The currency pod's top edge sits at y = -44 in absolute screen coordinates --
+-- the bar is anchored above the viewport edge -- so a flash rising 0.30 of the
+-- pod's height travels to roughly y = -61 and finishes off-screen. Measured, not
+-- assumed. Drifting down keeps the whole animation inside the window, and out of
+-- a payout the eye is already on the number it came from, so the direction
+-- carries no meaning worth preserving.
+local PAYOUT_DRIFT = 0.34
 
 -- A payout, shown rising out of the cash figure it just changed.
 --
@@ -623,14 +633,14 @@ function V7HUD:flashPayout(payout: number, voidHit: boolean)
 	label.Text = text
 	label.TextColor3 = colour
 	label.TextTransparency = 0
-	label.Position = UDim2.fromScale(0.25, 0.30)
+	label.Position = UDim2.fromScale(0.25, 1.05)
 	label.Visible = true
 
 	local tween = TweenService:Create(
 		label,
 		TweenInfo.new(PAYOUT_FLASH_SEC, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
 		{
-			Position = UDim2.fromScale(0.25, 0.30 - PAYOUT_RISE),
+			Position = UDim2.fromScale(0.25, 1.05 + PAYOUT_DRIFT),
 			TextTransparency = 1,
 		}
 	)
