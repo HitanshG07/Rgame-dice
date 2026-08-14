@@ -177,6 +177,13 @@ function NetClient.claimVault(doubled: boolean): Result
 	return call("ClaimVault", doubled == true)
 end
 
+-- Buys `hours` of vault capacity with Gems. The server prices it, caps it, and
+-- refuses it -- this only carries the request. No cost crosses the wire in
+-- either direction (NFR-5); the panel reads the rate from `VaultCatalog`.
+function NetClient.buyVaultHours(hours: number): Result
+	return call("BuyVaultHours", hours)
+end
+
 function NetClient.claimQuest(questId: string): Result
 	return call("ClaimQuest", questId)
 end

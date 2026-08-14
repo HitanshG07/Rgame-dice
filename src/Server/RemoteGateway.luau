@@ -75,6 +75,10 @@ local ARITY: { [string]: number } = {
 	GetLeaderboard = 1,
 	SetSetting = 2,
 	SwapDice = 2,
+	-- One argument: whole hours of vault capacity to buy with Gems. Range is
+	-- checked at the handler against `VaultCatalog.MAX_PURCHASE_HOURS_PER_CALL`;
+	-- this only fixes the SHAPE of the call.
+	BuyVaultHours = 1,
 }
 
 -- Returns the declared arity, or nil if the remote is not declared. A remote

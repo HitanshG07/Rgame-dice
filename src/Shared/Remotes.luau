@@ -23,7 +23,7 @@ export type FunctionName =
 	"Roll" | "Forge" | "SetElement" | "SetShape" | "BuyUpgrade" | "AddDieSlot"
 	| "Ascend" | "BuyDiamondNode" | "SetAutoRoll" | "ClaimVault" | "ClaimQuest"
 	| "ClaimChest" | "DailySpin" | "RedeemCode" | "ClaimGroupReward" | "GetLeaderboard"
-	| "SetSetting" | "SwapDice"
+	| "SetSetting" | "SwapDice" | "BuyVaultHours"
 
 -- Outbound: server fires, client listens. RemoteEvent. Display only.
 export type EventName =
@@ -54,6 +54,7 @@ local FN: { [string]: FunctionName } = {
 	-- FR-1.1. Reorders two of the player's own dice. Carries no economic value:
 	-- the same dice, in a different order.
 	SwapDice = "SwapDice",
+	BuyVaultHours = "BuyVaultHours",
 }
 Remotes.Fn = FN
 

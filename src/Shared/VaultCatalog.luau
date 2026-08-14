@@ -73,6 +73,16 @@ VaultCatalog.GEMS_PER_CAPACITY_HOUR = 5
 -- if the upgrade curve changes, this follows it rather than silently diverging.
 VaultCatalog.MAX_PURCHASED_CAPACITY_SEC = 8 * 3600
 
+-- Ceiling on a SINGLE purchase request, independent of the capacity cap.
+--
+-- The capacity cap already bounds the outcome, so this does not guard the
+-- economy -- it guards the arithmetic. A request of 1e9 hours would compute a
+-- Gems cost of 5e9 before any cap applied, and a non-finite or absurd figure
+-- reaching a currency path is exactly the shape of bug that becomes an exploit
+-- when some later change reorders the checks. Bounding the INPUT keeps every
+-- downstream number small by construction.
+VaultCatalog.MAX_PURCHASE_HOURS_PER_CALL = 24
+
 function VaultCatalog.gemCostForHours(hours: number): number?
 	if type(hours) ~= "number" or hours ~= hours or hours <= 0 then
 		return nil

@@ -1053,6 +1053,17 @@ function V7MenuPanel.new(): V7MenuController
 	claimVaultContainer.Name = "ClaimButton"
 	claimVaultContainer.Parent = vaultBody
 
+	-- BUY CAPACITY WITH GEMS -- the game's only Gems sink (FR-8; operator
+	-- decision 2026-08-13, "5 gems means 1 hour of storage", +8h cap approved).
+	--
+	-- Sits beside CLAIM because the two are the vault's only actions and a player
+	-- who has just collected is exactly the one thinking about holding more.
+	-- Coloured with the Gems accent so the currency is legible before reading.
+	local buyHoursContainer, buyHoursBtn = UITheme.neumorphicButton("+1 HOUR",
+		UITheme.Colors.Gems, UDim2.fromScale(0.44, 0.16), UDim2.fromScale(0.53, 0.54))
+	buyHoursContainer.Name = "BuyHoursButton"
+	buyHoursContainer.Parent = vaultBody
+
 	local vaultStatus = UITheme.label("", UDim2.fromScale(0.94, 0.1), UDim2.fromScale(0.03, 0.73),
 		UITheme.Colors.TextDim)
 	vaultStatus.Name = "ClaimStatus"
@@ -1078,6 +1089,11 @@ function V7MenuPanel.new(): V7MenuController
 		mutate_failed = "Could not save that. Try again.",
 		rate_limited = "Slow down a moment, then try again.",
 		throttled = "Slow down a moment, then try again.",
+		insufficient_gems = "Not enough Gems for another hour.",
+		insufficient_funds = "Not enough Gems for another hour.",
+		at_cap = "Your vault is already at its maximum size.",
+		invalid_hours = "Could not buy that amount.",
+		invalid_request = "Could not buy that amount.",
 	}
 
 	UITheme.onPressed(claimVaultBtn, function()
@@ -1095,6 +1111,26 @@ function V7MenuPanel.new(): V7MenuController
 			-- Re-enabled by the next snapshot's refresh, which also decides whether
 			-- there is anything left to claim.
 			UITheme.setEnabled(claimVaultBtn, true)
+		end)
+	end)
+
+	UITheme.onPressed(buyHoursBtn, function()
+		UITheme.setEnabled(buyHoursBtn, false)
+		task.spawn(function()
+			local result = NetClient.buyVaultHours(1)
+			if result.ok then
+				vaultStatus.Text = "Vault capacity increased by 1 hour."
+				vaultStatus.TextColor3 = UITheme.Colors.Positive
+			else
+				local reason = tostring(result.reason or "insufficient_gems")
+				vaultStatus.Text = VAULT_REFUSAL[reason] or "Could not buy capacity right now."
+				vaultStatus.TextColor3 = UITheme.Colors.Negative
+			end
+			-- RE-ENABLED BY THE NEXT SNAPSHOT, not here. The button's caption and
+			-- enabled state both depend on figures only the server knows (Gems held,
+			-- hours owned, whether the cap is reached), so `refreshVault` owns them
+			-- -- painting an optimistic state here is the L-042 defect.
+			UITheme.setEnabled(buyHoursBtn, true)
 		end)
 	end)
 
@@ -1131,7 +1167,28 @@ function V7MenuPanel.new(): V7MenuController
 			vaultInfo.Text = "Waiting for your vault figures..."
 			vaultTier.Text = ""
 			UITheme.setEnabled(claimVaultBtn, false)
+			UITheme.setEnabled(buyHoursBtn, false)
 			return
+		end
+
+		-- THE GEMS CONTROL, painted from server figures only.
+		--
+		-- Three states, and each says something different: at the cap there is
+		-- nothing to sell, short of Gems the price is still worth showing so the
+		-- player knows what to save for, and otherwise the button carries its own
+		-- cost. The cap and the owned hours both come from the snapshot -- the
+		-- client never decides either (L-042).
+		local ownedHours = tonumber(v.purchasedHours) or 0
+		local maxHours = tonumber(v.maxPurchasedHours) or 0
+		local gems = if type(state) == "table" then tonumber(state.gems) or 0 else 0
+		local hourCost = VaultCatalog.gemCostForHours(1) or 0
+
+		if maxHours > 0 and ownedHours >= maxHours then
+			UITheme.setButtonText(buyHoursBtn, string.format("MAX (+%dh)", math.floor(maxHours)))
+			UITheme.setEnabled(buyHoursBtn, false)
+		else
+			UITheme.setButtonText(buyHoursBtn, string.format("+1 HOUR  %d\u{25C6}", hourCost))
+			UITheme.setEnabled(buyHoursBtn, gems >= hourCost)
 		end
 
 		-- The tier line, from the server's computed efficiency and the
@@ -1170,6 +1227,15 @@ function V7MenuPanel.new(): V7MenuController
 			vaultInfo.Text = string.format(
 				"%s of %s stored, still filling.",
 				formatDuration(claimable), formatDuration(capacity))
+		end
+
+		-- Say what the Gems have already bought, and what the ceiling is. Without
+		-- this the purchase is invisible: capacity goes up but nothing tells the
+		-- player their Gems are the reason, or how much further they can go.
+		if ownedHours > 0 then
+			vaultInfo.Text ..= string.format(
+				"\n\n+%dh of that is Gem-bought, out of a possible +%dh.",
+				math.floor(ownedHours), math.floor(maxHours))
 		end
 
 		UITheme.setEnabled(claimVaultBtn, unclaimed > 0)

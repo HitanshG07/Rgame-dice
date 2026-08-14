@@ -68,6 +68,7 @@ local Shared = ReplicatedStorage:WaitForChild("Shared")
 local UpgradeCatalog = require(Shared:WaitForChild("UpgradeCatalog"))
 local DiceCatalog = require(Shared:WaitForChild("DiceCatalog"))
 local SettingsCatalog = require(Shared:WaitForChild("SettingsCatalog"))
+local VaultCatalog = require(Shared:WaitForChild("VaultCatalog"))
 
 local Server = ServerScriptService:WaitForChild("Server")
 local PlayerProfile = require(Server:WaitForChild("PlayerProfile"))
@@ -478,6 +479,33 @@ RemoteGateway.register("ClaimVault", announcing(function(player: Player, doubled
 	end
 	local ok, claimReason, _ = OfflineService.claimVault(player, doubled)
 	return ok, claimReason
+end))
+
+-- BUY VAULT CAPACITY WITH GEMS (FR-8; operator decision 2026-08-13, "5 gems
+-- means 1 hour of storage", +8h cap approved).
+--
+-- THE GAME'S FIRST AND ONLY GEMS SINK, so it is treated as an economic surface
+-- rather than a UI feature:
+--
+--   * ARITY AND RANGE ARE VALIDATED HERE, at the boundary, before the request
+--     reaches anything that can move currency (F-4A-1). `integerInRange` rejects
+--     a non-integer, a non-finite, and anything outside 1..MAX_PURCHASE_HOURS
+--     -- so no absurd figure can enter the cost arithmetic.
+--   * THE CAP IS ENFORCED SERVER-SIDE, twice, and neither place trusts the
+--     other: `buyVaultHours` refuses past it on write, and `getCapacity` clamps
+--     on read. The panel also shows it, but a client-side cap is a suggestion.
+--   * RATE LIMITED by the gateway's token bucket like every other remote, so a
+--     spend loop cannot be driven faster than a person can press a button.
+--
+-- `announcing` pushes a fresh snapshot on success, so the panel repaints from
+-- server truth rather than predicting the new balance (L-042).
+RemoteGateway.register("BuyVaultHours", announcing(function(player: Player, hours: number)
+	local okRange, reason = RemoteGateway.V.integerInRange(hours, 1, VaultCatalog.MAX_PURCHASE_HOURS_PER_CALL)
+	if not okRange then
+		return false, reason
+	end
+	local ok, buyReason, _ = OfflineService.buyVaultHours(player, hours)
+	return ok, buyReason
 end))
 
 RemoteGateway.register("DailySpin", announcing(function(player: Player)

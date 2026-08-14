@@ -28,6 +28,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Remotes = require(Shared:WaitForChild("Remotes"))
 local MonetisationCatalog = require(Shared:WaitForChild("MonetisationCatalog"))
+local VaultCatalog = require(Shared:WaitForChild("VaultCatalog"))
 
 local PlayerProfile = require(script.Parent:WaitForChild("PlayerProfile"))
 local PurchaseService = require(script.Parent:WaitForChild("PurchaseService"))
@@ -197,6 +198,12 @@ function StateSyncService.buildSnapshot(data: PlayerProfile.Profile, streak: num
 				-- Whether the vault is FULL, so the panel can say "stopped
 				-- earning" rather than leaving the player to compare two numbers.
 				atCapacity = status.claimableSeconds >= status.capacitySeconds,
+				-- GEM-PURCHASED HOURS and the ceiling on them, so the VAULT panel
+				-- can price the next hour and say when there is nothing left to
+				-- buy. Both come from the server: the cap is enforced here (twice
+				-- -- see OfflineService) and the panel only renders it.
+				purchasedHours = data.Vault.PurchasedHours or 0,
+				maxPurchasedHours = VaultCatalog.MAX_PURCHASED_CAPACITY_SEC / 3600,
 			}
 		elseif not okVault then
 			-- A failing provider must not take the whole snapshot down with it --

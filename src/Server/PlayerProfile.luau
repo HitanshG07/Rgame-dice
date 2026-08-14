@@ -72,7 +72,12 @@ export type Profile = {
 		ShapesEquipped: { [string]: boolean },
 	},
 	Upgrades: { [string]: number },
-	Vault: { LastSeen: number, AccrualId: number, AvgIncomePerSec: number },
+	-- `PurchasedHours` is vault capacity bought with GEMS, in whole hours. It is
+	-- the game's only Gems sink. Kept inside `Vault` because it is capacity like
+	-- every other term in that sum, and capped server-side at
+	-- `VaultCatalog.MAX_PURCHASED_CAPACITY_SEC` -- see OfflineService.getCapacity
+	-- for why the cap is the whole anti-pay-to-win property.
+	Vault: { LastSeen: number, AccrualId: number, AvgIncomePerSec: number, PurchasedHours: number },
 	PurchaseIds: { [string]: number },
 	PurchaseOrder: { string },
 	BundleOffered: boolean,
@@ -142,7 +147,7 @@ local TEMPLATE: Profile = {
 	-- (unbuilt) will be the only writer. Declared 2026-08-06 from Gate 3
 	-- finding F-G3-2. Absent-means-off remains the fail-closed default.
 	Upgrades = { AutoRollSpeed = 0, VaultCapacity = 0, VaultEfficiency = 0, Luck = 0, BadRollShield = 0 },
-	Vault = { LastSeen = 0, AccrualId = 0, AvgIncomePerSec = 0 },
+	Vault = { LastSeen = 0, AccrualId = 0, AvgIncomePerSec = 0, PurchasedHours = 0 },
 	PurchaseIds = {},
 	PurchaseOrder = {},
 	BundleOffered = false,

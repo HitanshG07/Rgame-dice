@@ -27,6 +27,7 @@ All remotes live under `ReplicatedStorage.Remotes`, are created by the server, a
 | `BuyDiamondNode` | `nodeId: string` | `ok, reason?` | `nodeId` allowlisted; Diamond cost server-resolved. Includes the Streak Strength tree. |
 | `SetAutoRoll` | `enabled: boolean` | `ok, reason?` | Strict boolean. The **interval** is server-owned and is never a parameter. |
 | `ClaimVault` | `doubled: boolean` | `ok, amount?, reason?` | `doubled=true` requires a validated receipt bound to this accrual id (threat T-24). Claim consumes the vault atomically. |
+| `BuyVaultHours` | `hours: number` | `ok, reason?` | Buys vault capacity with **Gems** — the game's only Gems sink. Integer, `1 ≤ hours ≤ MAX_PURCHASE_HOURS_PER_CALL`. Cost is priced server-side from `VaultCatalog`; **no cost crosses the wire** (NFR-5). Purchased capacity is capped at `MAX_PURCHASED_CAPACITY_SEC` — enforced **twice**, on write in `buyVaultHours` and on read in `getCapacity`, so no stored value can exceed it whatever wrote it. That cap is the anti-pay-to-win property: Gems buy *speed to the ceiling*, never a higher ceiling. |
 | `ClaimQuest` | `questId: string` | `ok, reward?, reason?` | Completion verified against server-tracked progress, never client assertion. |
 | `ClaimChest` | `tierId: string` | `ok, reward?, reason?` | Server-clocked session time only. |
 | `DailySpin` | *(none)* | `ok, outcomeId?, reason?` | Outcome drawn from a server-held weighted table. 24h cooldown on `os.time()`. |

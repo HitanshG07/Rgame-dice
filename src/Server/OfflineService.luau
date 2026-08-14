@@ -74,6 +74,26 @@ function OfflineService.getCapacity(player: Player): number
 	local level = if data ~= nil then (data.Upgrades.VaultCapacity or 0) else 0
 
 	local capacity = BASE_CAPACITY_SEC + (level * UPGRADE_CAPACITY_PER_LEVEL)
+
+	-- GEM-PURCHASED HOURS, AND THE CAP THAT KEEPS THEM FROM BEING PAY-TO-WIN.
+	--
+	-- Gems are buyable with Robux, and vault capacity is an economic advantage,
+	-- so "Gems buy capacity" is pay-to-win by construction unless something stops
+	-- it. That something is this clamp: purchased capacity stops at
+	-- MAX_PURCHASED_CAPACITY_SEC, the same total a maxed Cash upgrade reaches.
+	-- Paying buys SPEED TO THE CAP, never a higher cap.
+	--
+	-- CLAMPED ON READ, not only on purchase. The buy path also refuses past the
+	-- cap, but a clamp there alone would be one bug away from unbounded -- a bad
+	-- migration, a future grant path, or a hand-edited profile would all sail
+	-- past it. Enforcing it here means no stored value can produce more capacity
+	-- than the ceiling allows, whatever wrote it.
+	local purchased = tonumber(data ~= nil and data.Vault.PurchasedHours or 0) or 0
+	if purchased ~= purchased or purchased < 0 then
+		purchased = 0
+	end
+	capacity += math.min(purchased * 3600, VaultCatalog.MAX_PURCHASED_CAPACITY_SEC)
+
 	if hasPremium(player) then
 		capacity += OfflineService.PREMIUM_CAPACITY_BONUS_SEC
 	end
@@ -255,6 +275,84 @@ function OfflineService.claimVault(player: Player, doubled: boolean): (boolean, 
 	end
 
 	return true, nil, payout
+end
+
+-- BUYS VAULT CAPACITY WITH GEMS. The game's only Gems sink (FR-8, operator
+-- decision 2026-08-13: "5 gems means 1 hour of storage", "+8h cap" approved).
+--
+-- Returns (ok, reason, newPurchasedHours).
+--
+-- THE ORDER OF OPERATIONS IS THE WHOLE SAFETY PROPERTY. Every refusal is checked
+-- BEFORE any Gems leave the player, and the capacity is written only after the
+-- debit reports success. A grant that ran before a failed debit would mint
+-- capacity; a debit that ran before a refused grant would burn Gems for nothing.
+-- `EconomyService.debit` refuses rather than going negative, so the failure mode
+-- here is "nothing happened", which is the only acceptable one.
+function OfflineService.buyVaultHours(player: Player, hours: number): (boolean, string?, number)
+	local data = PlayerProfile.get(player)
+	if not data then
+		return false, "no_profile", 0
+	end
+
+	-- Arity and range are validated at the gateway, but this is a currency path
+	-- and must not depend on its caller for that.
+	if type(hours) ~= "number" or hours ~= hours or hours < 1 then
+		return false, "invalid_hours", 0
+	end
+	hours = math.floor(hours)
+	if hours > VaultCatalog.MAX_PURCHASE_HOURS_PER_CALL then
+		return false, "invalid_hours", 0
+	end
+
+	local owned = tonumber(data.Vault.PurchasedHours) or 0
+	if owned ~= owned or owned < 0 then
+		owned = 0
+	end
+	local capHours = VaultCatalog.MAX_PURCHASED_CAPACITY_SEC / 3600
+	if owned >= capHours then
+		return false, "at_cap", owned
+	end
+	-- Trim the request to what is still buyable rather than refusing outright: a
+	-- player two hours short of the cap asking for five should get two, not an
+	-- error they cannot act on.
+	local buyable = math.min(hours, capHours - owned)
+
+	local cost = VaultCatalog.gemCostForHours(buyable)
+	if cost == nil or cost <= 0 then
+		return false, "invalid_hours", owned
+	end
+
+	if not EconomyService.canAfford(player, "Gems", cost) then
+		return false, "insufficient_gems", owned
+	end
+
+	local spent, spendReason = EconomyService.spend(player, "Gems", cost, "vault_hours")
+	if not spent then
+		return false, spendReason or "spend_failed", owned
+	end
+
+	local applied = owned
+	local mutated, mutateReason = PlayerProfile.mutate(player, function(d)
+		local cur = tonumber(d.Vault.PurchasedHours) or 0
+		if cur ~= cur or cur < 0 then
+			cur = 0
+		end
+		-- Clamped again on write. The read path clamps too (see getCapacity), but
+		-- storing a value above the ceiling would still be a lie in the save file.
+		cur = math.min(cur + buyable, capHours)
+		d.Vault.PurchasedHours = cur
+		applied = cur
+	end)
+
+	if not mutated then
+		-- The Gems are already gone and the capacity did not land. Refund rather
+		-- than leave the player short: the debit succeeded, so this is our fault,
+		-- not theirs.
+		EconomyService.credit(player, "Gems", cost, "vault_hours_refund")
+		return false, mutateReason or "mutate_failed", owned
+	end
+
+	return true, nil, applied
 end
 
 function OfflineService.onPlayerRemoving(player: Player): ()
