@@ -1092,6 +1092,7 @@ function V7MenuPanel.new(): V7MenuController
 		insufficient_gems = "Not enough Gems for another hour.",
 		insufficient_funds = "Not enough Gems for another hour.",
 		at_cap = "Your vault is already at its maximum size.",
+		no_benefit = "Your VIP floor already covers more than this would add.",
 		invalid_hours = "Could not buy that amount.",
 		invalid_request = "Could not buy that amount.",
 	}
@@ -1183,8 +1184,20 @@ function V7MenuPanel.new(): V7MenuController
 		local gems = if type(state) == "table" then tonumber(state.gems) or 0 else 0
 		local hourCost = VaultCatalog.gemCostForHours(1) or 0
 
+		-- `buyableHours` is how many more hours would ACTUALLY raise capacity, not
+		-- how many are left under the cap. They differ for a VIP player, whose 24h
+		-- floor already exceeds every other source combined -- see
+		-- OfflineService.effectiveBuyableHours.
+		local buyable = tonumber(v.buyableHours) or 0
+
 		if maxHours > 0 and ownedHours >= maxHours then
 			UITheme.setButtonText(buyHoursBtn, string.format("MAX (+%dh)", math.floor(maxHours)))
+			UITheme.setEnabled(buyHoursBtn, false)
+		elseif buyable <= 0 then
+			-- Nothing to sell. Saying "INCLUDED" rather than greying out an
+			-- unexplained button is the difference between a player thinking the
+			-- game is broken and understanding they already have the benefit.
+			UITheme.setButtonText(buyHoursBtn, "INCLUDED")
 			UITheme.setEnabled(buyHoursBtn, false)
 		else
 			UITheme.setButtonText(buyHoursBtn, string.format("+1 HOUR  %d\u{25C6}", hourCost))
@@ -1229,13 +1242,33 @@ function V7MenuPanel.new(): V7MenuController
 				formatDuration(claimable), formatDuration(capacity))
 		end
 
-		-- Say what the Gems have already bought, and what the ceiling is. Without
-		-- this the purchase is invisible: capacity goes up but nothing tells the
-		-- player their Gems are the reason, or how much further they can go.
+		-- WHAT THE GEMS ACTUALLY BOUGHT -- which is not always what was paid for.
+		--
+		-- This line used to read "+8h of that is Gem-bought" unconditionally, and
+		-- for a VIP player that was FALSE: their 24h floor already exceeds every
+		-- other source combined, so the Gem hours contributed nothing to the
+		-- capacity shown directly above. The operator spotted the contradiction
+		-- immediately -- "how does this work if its still 24hrs".
+		--
+		-- A readout that credits a purchase with an effect it did not have is
+		-- worse than saying nothing, so the two cases now read differently.
 		if ownedHours > 0 then
+			if buyable <= 0 and v.hasVip == true then
+				vaultInfo.Text ..= string.format(
+					"\n\nYour VIP floor of %s already covers more than every other"
+					.. " source combined, so your %dh of Gem-bought capacity is not"
+					.. " adding to it.",
+					formatDuration(VaultCatalog.VIP_CAPACITY_SEC), math.floor(ownedHours))
+			else
+				vaultInfo.Text ..= string.format(
+					"\n\n+%dh of that is Gem-bought, out of a possible +%dh.",
+					math.floor(ownedHours), math.floor(maxHours))
+			end
+		elseif buyable <= 0 and v.hasVip == true then
 			vaultInfo.Text ..= string.format(
-				"\n\n+%dh of that is Gem-bought, out of a possible +%dh.",
-				math.floor(ownedHours), math.floor(maxHours))
+				"\n\nYour VIP floor of %s already covers more than every other"
+				.. " source combined, so extra capacity is not worth buying.",
+				formatDuration(VaultCatalog.VIP_CAPACITY_SEC))
 		end
 
 		UITheme.setEnabled(claimVaultBtn, unclaimed > 0)

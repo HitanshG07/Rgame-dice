@@ -95,6 +95,16 @@ function StateSyncService.setVaultProvider(fn: ((Player) -> any)?): ()
 	vaultProvider = fn
 end
 
+-- How many more Gem-hours would actually raise this player's vault capacity.
+-- Injected for the same reason the vault provider above is (L-035): this module
+-- is imported by nearly everything and must import as little as possible itself.
+-- nil means "unknown", which the panel renders as no offer rather than as zero.
+local buyableHoursProvider: ((Player) -> number)? = nil
+
+function StateSyncService.setBuyableHoursProvider(fn: ((Player) -> number)?): ()
+	buyableHoursProvider = fn
+end
+
 --------------------------------------------------------------------------------
 -- Snapshot construction
 --------------------------------------------------------------------------------
@@ -204,6 +214,11 @@ function StateSyncService.buildSnapshot(data: PlayerProfile.Profile, streak: num
 				-- -- see OfflineService) and the panel only renders it.
 				purchasedHours = data.Vault.PurchasedHours or 0,
 				maxPurchasedHours = VaultCatalog.MAX_PURCHASED_CAPACITY_SEC / 3600,
+				-- How many more Gem-hours would ACTUALLY raise capacity. Zero for a
+				-- VIP player, whose 24h floor already exceeds every other source
+				-- combined -- the panel needs this to stop advertising a purchase
+				-- that would do nothing, and to say why.
+				buyableHours = buyableHoursProvider ~= nil and buyableHoursProvider(player) or 0,
 			}
 		elseif not okVault then
 			-- A failing provider must not take the whole snapshot down with it --

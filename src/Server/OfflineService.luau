@@ -106,6 +106,59 @@ function OfflineService.getCapacity(player: Player): number
 	return capacity
 end
 
+-- HOW MANY MORE GEM-HOURS WOULD ACTUALLY RAISE THIS PLAYER'S CAPACITY.
+--
+-- THE DEFECT THIS EXISTS TO CLOSE (operator-reported 2026-08-15, "how does this
+-- work if its still 24hrs"). VIP sets a 24h FLOOR, and every other source sums
+-- to at most 20h -- base 4 + upgrades 4 + Gems 8 + Premium 4. So for a VIP
+-- player the floor swallows the entire Gem purchase: 0 gem-hours gives 24h and
+-- 8 gem-hours also gives 24h. They were charged 40 Gems for literally nothing,
+-- and the panel then told them "+8h of that is Gem-bought", which was false.
+--
+-- Selling something that provably does nothing is the worst kind of economy bug,
+-- so the buy path refuses it and the panel says why -- rather than taking the
+-- Gems and reporting a benefit that did not exist.
+--
+-- Returns the number of WHOLE HOURS still worth buying: how far the capacity
+-- would have to climb before it clears whatever floor is already in effect, on
+-- top of what has already been bought, bounded by the purchase cap.
+function OfflineService.effectiveBuyableHours(player: Player): number
+	local PurchaseService = require(script.Parent:WaitForChild("PurchaseService"))
+	local data = PlayerProfile.get(player)
+	if not data then
+		return 0
+	end
+
+	local owned = tonumber(data.Vault.PurchasedHours) or 0
+	if owned ~= owned or owned < 0 then
+		owned = 0
+	end
+	local capHours = VaultCatalog.MAX_PURCHASED_CAPACITY_SEC / 3600
+	local remainingByCap = math.max(0, capHours - owned)
+	if remainingByCap <= 0 then
+		return 0
+	end
+
+	-- What the capacity would be with the Gem hours removed. Anything at or
+	-- below a floor that already exceeds that is capacity the player has for
+	-- free, and buying into it changes nothing.
+	local level = data.Upgrades.VaultCapacity or 0
+	local withoutGems = BASE_CAPACITY_SEC + (level * UPGRADE_CAPACITY_PER_LEVEL)
+	if hasPremium(player) then
+		withoutGems += OfflineService.PREMIUM_CAPACITY_BONUS_SEC
+	end
+
+	local floor = 0
+	if PurchaseService.ownsPass(player, "VipVault") then
+		floor = OfflineService.VIP_CAPACITY_SEC
+	end
+
+	-- Hours that would be absorbed before the sum clears the floor.
+	local absorbed = math.max(0, floor - withoutGems) / 3600
+	local useful = remainingByCap - math.max(0, absorbed - owned)
+	return math.max(0, math.floor(useful))
+end
+
 function OfflineService.getEfficiency(player: Player): number
 	local PurchaseService = require(script.Parent:WaitForChild("PurchaseService"))
 	local data = PlayerProfile.get(player)
@@ -311,6 +364,14 @@ function OfflineService.buyVaultHours(player: Player, hours: number): (boolean, 
 	local capHours = VaultCatalog.MAX_PURCHASED_CAPACITY_SEC / 3600
 	if owned >= capHours then
 		return false, "at_cap", owned
+	end
+
+	-- REFUSE A PURCHASE THAT WOULD NOT RAISE CAPACITY. A VIP player's 24h floor
+	-- already exceeds everything else combined, so Gems spent there buy nothing
+	-- -- see `effectiveBuyableHours`. Taking the payment anyway and reporting a
+	-- benefit is the defect the operator caught; refusing is the honest answer.
+	if OfflineService.effectiveBuyableHours(player) <= 0 then
+		return false, "no_benefit", owned
 	end
 	-- Trim the request to what is still buyable rather than refusing outright: a
 	-- player two hours short of the cap asking for five should get two, not an

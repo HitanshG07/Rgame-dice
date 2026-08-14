@@ -112,6 +112,11 @@ PurchaseService.init()
 -- an idle player opens the game, was invisible until the moment it was spent.
 StateSyncService.setVaultProvider(OfflineService.getStatus)
 
+-- How many more Gem-hours would actually help. A VIP player's 24h floor already
+-- exceeds every other capacity source combined, so for them the answer is zero
+-- and the VAULT panel must not offer a purchase that would do nothing.
+StateSyncService.setBuyableHoursProvider(OfflineService.effectiveBuyableHours)
+
 -- THE DICE SOLIDS. Generated ONCE, on the server, into ReplicatedStorage.
 do
 	local ok, err = pcall(function()

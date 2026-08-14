@@ -59,12 +59,20 @@ local DICE_COLORS: { [string]: Color3 } = {
 local TARGET_EXTENT = 6.0
 
 -- The thinnest any part may be after normalisation, as a fraction of
--- TARGET_EXTENT. See the floor in `normaliseScale` for the full account: below
--- roughly one screen pixel a part cannot rasterise stably and shears as the die
--- tumbles. At 0.030 the thinnest geometry lands near 1.3 px on a 30-die board,
--- which is the smallest value that renders cleanly with margin -- and still thin
--- enough that a chamfer reads as a bevel rather than a slab.
-local MIN_THICKNESS_RATIO = 0.030
+-- TARGET_EXTENT. See the floor in `normaliseScale` for the full account.
+--
+-- CALIBRATED AGAINST THE WORST CASE, NOT A TYPICAL ONE. The first value, 0.030,
+-- was measured against a die 26 studs from the camera and gave a comfortable
+-- 1.37 px -- but the camera sits further back than that for dice on the far side
+-- of the felt, and the operator still saw distortion. Re-measured at the FURTHEST
+-- die on a full board (37.7 studs, 0.061 world units per pixel, die scale 0.322)
+-- the same ratio yielded 0.95 px: sub-pixel again, and shearing again.
+--
+-- 0.070 puts the thinnest geometry above 2 px at that worst-case distance, with
+-- margin for a wider viewport. The lesson worth keeping: a pixel threshold has to
+-- be checked at the largest camera distance the scene can produce, because a
+-- measurement taken at the nearest die passes while the far ones still tear.
+local MIN_THICKNESS_RATIO = 0.070
 
 --------------------------------------------------------------------------------
 -- Vector Stroke Numeral System (Bold, High-Legibility Glyph Geometry)
