@@ -1252,8 +1252,16 @@ function V7MenuPanel.new(): V7MenuController
 		--
 		-- A readout that credits a purchase with an effect it did not have is
 		-- worse than saying nothing, so the two cases now read differently.
+		-- `buyable <= 0` has TWO causes and they mean opposite things: the player is
+		-- at the purchase cap (their Gems worked, there is simply no more to buy),
+		-- or a floor is absorbing the purchase (their Gems did nothing). Reading it
+		-- as only the second told a player with a working +8h that it "is not
+		-- adding to it" -- the exact false claim this line was written to remove.
+		-- The cap case is checked first because it is the one that means success.
+		local atPurchaseCap = maxHours > 0 and ownedHours >= maxHours
+
 		if ownedHours > 0 then
-			if buyable <= 0 and v.hasVip == true then
+			if not atPurchaseCap and buyable <= 0 and v.hasVip == true then
 				vaultInfo.Text ..= string.format(
 					"\n\nYour VIP floor of %s already covers more than every other"
 					.. " source combined, so your %dh of Gem-bought capacity is not"

@@ -58,22 +58,6 @@ local DICE_COLORS: { [string]: Color3 } = {
 
 local TARGET_EXTENT = 6.0
 
--- The thinnest any part may be after normalisation, as a fraction of
--- TARGET_EXTENT. See the floor in `normaliseScale` for the full account.
---
--- CALIBRATED AGAINST THE WORST CASE, NOT A TYPICAL ONE. The first value, 0.030,
--- was measured against a die 26 studs from the camera and gave a comfortable
--- 1.37 px -- but the camera sits further back than that for dice on the far side
--- of the felt, and the operator still saw distortion. Re-measured at the FURTHEST
--- die on a full board (37.7 studs, 0.061 world units per pixel, die scale 0.322)
--- the same ratio yielded 0.95 px: sub-pixel again, and shearing again.
---
--- 0.070 puts the thinnest geometry above 2 px at that worst-case distance, with
--- margin for a wider viewport. The lesson worth keeping: a pixel threshold has to
--- be checked at the largest camera distance the scene can produce, because a
--- measurement taken at the nearest die passes while the far ones still tear.
-local MIN_THICKNESS_RATIO = 0.070
-
 --------------------------------------------------------------------------------
 -- Vector Stroke Numeral System (Bold, High-Legibility Glyph Geometry)
 --------------------------------------------------------------------------------
@@ -501,10 +485,6 @@ local function buildChamferedSolid(
 	local normals: { Vector3 } = {}
 	local insets: { { Vector3 } } = {}
 
-	-- Thicknesses passed to the draw helpers below are AUTHORING values only.
-	-- `normaliseScale` rescales the finished solid and then applies a hard
-	-- minimum thickness, so a part cannot end up sub-pixel however thin it was
-	-- drawn here. See the floor in `normaliseScale`.
 	for f = 1, numFaces do
 		local fv = faceIndices[f]
 		local k = #fv
@@ -1072,48 +1052,6 @@ local function normaliseScale(model: Model): ()
 			local offset = d.CFrame.Position - centre
 			d.Size = d.Size * k
 			d.CFrame = (d.CFrame - d.CFrame.Position) + (centre + offset * k)
-		end
-	end
-
-	-- MINIMUM THICKNESS, ENFORCED HERE AND ONLY HERE.
-	--
-	-- Operator-reported 2026-08-14: "the dice are getting distorted while they
-	-- roll". They were -- coins showed as torn slivers mid-tumble. The cause is
-	-- SUB-PIXEL GEOMETRY, not a deformed model: measured on a 30-die board, the
-	-- thinnest chamfer strips rendered 0.07 PIXELS across. Geometry thinner than
-	-- a pixel cannot rasterise stably, so as a die turns those parts flicker,
-	-- shear, and drop out entirely on some frames.
-	--
-	-- WHY THE FLOOR LIVES AT THIS POINT IN THE PIPELINE. Every builder emits its
-	-- own thicknesses -- facet plates, chamfer strips, glyph strokes, pips -- and
-	-- `normaliseScale` then divides the whole solid by a factor that DIFFERS PER
-	-- SHAPE (whatever brings it to TARGET_EXTENT). A literal thickness chosen in
-	-- a builder therefore lands at an unpredictable final size: the same 0.12
-	-- came out at 0.07 px on the D10 and 0.58 on the D8, an eightfold spread. I
-	-- first tried raising the per-builder literals and it did nothing measurable,
-	-- because the parts that were actually too thin were the chamfer strips and
-	-- pips, not the plates I was editing.
-	--
-	-- Applying the floor AFTER the divide is the only place a single rule can
-	-- guarantee the outcome, and it cannot be bypassed by a future builder that
-	-- forgets to pass a thickness.
-	--
-	-- The floor is a fraction of TARGET_EXTENT rather than a stud constant, so it
-	-- tracks the die's rendered size rather than an absolute the camera might
-	-- change. Only the SMALLEST axis is raised -- a part's other two dimensions
-	-- are its real footprint and must not be touched, or plates would inflate
-	-- into blocks.
-	local minThickness = TARGET_EXTENT * MIN_THICKNESS_RATIO
-	for _, d in ipairs(model:GetDescendants()) do
-		if d:IsA("BasePart") and d.Name ~= "Pivot" then
-			local s = d.Size
-			if s.X < minThickness or s.Y < minThickness or s.Z < minThickness then
-				d.Size = Vector3.new(
-					math.max(s.X, minThickness),
-					math.max(s.Y, minThickness),
-					math.max(s.Z, minThickness)
-				)
-			end
 		end
 	end
 end

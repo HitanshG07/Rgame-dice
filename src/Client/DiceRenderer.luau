@@ -77,6 +77,7 @@ local RunService = game:GetService("RunService")
 
 local UITheme = require(script.Parent:WaitForChild("UITheme"))
 local BoardView = require(script.Parent:WaitForChild("BoardView"))
+local DiceCatalog = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("DiceCatalog"))
 
 local DiceRenderer = {}
 
@@ -86,25 +87,39 @@ local DiceRenderer = {}
 
 local DEFAULT_SHAPE = "D6"
 
--- Face counts by shape id. Mirrors DiceCatalog; the renderer needs only the
--- count, never the mass rules, and requiring the catalog here would pull a
--- server-shaped dependency into the view layer for one integer.
+-- Face counts by shape id. An id absent from this table is an UNKNOWN shape and
+-- draws no die rather than a guessed one.
 --
--- An id absent from this table is an UNKNOWN shape and draws no die rather than
--- a guessed one.
-local FACE_COUNTS: { [string]: number } = {
-	D2 = 2,
-	D3 = 3,
-	D4 = 4,
-	D6 = 6,
-	D8 = 8,
-	D10 = 10,
-	D12 = 12,
-	D20 = 20,
-}
+-- DERIVED FROM THE CATALOG, never hand-listed.
+--
+-- THE DEFECT THIS FIXES, and it is L-041 repeating in a second file. This was a
+-- hand-written mirror of eight shapes. The catalog then grew to twelve -- D5, D7,
+-- D14 and D16 were added with the geometry rebuild -- and this table was never
+-- updated. `readShape` returns nil for any id absent here, and a nil shape draws
+-- NO MODEL by design, so a player whose die was one of those four saw an EMPTY
+-- BOARD. Found exactly that way: the die count was set to 1, the server granted
+-- it correctly, no error was logged anywhere, and the scene contained only the
+-- felt.
+--
+-- The mesh builder already fixed this same class of bug by deriving its shape
+-- list from `DiceCatalog.getAllShapes()`; the renderer kept its own copy and
+-- drifted the moment the catalog moved. Requiring the catalog here costs one
+-- import and makes the drift impossible -- which is worth more than the
+-- "server-shaped dependency" the old comment was avoiding, since a face COUNT is
+-- not a server rule.
+local FACE_COUNTS: { [string]: number } = {}
+for _, def in ipairs(DiceCatalog.getAllShapes()) do
+	FACE_COUNTS[def.id] = DiceCatalog.getFaceCount(def.id)
+end
 
 -- Where the generated solids live. The renderer never builds geometry.
 local DICE_SOURCE = "dice_faces"
+
+-- Somewhere no camera looks. Used to hold a die while it is being cloned or
+-- measured, so it is never visible in a pose that belongs to no part of the
+-- animation -- see `measureSitHeight` and the clone in `applyModel` for the two
+-- places that produced exactly that artifact.
+local MEASURE_PARK_Y = -1000
 
 --------------------------------------------------------------------------------
 -- Flight timing.
@@ -385,7 +400,22 @@ end
 -- multiplies rather than eight corner transforms, because this runs once per die
 -- per roll and a D12 carries 132 parts.
 local function measureSitHeight(model: Model, rotation: CFrame): number
-	model:PivotTo(rotation)
+	-- MEASURED FAR BELOW THE FELT, NOT AT THE ORIGIN.
+	--
+	-- This posed the model with `PivotTo(rotation)` -- a rotation carrying NO
+	-- translation, which puts the die at (0,0,0), the centre of the felt, at full
+	-- size. It runs during `beginRoll`, one frame before the flight starts, so the
+	-- die was VISIBLE there for that frame. Together with the un-parked clone this
+	-- produced the "breaking and deforming" the operator reported: measured, 4
+	-- frames per session rendering at the origin and jumps of up to 13.9 studs
+	-- between consecutive frames.
+	--
+	-- Translating the pose off-screen changes nothing about the measurement --
+	-- every part moves with the pivot, so the LOWEST point relative to that pivot
+	-- is identical -- and it removes the only frame in which the die could be seen
+	-- somewhere it does not belong.
+	local probe = CFrame.new(0, MEASURE_PARK_Y, 0) * rotation
+	model:PivotTo(probe)
 
 	local lowest = math.huge
 	for _, d in ipairs(model:GetDescendants()) do
@@ -405,8 +435,10 @@ local function measureSitHeight(model: Model, rotation: CFrame): number
 	if lowest == math.huge or not isFinite(lowest) then
 		return 0
 	end
-	-- The rotation carried no translation, so the pivot is at the origin and the
-	-- lowest surface's depth below it IS the height the pivot must sit at.
+	-- The pose was translated to MEASURE_PARK_Y, so subtract it to get the depth
+	-- RELATIVE TO THE PIVOT -- which is the height the pivot must sit at when the
+	-- die rests on a floor at y = 0.
+	lowest -= MEASURE_PARK_Y
 	return -lowest
 end
 
@@ -515,6 +547,29 @@ local function applyModel(visual: DieVisual, shapeId: string?): ()
 		end
 	end
 
+	-- PARKED OFF-SCREEN BEFORE IT IS PARENTED, and this is not defensive tidying.
+	--
+	-- Operator-reported 2026-08-15 as dice "breaking and deforming and then
+	-- falling", with screenshots of coins appearing as fragments mid-flight.
+	-- Sampling a die's pivot every frame through a roll found two discontinuities
+	-- of ~11 studs, and printing the positions showed exactly what they were:
+	--
+	--     t=0.050  pos=(-2.44, 0.37,  7.08)   <- at rest
+	--     t=0.118  pos=( 0.00, 0.00,  0.00)   <- ONE FRAME AT THE ORIGIN
+	--     t=0.183  pos=( 4.72, 5.88,-10.87)   <- throw start
+	--
+	-- A freshly cloned model sits at whatever CFrame it was authored at -- the
+	-- origin -- and `Parent` makes it visible IMMEDIATELY. The frame step does not
+	-- run until the next frame, so for exactly one frame the die renders at the
+	-- centre of the felt, at full size, in a pose belonging to no part of the
+	-- animation. Two of those per roll, and at speed they read as the die tearing
+	-- apart rather than as a position glitch.
+	--
+	-- Positioning BEFORE parenting closes the window entirely: the model is never
+	-- visible anywhere it should not be. Far below the felt rather than at the
+	-- rest point, because the rest point is not known yet at clone time and a
+	-- wrong-but-plausible position is harder to spot than an obviously absent one.
+	clone:PivotTo(CFrame.new(0, MEASURE_PARK_Y, 0))
 	clone.Parent = BoardView.getScene()
 	visual.model = clone
 	visual.sourceRadius = measureRadius(clone)

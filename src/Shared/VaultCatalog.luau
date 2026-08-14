@@ -47,7 +47,30 @@ VaultCatalog.MAX_EFFICIENCY = 1.0
 VaultCatalog.BASE_CAPACITY_SEC = 4 * 3600
 VaultCatalog.UPGRADE_CAPACITY_PER_LEVEL_SEC = 2880 -- +0.8h
 VaultCatalog.PREMIUM_CAPACITY_BONUS_SEC = 4 * 3600
-VaultCatalog.VIP_CAPACITY_SEC = 24 * 3600
+-- VIP's capacity FLOOR. Operator decision 2026-08-15, option 1 of two: lower the
+-- floor below the stackable maximum rather than convert VIP into a flat bonus.
+--
+-- IT WAS 24h, AND THAT MADE THE GEMS SINK POINTLESS. Every other source combined
+-- reaches 20h -- base 4 + Cash upgrades 4 + Gems 8 + Premium 4 -- so a 24h floor
+-- swallowed all of it: a VIP player measured 24h with zero Gem-hours and 24h with
+-- eight. They were charged 40 Gems for nothing, which the operator caught
+-- immediately ("how does this work if its still 24hrs").
+--
+-- THE THRESHOLD IS ARITHMETIC, NOT TASTE, and 16h -- my first attempt -- was
+-- still wrong. A floor only leaves room for Gems if it sits BELOW what the
+-- worst-case VIP player reaches without it: base 4h + Gems 8h = 12h. At 16h and
+-- at 12h the Gems still add exactly nothing; the fix has to clear 12, not merely
+-- come down from 24. Solved rather than guessed a third time:
+--
+--     floor 16h -> VIP alone 16h, with 8 Gem-hours 16h, Gems add +0h
+--     floor 12h -> VIP alone 12h, with 8 Gem-hours 12h, Gems add +0h
+--     floor 10h -> VIP alone 10h, with 8 Gem-hours 12h, Gems add +2h
+--
+-- 10h keeps VIP a strong opening position -- two and a half times base, and more
+-- than a fully Cash-upgraded player without Premium reaches -- while leaving
+-- genuine headroom that only Gems and Premium can fill. Both the pass and the
+-- sink stay worth buying, which is the whole point.
+VaultCatalog.VIP_CAPACITY_SEC = 10 * 3600
 
 --------------------------------------------------------------------------------
 -- GEMS FOR CAPACITY (operator-directed 2026-08-13, "5 gems means 1 hour").
@@ -129,8 +152,13 @@ function VaultCatalog.describeTier(efficiency: number, hasVip: boolean, hasPremi
 	-- the VIP bonus is noise, and noise is what makes small print unread.
 	local upsell: { string } = {}
 	if not hasVip then
-		table.insert(upsell, string.format("VIP Vault +%d%% and 24h",
-			math.floor(VaultCatalog.VIP_EFFICIENCY_BONUS * 100 + 0.5)))
+		-- DERIVED, not the literal "24h" this used to say. That string was already
+		-- a second copy of `VIP_CAPACITY_SEC`, and the moment the floor moved to
+		-- 16h it would have been advertising a capacity the pass does not grant
+		-- (L-025). One declaration, read by both sides.
+		table.insert(upsell, string.format("VIP Vault +%d%% and %dh",
+			math.floor(VaultCatalog.VIP_EFFICIENCY_BONUS * 100 + 0.5),
+			math.floor(VaultCatalog.VIP_CAPACITY_SEC / 3600)))
 	end
 	if not hasPremium then
 		table.insert(upsell, string.format("Roblox Premium +%d%% and +%dh",
