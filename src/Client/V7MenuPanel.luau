@@ -814,7 +814,7 @@ function V7MenuPanel.new(): V7MenuController
 				-- with the authoritative figures; this only removes the window in
 				-- which the screen contradicts itself.
 				local ok, err = pcall(refreshAscend, {
-					runCash = 0,
+					cash = 0,
 					ascensions = (tonumber(lastAscensions) or 0) + 1,
 				})
 				if not ok then
@@ -830,11 +830,20 @@ function V7MenuPanel.new(): V7MenuController
 	end)
 
 	refreshAscend = function(state: any)
-		-- RUN cash, not lifetime. This read `lifetimeCash`, which never resets --
-		-- so the panel told a player "Earned $1.09M this run" when they had earned
-		-- nothing of the sort this run, and the projected reward only ever grew
-		-- (operator-reported 2026-08-13).
-		local lifetime = if type(state) == "table" then tonumber(state.runCash) or 0 else 0
+		-- CASH ON HAND -- the same figure the HUD's cash readout shows.
+		--
+		-- This read `lifetimeCash` first, which never resets, so the panel told a
+		-- player "Earned $1.09M this run" when they had earned nothing of the sort
+		-- and the projected reward only ever grew. It then read `runCash`, a
+		-- separate per-run counter, which was correct but produced two internally
+		-- valid figures a player could not reconcile: the HUD said $558K while this
+		-- panel said $40K (operator-reported 2026-08-13).
+		--
+		-- Reading `cash` means the panel and the HUD are the SAME number by
+		-- construction. Ascension sets cash to zero, so this reads $0 immediately
+		-- afterwards, which is what the operator wanted and what makes the two
+		-- impossible to contradict.
+		local lifetime = if type(state) == "table" then tonumber(state.cash) or 0 else 0
 		local ascensions = if type(state) == "table" then tonumber(state.ascensions) or 0 else 0
 		lastAscensions = ascensions
 		local projected = DiceCatalog.ascensionDiamonds(lifetime)

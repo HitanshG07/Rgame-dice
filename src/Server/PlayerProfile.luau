@@ -61,10 +61,6 @@ export type Profile = {
 	SchemaVersion: number,
 	Cash: number, Gems: number, Diamonds: number,
 	LifetimeCash: number, HighestRoll: number, Ascensions: number, TotalRolls: number,
-	-- Cash earned since the LAST ascension. `LifetimeCash` is all-time and never
-	-- resets (the NetWorth leaderboard ranks on it); this is what the ascension
-	-- reward is actually computed from.
-	RunCash: number,
 	Dice: { Die },
 	DieSlots: number,
 	-- How much of the +2 Die Slots pass entitlement has already been turned into
@@ -98,7 +94,6 @@ local TEMPLATE: Profile = {
 	SchemaVersion = 2,
 	Cash = 0, Gems = 0, Diamonds = 0,
 	LifetimeCash = 0, HighestRoll = 0, Ascensions = 0, TotalRolls = 0,
-	RunCash = 0,
 	-- A NEW PLAYER STARTS ON THE D2 (operator-directed 2026-08-11). Shapes unlock
 	-- along the ladder in `DiceCatalog.UNLOCK_ORDER`; see that file's header for
 	-- why an ordered unlock does not make shapes a power tier.
@@ -351,17 +346,17 @@ function PlayerProfile._reconcile(raw: any): Profile
 		data.Diamond.ShapesEquipped = deepCopy(TEMPLATE.Diamond.ShapesEquipped)
 	end
 
-	-- RUN CASH BACKFILL. Added 2026-08-13, so every existing profile has none.
+	-- `RunCash` WAS BACKFILLED HERE, and the field has been deleted.
 	--
-	-- Seeded from CURRENT CASH rather than from `LifetimeCash`, and the
-	-- difference matters: lifetime includes everything already spent and already
-	-- converted into past ascensions, so seeding from it would hand returning
-	-- players an enormous unearned reward on their very next prestige. Current
-	-- cash is the most generous figure that is defensibly "this run", and it can
-	-- only ever under-credit.
-	if type(data.RunCash) ~= "number" or data.RunCash ~= data.RunCash or data.RunCash < 0 then
-		data.RunCash = math.max(0, tonumber(data.Cash) or 0)
-	end
+	-- It was a per-run earnings counter introduced 2026-08-13 to price ascension,
+	-- and retired the same day in favour of reading cash on hand (operator
+	-- decision -- `AscensionService.canAscend` carries the reasoning).
+	--
+	-- NO MIGRATION IS NEEDED ON REMOVAL, which is the whole reason this is safe to
+	-- delete rather than deprecate: nothing reads the field, `fill` only ADDS keys
+	-- the template has, and a stale `RunCash` sitting on an already-saved profile
+	-- is inert. It costs a few bytes until that profile is next written and then
+	-- stops existing.
 
 	-- A SHAPE ON A DIE HAS, BY DEFINITION, BEEN EQUIPPED.
 	--

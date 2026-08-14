@@ -34,11 +34,24 @@ function AscensionService.canAscend(player: Player): (boolean, number)
 	if not data then
 		return false, 0
 	end
-	-- RUN cash, not lifetime. `LifetimeCash` never resets -- it is what the
-	-- NetWorth leaderboard ranks on -- so reading it here meant a player
+	-- CASH ON HAND. Not `LifetimeCash`, which never resets -- it is what the
+	-- NetWorth leaderboard ranks on, so reading it here meant a player
 	-- permanently qualified after their first ascension and the reward was
 	-- computed from earnings they had already spent.
-	local diamonds = AscensionService.calculateDiamonds(data.RunCash or 0)
+	--
+	-- Nor `RunCash`, a separate "earned this run" counter that used to live here
+	-- and has been deleted. Operator decision 2026-08-13: "holding -- because
+	-- after ascension I'm holding 0 so it would anyways be showing 0 in the
+	-- ascension tab as well". The reasoning is the whole argument for it:
+	-- ascension sets `Cash = 0`, so the HUD and the ASCEND panel read the same
+	-- number immediately afterwards and can never disagree again. Two internally
+	-- correct figures a player cannot reconcile is worse than one.
+	--
+	-- THE TRADEOFF, STATED: spending Cash on upgrades now pushes ascension
+	-- further away, because the threshold measures what you HOLD rather than what
+	-- you earned. That makes upgrade-vs-prestige a real decision, and it is the
+	-- price of the two numbers always agreeing.
+	local diamonds = AscensionService.calculateDiamonds(data.Cash or 0)
 	return diamonds > 0, diamonds
 end
 
@@ -53,10 +66,11 @@ function AscensionService.ascend(player: Player): (boolean, string?, number)
 		d.Gems = 0
 		d.Diamonds += diamondsEarned
 		d.Ascensions += 1
-		-- THE RUN IS OVER. Without this the next ascension would be priced against
-		-- earnings already converted into Diamonds -- each prestige paying out for
-		-- the same cash again. `LifetimeCash` is deliberately untouched.
-		d.RunCash = 0
+		-- `d.Cash = 0` above IS the run reset now. A separate `RunCash` counter
+		-- used to be zeroed here as well; it has been deleted, because the
+		-- threshold reads cash on hand and that is already back to zero.
+		-- `LifetimeCash` is deliberately untouched -- the NetWorth leaderboard
+		-- ranks on it and it must survive prestige.
 
 		-- Reset Cash upgrades only
 		d.Upgrades.AutoRollSpeed = 0

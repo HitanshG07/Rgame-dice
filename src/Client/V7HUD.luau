@@ -489,6 +489,9 @@ function V7HUD.new(): V7HUDController
 		riskIcon = riskIcon,
 		riskValue = riskValue,
 		payoutLabel = payoutLabel,
+		-- The in-flight payout flash, so a new payout can cancel it rather than
+		-- letting two tweens fight over the same label's Position.
+		payoutTween = nil,
 		autoBtn = autoBtn,
 		autoEnabled = false,
 		rollBtn = rollBtn,
@@ -551,8 +554,99 @@ end
 -- A one-shot payout flash where the mock "+$14.8M" used to sit permanently.
 -- Rises and fades over the streak text, then hides -- so the strip's resting
 -- state is always the live readout, never a stale payout from three rolls ago.
-function V7HUD:flashPayout(_payout: number, _voidHit: boolean)
-	return
+-- How long a payout flash lives, and how far it rises. Short: at the auto-roll
+-- ceiling of 1.6 rolls/sec a longer flash would still be on screen when the next
+-- one starts, and two overlapping numbers are less readable than one.
+local PAYOUT_FLASH_SEC = 0.62
+local PAYOUT_RISE = 0.30
+
+-- A payout, shown rising out of the cash figure it just changed.
+--
+-- THIS WAS A NO-OP FOR THE WHOLE OF THE V7 BUILD. It floated over the BOARD
+-- first, printing on top of the dice it was reporting; once thirty dice could
+-- roll at once several payouts a second stacked into an unreadable pile. It was
+-- then moved onto the streak strip, where it covered the MULT/STREAK/RISK chips
+-- -- and at that point it was stubbed out rather than fixed (L-044), so the
+-- feature has shown nothing since. See the label's construction for why the cash
+-- readout is the right home for it.
+--
+-- SINGLE-FLIGHT, NOT POOLED. Only one flash can be in the air at a time, and a
+-- new payout restarts it rather than queueing. At auto-roll speed a queue would
+-- drift steadily behind the actual balance and start reporting stale numbers --
+-- and a payout that arrives while the last is still rising is exactly the case
+-- where the player wants the LATEST figure, not both.
+--
+-- TWEENED, NOT STEPPED. This is a fire-and-forget one-shot with no per-frame
+-- state to advance, so it needs no RenderStepped connection and no teardown
+-- beyond cancelling the tweens -- which `shutdown` already gets for free by
+-- destroying the ScreenGui the label lives in.
+function V7HUD:flashPayout(payout: number, voidHit: boolean)
+	local label = self.payoutLabel
+	if label == nil or label.Parent == nil then
+		return
+	end
+
+	-- A non-finite payout is a contract violation upstream. `formatNumber`
+	-- renders it honestly rather than inventing a plausible zero, but there is
+	-- nothing to celebrate, so it is shown without the rise.
+	local finite = type(payout) == "number" and payout == payout
+		and payout ~= math.huge and payout ~= -math.huge
+
+	local text: string
+	local colour: Color3
+	if not finite then
+		text = Format.formatNumber(payout)
+		colour = UITheme.Colors.Negative
+	elseif payout > 0 then
+		text = "+$" .. Format.formatNumber(payout)
+		colour = UITheme.Colors.Cash
+	elseif payout < 0 then
+		-- `formatNumber` already carries the minus sign. A debit must read as
+		-- one; telling a player "0" while their balance dropped is a false
+		-- receipt.
+		text = "$" .. Format.formatNumber(payout)
+		colour = UITheme.Colors.Negative
+	elseif voidHit then
+		text = "VOID"
+		colour = UITheme.Colors.VoidFace
+	else
+		-- A genuine zero with no void. Nothing happened worth animating.
+		return
+	end
+
+	-- Cancel whatever is still in the air before restarting.
+	local previous = self.payoutTween
+	if previous ~= nil then
+		previous:Cancel()
+	end
+
+	label.Text = text
+	label.TextColor3 = colour
+	label.TextTransparency = 0
+	label.Position = UDim2.fromScale(0.25, 0.30)
+	label.Visible = true
+
+	local tween = TweenService:Create(
+		label,
+		TweenInfo.new(PAYOUT_FLASH_SEC, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+		{
+			Position = UDim2.fromScale(0.25, 0.30 - PAYOUT_RISE),
+			TextTransparency = 1,
+		}
+	)
+	self.payoutTween = tween
+
+	-- Hidden on completion as well as faded. A fully transparent label still
+	-- occupies its slot for hit-testing and still renders; leaving it visible
+	-- would also mean the next flash briefly shows the previous figure at full
+	-- opacity before the new text is assigned.
+	tween.Completed:Connect(function(state: Enum.PlaybackState)
+		if state == Enum.PlaybackState.Completed then
+			label.Visible = false
+		end
+	end)
+
+	tween:Play()
 end
 
 function V7HUD:onMenuClicked(callback: (menuId: string) -> ())

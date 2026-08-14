@@ -31,15 +31,23 @@ local function run(): (boolean, string?, number)
 	local fakeData = PlayerProfile._reconcile({})
 	
 	-- Pre-ascension setup
-	fakeData.Cash = 50000000000 -- Give enough cash to ascend (threshold varies, typically 10B+ depending on rules)
 	fakeData.LifetimeCash = 50000000000
-	-- THE REWARD IS PRICED ON RUN CASH, not lifetime (2026-08-13). `LifetimeCash`
-	-- is all-time and never resets -- it is what the NetWorth leaderboard ranks
-	-- on -- so reading it meant a player permanently qualified after their first
-	-- ascension and was paid again for earnings already converted to Diamonds.
-	-- Setting only LifetimeCash here now correctly yields NO reward, which is how
-	-- this fixture caught the change.
-	fakeData.RunCash = 50000000000
+	-- THE REWARD IS PRICED ON CASH ON HAND (2026-08-13, operator decision).
+	--
+	-- NOT `LifetimeCash`: that is all-time and never resets -- the NetWorth
+	-- leaderboard ranks on it -- so reading it meant a player permanently
+	-- qualified after their first ascension and was paid again for earnings
+	-- already converted to Diamonds.
+	--
+	-- NOT `RunCash` either: that intermediate per-run counter existed for one day
+	-- and has been deleted. It was correct but produced two internally valid
+	-- figures the player could not reconcile -- the HUD showing holdings and the
+	-- ASCEND panel showing earnings. Cash on hand is what the HUD already shows,
+	-- so the two cannot disagree.
+	--
+	-- Setting only LifetimeCash here therefore yields NO reward, which is how this
+	-- fixture catches a regression back to the all-time figure.
+	fakeData.Cash = 50000000000
 	fakeData.Gems = 500
 	fakeData.Diamonds = 10
 	fakeData.Ascensions = 1
@@ -108,15 +116,29 @@ local function run(): (boolean, string?, number)
 		e = e or check(postData.Ascensions == 2, "Ascensions MUST be incremented (was 1, now 2)")
 		e = e or check(postData.LifetimeCash == 50000000000, "LifetimeCash MUST be preserved")
 
-		-- RUN CASH IS CONSUMED. Without this the next ascension would be priced
-		-- against earnings already converted into Diamonds -- each prestige
-		-- paying out for the same cash over and over.
-		e = e or check(postData.RunCash == 0,
-			"RunCash MUST reset on ascension, or the same earnings pay out again")
+		-- CASH ON HAND IS CONSUMED, and it is what prices the NEXT ascension.
+		-- Without this reset the next prestige would be priced against earnings
+		-- already converted into Diamonds -- paying out for the same cash again.
+		-- (`Cash == 0` is asserted above as a wipe; this states WHY it also matters
+		-- for the reward, so a future author does not weaken one and keep the
+		-- other.)
+		e = e or check(postData.Cash == 0,
+			"Cash MUST reset on ascension -- it is the ascension threshold, so"
+			.. " leaving it would pay out for the same earnings again")
 
-		-- And the two must be distinguishable: lifetime survives, run does not.
-		e = e or check(postData.LifetimeCash > postData.RunCash,
-			"LifetimeCash and RunCash must be separate figures after an ascension")
+		-- The two figures must remain distinguishable: all-time survives, holdings
+		-- do not. This is what catches a regression to pricing on `LifetimeCash`.
+		e = e or check(postData.LifetimeCash > postData.Cash,
+			"LifetimeCash MUST survive ascension while Cash resets -- they are"
+			.. " different figures and only one of them prices the reward")
+
+		-- THE FIELD IS GONE, not merely unused. `RunCash` existed for one day as an
+		-- intermediate per-run counter and was removed when the threshold moved to
+		-- cash on hand. Asserting its absence stops it being quietly reintroduced
+		-- as a third cash figure alongside the two above.
+		e = e or check((postData :: any).RunCash == nil,
+			"RunCash MUST NOT exist -- the ascension threshold reads Cash on hand,"
+			.. " and a third cash figure is what made the HUD and panel disagree")
 		
 		e = e or check(postData.Diamond.Elements["Fire"] == true, "Diamond Tree Elements MUST be preserved")
 		e = e or check(postData.Diamond.Shapes["D8"] == true, "Diamond Tree Shapes MUST be preserved")

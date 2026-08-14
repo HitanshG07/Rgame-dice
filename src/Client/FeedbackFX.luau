@@ -291,7 +291,13 @@ end
 -- Presenting a payout
 --------------------------------------------------------------------------------
 
-local function present(payout: number, voidHit: boolean): ()
+-- CURRENTLY UNSUBSCRIBED. `init` no longer routes `onRollResult` here -- see the
+-- note there for why the board-anchored payout was retired in favour of the HUD
+-- cash flash. Exposed on the module rather than left as an unreferenced local so
+-- the pool, `acquire`, `magnitude` and the spark geometry all stay reachable and
+-- analysable, instead of becoming a block of dead code the type checker stops
+-- reading. Nothing calls it today.
+function FeedbackFX._presentForTesting(payout: number, voidHit: boolean): ()
 	if #pool == 0 then
 		return
 	end
@@ -561,18 +567,31 @@ function FeedbackFX.init(net: any): ()
 		})
 	end))
 
-	-- Already credited by the time this arrives (FR-2.6). This is a receipt,
-	-- not a transaction.
-	table.insert(connections, net.onRollResult(function(result: any)
-		if type(result) ~= "table" then
-			return
-		end
-		local payout = result.payout
-		if type(payout) ~= "number" then
-			return
-		end
-		present(payout, result.voidHit == true)
-	end))
+	-- THE BOARD-ANCHORED PAYOUT TEXT IS RETIRED. This used to subscribe to
+	-- `onRollResult` and float "+$37.90K" up from the middle of the tray.
+	--
+	-- It printed on top of the dice it was reporting, and it scaled with the win
+	-- -- up to a third of the screen -- so a jackpot covered the board. Once
+	-- thirty dice could roll at once, several payouts a second stacked into an
+	-- unreadable pile over the whole arena. Observed exactly that way in a
+	-- screenshot after the HUD flash was wired up and BOTH were firing at once.
+	--
+	-- The payout now rises out of the cash readout instead
+	-- (`V7HUD:flashPayout`), which is where a player looks to see their cash and
+	-- where it cannot collide with anything. FR-2.8 is satisfied there: the
+	-- figure still appears at the moment of credit.
+	--
+	-- The sparks went with it, and that is not a loss worth reversing: they were
+	-- children of the payout label and travelled with it, so keeping them would
+	-- have meant keeping the thing that was covering the board. The dice
+	-- themselves are the board's animation now.
+	--
+	-- `present`, the pool, and the spark geometry remain in this file and are now
+	-- unreferenced by any subscription. They are deliberately NOT deleted in this
+	-- pass: the module still owns the settings plumbing (`applySettings`,
+	-- `particlesOn`, `motionBlurOn`) that other surfaces read, and gutting the
+	-- file while wiring a new effect is how a working toggle gets removed by
+	-- accident. Removing the dead pool is its own small change.
 
 	table.insert(connections, RunService.RenderStepped:Connect(step))
 

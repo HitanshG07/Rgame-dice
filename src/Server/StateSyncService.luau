@@ -294,9 +294,10 @@ function StateSyncService.buildSnapshot(data: PlayerProfile.Profile, streak: num
 		-- Stats the HUD and the Statistics panel read. Present here rather than
 		-- in a second event because they change on the same cadence.
 		lifetimeCash = data.LifetimeCash,
-		-- Earned since the last ascension. The ASCEND panel shows progress toward
-		-- the threshold from this, not from `lifetimeCash`, which never resets.
-		runCash = data.RunCash or 0,
+		-- `runCash` WAS SENT HERE and is gone. The ASCEND panel now shows progress
+		-- toward the threshold from `cash`, which this snapshot already carries and
+		-- which the HUD already displays -- so the two can never disagree, which is
+		-- exactly why the operator chose it. Not `lifetimeCash`, which never resets.
 		highestRoll = data.HighestRoll,
 		ascensions = data.Ascensions,
 		totalRolls = data.TotalRolls,
