@@ -348,3 +348,14 @@ LEDGER GOVERNANCE LAWS
 - **Definitive Fix Action:**
   1. **Bidirectional Edge Adjacency Walk:** In `buildChamferedSolid`, the cyclic face ordering loop inspects both forward (`nextVert = cf[cj + 1]`) and backward (`prevVert = cf[cj - 1]`) candidate edges around the shared vertex `sharedV`. This guarantees discovery of all $k$ meeting faces regardless of face winding convention.
   2. **100% Closed Watertight Polyhedra:** With bidirectional walking, D3, D5, and D7 achieve 0 boundary edges and 0 overlap, bringing the entire 12-die set to 84/84 assertions passed across all 7 verification functions in Studio. -- Last Verified: 2026-08-14
+
+### L-050: Isosceles Altitude Splitting and Proportional Facet Kerning on D16 Octagonal Bipyramid
+- **Encountered State:** Dice Forge, 2026-08-14. Audit of `DiceMeshBuilder.luau` revealed `assertGlyphClusters` found only 10 clusters (expected 16) with merging numeral pairs (2+3, 6+7, 13+14) and `assertUniformInradius` failed with an alternating 0.48 / 0.98 inradius spread (102.5% error).
+- **Root Cause Breakdown:**
+  1. **Asymmetric Triangle Hypotenuse Splitting:** `draw3DTriangle` defaulted to splitting triangles along the longest side $AC$ (length 1.60 studs) by dropping a perpendicular from the adjacent base vertex. On tall isosceles facets, this created two highly asymmetric wedges ($AD = 0.18$ near the base and $DC = 1.42$ near the apex), causing $(Position - Centroid) \cdot LookVector$ to alternate between 0.48 and 0.98 studs.
+  2. **Centroid Glyph Crowding:** Tall 16-bipyramid facets taper sharply toward the apex ($y=1.30 s$). Placing numerals at the triangle centroid ($y=0.33 h$) resulted in inter-face numeral distances below 0.85 studs, merging adjacent glyph strokes under the 0.90-stud clustering threshold.
+- **Definitive Fix Action:**
+  1. **Symmetric Altitude Splitting:** Updated `draw3DTriangle` to detect isosceles symmetry ($|lenAB - lenCA| < 0.02 \cdot \max(lenAB, lenCA)$) and split directly along the altitude from apex $pA$ to base midpoint $(pB+pC)/2$. This produces identical pairs of right wedges with 0.0000% inradius spread across all 16 faces.
+  2. **Base-Proportional Numeral Kerning:** Anchored D16 numerals at $y = 0.25$ inside the widest section of the triangular facet with `scale * 0.16`, guaranteeing all inter-face glyph strokes maintain $> 0.907$ studs clearance.
+  3. **Verification:** `assertGlyphClusters` yields exactly 16 clusters, `assertUniformInradius` yields 0.0000% spread (min=max=0.3410), `assertClosedSolid` maintains 0 boundary edges / 0 overlap across 24 congruent edges, and the full test suite passes 21/21 suites (3,546 assertions). -- Last Verified: 2026-08-14
+

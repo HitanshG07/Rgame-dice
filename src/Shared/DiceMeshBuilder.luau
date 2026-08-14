@@ -143,6 +143,68 @@ local function draw3DTriangle(
 	local lenAB = (pB - pA).Magnitude
 	local lenBC = (pC - pB).Magnitude
 	local lenCA = (pA - pC).Magnitude
+
+	-- Check for isosceles / symmetric triangle where pA is the apex (lenAB == lenCA)
+	if math.abs(lenAB - lenCA) < 0.02 * math.max(lenAB, lenCA) and lenBC <= lenAB then
+		local baseMid = (pB + pC) / 2
+		local heightVec = pA - baseMid
+		local height = heightVec.Magnitude
+		if height < 0.0001 then return {} end
+		local dirHeight = heightVec.Unit
+
+		local baseVec = pC - pB
+		local baseLen = baseVec.Magnitude
+		if baseLen < 0.0001 then return {} end
+		local dirBase = baseVec.Unit
+		local halfBase = baseLen / 2
+
+		local faceCenter = (pA + pB + pC) / 3
+		local rawNormal = baseVec:Cross(heightVec).Unit
+		local normal = if rawNormal:Dot(faceCenter) < 0 then -rawNormal else rawNormal
+
+		local createdWedges: { WedgePart } = {}
+
+		-- Wedge 1: towards pB
+		local w1 = Instance.new("WedgePart")
+		w1.Name = if isChamfer then "ChamferWedge" else "FacetWedge"
+		w1.Anchored = true
+		w1.CanCollide = false
+		w1.CanQuery = false
+		w1.CanTouch = false
+		w1.CastShadow = false
+		w1.Material = Enum.Material.SmoothPlastic
+		w1.Color = color
+		w1.Size = Vector3.new(t, height, halfBase)
+		local up1 = dirHeight
+		local back1 = dirBase
+		local right1 = up1:Cross(back1).Unit
+		local pos1 = baseMid - dirBase * (halfBase / 2) + dirHeight * (height / 2) - normal * (t / 2)
+		w1.CFrame = CFrame.fromMatrix(pos1, right1, up1, back1)
+		w1.Parent = parent
+		table.insert(createdWedges, w1)
+
+		-- Wedge 2: towards pC
+		local w2 = Instance.new("WedgePart")
+		w2.Name = if isChamfer then "ChamferWedge" else "FacetWedge"
+		w2.Anchored = true
+		w2.CanCollide = false
+		w2.CanQuery = false
+		w2.CanTouch = false
+		w2.CastShadow = false
+		w2.Material = Enum.Material.SmoothPlastic
+		w2.Color = color
+		w2.Size = Vector3.new(t, height, halfBase)
+		local up2 = dirHeight
+		local back2 = -dirBase
+		local right2 = up2:Cross(back2).Unit
+		local pos2 = baseMid + dirBase * (halfBase / 2) + dirHeight * (height / 2) - normal * (t / 2)
+		w2.CFrame = CFrame.fromMatrix(pos2, right2, up2, back2)
+		w2.Parent = parent
+		table.insert(createdWedges, w2)
+
+		return createdWedges
+	end
+
 	if lenAB >= lenBC and lenAB >= lenCA then
 		pA, pB, pC = pB, pC, pA
 	elseif lenBC >= lenAB and lenBC >= lenCA then
@@ -857,8 +919,9 @@ end
 -- 11. D16 Octagonal Bipyramid [FIXED]
 local function buildD16(scale: number, color: Color3): Model
 	local s = scale
-	local topApex = Vector3.new(0, s * 1.25, 0)
-	local botApex = Vector3.new(0, -s * 1.25, 0)
+	local h = s * 1.30
+	local topApex = Vector3.new(0, h, 0)
+	local botApex = Vector3.new(0, -h, 0)
 	local ring: { Vector3 } = {}
 	for i = 1, 8 do
 		local angle = (i - 1) * (math.pi * 2 / 8)
@@ -879,19 +942,24 @@ local function buildD16(scale: number, color: Color3): Model
 	end
 
 	local model, centroids, normals = buildChamferedSolid("D16", verts, faces, color, 0.08)
+	local baseRatio = 0.25
 	for i = 1, 8 do
-		local c = centroids[i]
+		local nxt = if i == 8 then 1 else i + 1
+		local baseMid = (ring[i] + ring[nxt]) / 2
+		local c = baseMid * (1 - baseRatio) + topApex * baseRatio
 		local n = normals[i]
 		local tempUp = (topApex - c).Unit
 		local up = (tempUp - n * tempUp:Dot(n)).Unit
-		addEngravedFaceNumeral(c, n, tostring(i), model, scale * 0.70, up)
+		addEngravedFaceNumeral(c, n, tostring(i), model, scale * 0.40, up)
 	end
 	for i = 1, 8 do
-		local c = centroids[8 + i]
+		local nxt = if i == 8 then 1 else i + 1
+		local baseMid = (ring[i] + ring[nxt]) / 2
+		local c = baseMid * (1 - baseRatio) + botApex * baseRatio
 		local n = normals[8 + i]
 		local tempUp = (botApex - c).Unit
 		local up = (tempUp - n * tempUp:Dot(n)).Unit
-		addEngravedFaceNumeral(c, n, tostring(i + 8), model, scale * 0.70, up)
+		addEngravedFaceNumeral(c, n, tostring(i + 8), model, scale * 0.40, up)
 	end
 	return model
 end
