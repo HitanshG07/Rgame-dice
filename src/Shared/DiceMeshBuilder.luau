@@ -950,7 +950,7 @@ local function buildD16(scale: number, color: Color3): Model
 		local n = normals[i]
 		local tempUp = (topApex - c).Unit
 		local up = (tempUp - n * tempUp:Dot(n)).Unit
-		addEngravedFaceNumeral(c, n, tostring(i), model, scale * 0.40, up)
+		addEngravedFaceNumeral(c, n, tostring(i), model, scale * 0.95, up)
 	end
 	for i = 1, 8 do
 		local nxt = if i == 8 then 1 else i + 1
@@ -959,7 +959,7 @@ local function buildD16(scale: number, color: Color3): Model
 		local n = normals[8 + i]
 		local tempUp = (botApex - c).Unit
 		local up = (tempUp - n * tempUp:Dot(n)).Unit
-		addEngravedFaceNumeral(c, n, tostring(i + 8), model, scale * 0.40, up)
+		addEngravedFaceNumeral(c, n, tostring(i + 8), model, scale * 0.95, up)
 	end
 	return model
 end
