@@ -1,5 +1,12 @@
 # HANDOFF 4 — Economy corrections, tuning, and the animation rebuild
 
+> **SUPERSEDED BY `docs/handoff-5.md` (2026-08-15).** Its §6 queue is stale:
+> every item on it — the payout flash, the ascension threshold, and the Gems
+> vault sink — has since landed. Read handoff-5 for the current state and queue.
+> This document is kept for the reasoning behind the animation rebuild, the
+> Forge tab adaptivity, and the UI-quality complaint recorded in §0c, which all
+> still stand.
+
 **Date:** 2026-08-13
 **Head:** `9be3737` · 21 suites, 3,546 assertions, 0 failing · tree clean
 
