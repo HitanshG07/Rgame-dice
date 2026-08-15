@@ -1291,9 +1291,17 @@ local function step(delta: number): ()
 			-- have placed the bar several studs below the felt.
 			local anchor = position - Vector3.new(0, slot.visual.sitHeight + 0.5, 0)
 			local at, inFront = project(vp, cam, anchor)
-			bar.Visible = inFront
 			if inFront then
+				-- POSITION FIRST, THEN REVEAL. Assigning `Visible` before
+				-- `Position` showed the bar for one frame wherever it happened to
+				-- be -- the overlay's top-left for a fresh bar, or the previous
+				-- die's spot for a recycled one (L-052).
+				--
+				-- The two assignments are ONE operation and must not be separated.
 				bar.Position = at
+				bar.Visible = true
+			else
+				bar.Visible = false
 			end
 		else
 			bar.Visible = false
