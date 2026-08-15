@@ -182,6 +182,144 @@ local function run(): (boolean, string?, number)
 		e = e or check(type(t.button) == "function", "UITheme must expose the button builder")
 		e = e or check(t.BorderThickness == 1, "FR-13.1 specifies a 1-pixel border")
 
+		------------------------------------------------------------------------
+		-- THE LAYOUT PRIMITIVES.
+		--
+		-- These exist because hand-placed scale coordinates were overlapping:
+		-- the SHAPES card drew its status label from x 0.44 to 0.66 while its
+		-- action button began at x 0.585, so "OWNED" printed through "USE".
+		-- Panels are now built from layout containers instead, which cannot
+		-- overlap by construction.
+		--
+		-- ASSERTED HERE BECAUSE NOTHING ELSE CAN SEE THEM. `new()` needs a
+		-- LocalPlayer and this suite runs server-side, so the entire
+		-- CONSTRUCTION phase of every panel is out of reach (L-036). What is
+		-- reachable is whether the symbols the panels call actually exist --
+		-- which is exactly the failure mode where a renamed builder takes out
+		-- every overlay at once and the suite stays green.
+		------------------------------------------------------------------------
+
+		for _, fn in ipairs({ "verticalStack", "card", "listRow", "textLine",
+			"paragraph", "actionButton", "statusPill", "setPill",
+			"setActionEnabled", "arbitratesChildren" }) do
+			e = e or check(type((t :: any)[fn]) == "function",
+				string.format("UITheme must expose the %s layout primitive", fn))
+		end
+
+		------------------------------------------------------------------------
+		-- THE OVERLAP RULE, exercised on synthetic containers.
+		--
+		-- The property that matters is "no two siblings in a card intersect",
+		-- and it CANNOT be measured here: constructing a panel needs a
+		-- LocalPlayer and this suite runs server-side, so there is no
+		-- AbsoluteSize to compare (L-036). Asserting it anyway would be a green
+		-- check for a property nobody tested, which is the trap L-051 was
+		-- written about.
+		--
+		-- What IS checkable is the rule the panels were rebuilt to satisfy:
+		-- overlap is impossible when a container arbitrates its children with a
+		-- layout, and possible exactly when siblings are hand-placed. These
+		-- cases pin `arbitratesChildren` against known-good and known-bad
+		-- shapes, so the helper the panels rely on cannot silently invert.
+		------------------------------------------------------------------------
+
+		if type((t :: any).arbitratesChildren) == "function" then
+			local arbitrates = (t :: any).arbitratesChildren
+
+			-- KNOWN-BAD: two hand-placed siblings. This is the exact shape the
+			-- shapes card had, with a status label and a button whose
+			-- rectangles overlapped by 7.5% of the panel width.
+			local bad = Instance.new("Frame")
+			local badA = Instance.new("TextLabel")
+			badA.Parent = bad
+			local badB = Instance.new("TextButton")
+			badB.Parent = bad
+			e = e or check(arbitrates(bad) == false,
+				"arbitratesChildren must REJECT two hand-placed siblings")
+
+			-- KNOWN-GOOD: the same two children under a layout.
+			local good = Instance.new("Frame")
+			local layout = Instance.new("UIListLayout")
+			layout.Parent = good
+			local goodA = Instance.new("TextLabel")
+			goodA.Parent = good
+			local goodB = Instance.new("TextButton")
+			goodB.Parent = good
+			e = e or check(arbitrates(good) == true,
+				"arbitratesChildren must ACCEPT siblings under a UIListLayout")
+
+			-- KNOWN-GOOD: a single child needs no layout to be unambiguous.
+			local single = Instance.new("Frame")
+			local only = Instance.new("Frame")
+			only.Parent = single
+			e = e or check(arbitrates(single) == true,
+				"arbitratesChildren must ACCEPT a container with one child")
+
+			-- KNOWN-GOOD: decorations are not positioned content. A card carries
+			-- a UICorner, a UIStroke and a UIPadding beside its one content
+			-- frame, and counting those as siblings would flag every card.
+			-- Written as named locals rather than parenthesised expressions. A
+			-- statement beginning with `(` after a line ending in an identifier
+			-- parses as a CALL on that identifier -- `decorated(...)` here -- and
+			-- the whole file then fails to compile, taking every assertion in it
+			-- with it, silently. A leading `;` prevents that, which is why two of
+			-- these lines had one; the first did not, and one missing semicolon
+			-- would have disabled this entire suite.
+			local decorated = Instance.new("Frame")
+			local body = Instance.new("Frame")
+			body.Parent = decorated
+			local deco1 = Instance.new("UICorner")
+			deco1.Parent = decorated
+			local deco2 = Instance.new("UIStroke")
+			deco2.Parent = decorated
+			local deco3 = Instance.new("UIPadding")
+			deco3.Parent = decorated
+			e = e or check(arbitrates(decorated) == true,
+				"arbitratesChildren must not count UICorner/UIStroke/UIPadding as content")
+
+			bad:Destroy()
+			good:Destroy()
+			single:Destroy()
+			decorated:Destroy()
+		else
+			e = e or check(false, "UITheme must expose arbitratesChildren")
+		end
+
+		-- THE SCALE IS THE ANTI-MAGIC-NUMBER CONTROL. Every gap, radius and type
+		-- size comes from here, so a panel inventing its own 0.545 has somewhere
+		-- to be corrected TO.
+		e = e or check(type(t.Scale) == "table", "UITheme must expose a Scale table")
+		if type(t.Scale) == "table" then
+			local s = t.Scale :: any
+			-- 44px is the platform touch-target floor and does not scale with
+			-- build tier (ui_ux_design skill S3). Asserted as a NUMBER and a
+			-- MINIMUM rather than an equality, so raising it stays legal and
+			-- lowering it below the accessibility floor does not.
+			e = e or check(type(s.TouchTarget) == "number" and s.TouchTarget >= 44,
+				"UITheme.Scale.TouchTarget must be at least the 44px touch floor")
+
+			-- The spacing ladder must be ASCENDING, which is the property that
+			-- makes it a scale rather than six unrelated numbers.
+			local ladder = { s.XS, s.SM, s.MD, s.LG, s.XL, s.XXL }
+			local ascending = true
+			for i = 2, #ladder do
+				if type(ladder[i]) ~= "number" or ladder[i] <= ladder[i - 1] then
+					ascending = false
+					break
+				end
+			end
+			e = e or check(ascending,
+				"UITheme.Scale spacing steps must ascend strictly (XS < SM < ... < XXL)")
+
+			-- Likewise the type ladder, descending from title to small print. A
+			-- body size at or above the heading size is a hierarchy inversion.
+			e = e or check(
+				type(s.TextTitle) == "number" and type(s.TextSmall) == "number"
+				and s.TextTitle > s.TextHeading and s.TextHeading > s.TextBody
+				and s.TextBody > s.TextSmall,
+				"UITheme.Scale type sizes must descend: Title > Heading > Body > Small")
+		end
+
 		-- Every element in the catalog needs a tint, or a face renders untinted
 		-- with no error to notice. This is the check that keeps the palette and
 		-- the catalog from drifting apart.
@@ -195,6 +333,106 @@ local function run(): (boolean, string?, number)
 		e = e or check(#untinted == 0, string.format(
 			"elements with no UITheme tint: %s", table.concat(untinted, ", ")))
 	end
+
+	----------------------------------------------------------------------------
+	-- NO EMOJI IN THE INTERFACE.
+	--
+	-- Nine of the nine overlay titles opened with one -- a shopping trolley, a
+	-- die, a trophy, an hourglass -- and the operator's verdict on the result
+	-- was that it looked "as if it was made by an ai, and not a proper
+	-- developer". They are also a RENDERING hazard independent of taste: an
+	-- emoji is a font-dependent glyph, so it renders as colour art on one
+	-- platform, monochrome line art on another, and a tofu box wherever the
+	-- font lacks it. Every icon in this game is drawn geometry for that reason.
+	--
+	-- CHECKED ON THE SOURCE rather than on constructed instances, because the
+	-- panels cannot be constructed here (no LocalPlayer). Scanning bytes catches
+	-- it wherever it appears -- a title, a button caption, a status string --
+	-- rather than only in the places a test thought to look.
+	--
+	-- TWO RANGES, because the offenders spanned both. Five were 4-byte sequences
+	-- in the emoji planes (trolley, die, trophy, scroll, galaxy) and five were
+	-- 3-byte symbols (gear, hourglass, high voltage) -- so a check for only the
+	-- 4-byte lead would have passed a panel still headed by a gear.
+	--
+	-- Deliberately NOT flagged: the multiplication sign, the minus sign and the
+	-- diamond suit, all used on purpose as typography. They fall outside both
+	-- ranges, which is the property that makes this a usable rule rather than a
+	-- ban on every non-ASCII character.
+	--
+	-- VALIDATED BOTH WAYS BEFORE BEING TRUSTED (L-051): run against commit
+	-- a8faa6a it reports THREE offending files -- V7MenuPanel:64, V7ForgePanel:67
+	-- and V7HUD:223 -- and against the current tree it reports none.
+	--
+	-- THREE FILES, NOT TEN SITES, and the difference is the point: `findPictograph`
+	-- returns on the FIRST match, so it names one line per file however many that
+	-- file contains. The count is a file count. An earlier version of this comment
+	-- claimed ten offenders, which is the number of emoji that were in the tree
+	-- and not a number this code can ever print -- a validation note describing
+	-- what was fixed rather than what the check reports. That is the same shape of
+	-- error as the metric it guards against, so it is corrected rather than
+	-- quietly dropped. A metric that cannot tell
+	-- a known-bad build from a known-good one is not evidence.
+	----------------------------------------------------------------------------
+
+	local function findPictograph(src: string): number?
+		local i = 1
+		local len = #src
+		while i <= len do
+			local c = string.byte(src, i)
+			if c == nil then
+				break
+			end
+			if c >= 240 and c <= 244 then
+				-- 4-byte: the supplementary planes, where the emoji live.
+				return i
+			elseif c == 226 and i + 2 <= len then
+				-- 3-byte starting E2: misc symbols, dingbats, arrows.
+				local b1 = string.byte(src, i + 1) or 0
+				local b2 = string.byte(src, i + 2) or 0
+				local cp = 0x2000 + (b1 % 64) * 64 + (b2 % 64)
+
+				-- THE CARD SUITS ARE TYPOGRAPHY AND ARE ALLOWED. U+2666 BLACK
+				-- DIAMOND SUIT is the Diamonds currency mark and sits INSIDE the
+				-- misc-symbols block below, so it has to be excused explicitly
+				-- rather than by relying on where it falls.
+				--
+				-- It is currently written as a `\u{2666}` escape, whose bytes are
+				-- plain ASCII and would never reach this scan at all -- which is
+				-- exactly why the exclusion is stated here. A rule that passes
+				-- only because of how a character happened to be typed is a trap
+				-- for whoever next writes the glyph literally.
+				local isSuit = cp >= 0x2660 and cp <= 0x2667
+
+				if not isSuit and ((cp >= 0x2600 and cp <= 0x27BF)
+					or (cp >= 0x2B00 and cp <= 0x2BFF)
+					or (cp >= 0x23E9 and cp <= 0x23FA)) then
+					return i
+				end
+				i += 2
+			end
+			i += 1
+		end
+		return nil
+	end
+
+	local emojiOffenders: { string } = {}
+	for _, name in ipairs(VIEW_MODULES) do
+		local instance = clientRoot:FindFirstChild(name)
+		if instance ~= nil and instance:IsA("LuaSourceContainer") then
+			local at = findPictograph(instance.Source)
+			if at ~= nil then
+				-- Report the LINE, so the offender is addressable rather than
+				-- merely reported as present (L-037).
+				local _, line = string.gsub(string.sub(instance.Source, 1, at), "\n", "")
+				table.insert(emojiOffenders,
+					string.format("%s:%d", name, line + 1))
+			end
+		end
+	end
+	e = e or check(#emojiOffenders == 0, string.format(
+		"emoji in client UI source (icons must be drawn geometry, not font glyphs): %s",
+		table.concat(emojiOffenders, ", ")))
 
 	----------------------------------------------------------------------------
 	-- IT LOADS. The single most valuable assertion in this file.

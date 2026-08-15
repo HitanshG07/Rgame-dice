@@ -220,8 +220,70 @@ function V7HUD.new(): V7HUDController
 	-- a gear is conventionally found. Deliberately OUTSIDE `topBarBody`, whose
 	-- UIListLayout would have folded it into the currency row and squeezed the
 	-- three balances.
-	local gearWrapper, gearBtn = UITheme.neumorphicButton("⚙", UITheme.Colors.TextDim,
+	-- THE GLYPH IS DRAWN, NOT TYPED.
+	--
+	-- It was the character U+2699 GEAR, which is a font-dependent symbol: it
+	-- renders as a filled cog on one platform, an outlined one on another, and a
+	-- tofu box wherever the font lacks it -- and Roblox's own fonts do not carry
+	-- it consistently. Every other icon in this game is geometry for the same
+	-- reason. Three concentric frames read as a gear at this size and render
+	-- identically everywhere.
+	local gearWrapper, gearBtn = UITheme.neumorphicButton("", UITheme.Colors.TextDim,
 		UDim2.fromScale(0.045, 0.08), UDim2.fromScale(0.815, 0.02))
+
+	-- The 44px touch floor comes from `neumorphicButton` itself, so this control
+	-- and the eight menu buttons and the AUTO toggle all clear it without each
+	-- carrying its own constraint.
+
+	do
+		local ring = Instance.new("Frame")
+		ring.Name = "GearRing"
+		ring.AnchorPoint = Vector2.new(0.5, 0.5)
+		ring.Position = UDim2.fromScale(0.5, 0.5)
+		ring.Size = UDim2.fromScale(0.52, 0.52)
+		ring.BackgroundTransparency = 1
+		ring.ZIndex = 6
+		ring.Parent = gearBtn
+
+		local ringCorner = Instance.new("UICorner")
+		ringCorner.CornerRadius = UDim.new(1, 0)
+		ringCorner.Parent = ring
+
+		local ringStroke = Instance.new("UIStroke")
+		ringStroke.Color = UITheme.Colors.TextDim
+		ringStroke.Thickness = 3
+		ringStroke.Parent = ring
+
+		-- The hub. A gear reads as a gear because of the hole in the middle.
+		local hub = Instance.new("Frame")
+		hub.Name = "GearHub"
+		hub.AnchorPoint = Vector2.new(0.5, 0.5)
+		hub.Position = UDim2.fromScale(0.5, 0.5)
+		hub.Size = UDim2.fromScale(0.34, 0.34)
+		hub.BackgroundColor3 = UITheme.Colors.BaseCream
+		hub.BorderSizePixel = 0
+		hub.ZIndex = 7
+		hub.Parent = ring
+
+		local hubCorner = Instance.new("UICorner")
+		hubCorner.CornerRadius = UDim.new(1, 0)
+		hubCorner.Parent = hub
+
+		-- Four teeth on the diagonals. Rotation is a property, so these cost
+		-- nothing to place and never depend on a font.
+		for i = 0, 3 do
+			local tooth = Instance.new("Frame")
+			tooth.Name = "GearTooth" .. tostring(i)
+			tooth.AnchorPoint = Vector2.new(0.5, 0.5)
+			tooth.Position = UDim2.fromScale(0.5, 0.5)
+			tooth.Size = UDim2.fromScale(1.24, 0.26)
+			tooth.Rotation = i * 45
+			tooth.BackgroundColor3 = UITheme.Colors.TextDim
+			tooth.BorderSizePixel = 0
+			tooth.ZIndex = 5
+			tooth.Parent = ring
+		end
+	end
 	-- NAMED. Every other pod in this GUI is an anonymous "Frame", which makes
 	-- them indistinguishable by path -- and a control that cannot be addressed by
 	-- path cannot be driven by a test or an automated click.

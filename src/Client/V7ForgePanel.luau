@@ -64,7 +64,7 @@ function V7ForgePanel.new(): V7ForgeController
 	screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 	screenGui.DisplayOrder = UITheme.Layer.Overlay
 
-	local overlayFrame, bodyFrame = UITheme.overlay("🔨 THE FORGE")
+	local overlayFrame, bodyFrame = UITheme.overlay("Forge")
 	overlayFrame.Parent = screenGui
 	screenGui.Parent = playerGui
 
@@ -245,7 +245,18 @@ function V7ForgePanel.new(): V7ForgeController
 
 	-- The face list. Rows are created up to the largest shape and hidden when the
 	-- current die has fewer, so switching shape never rebuilds Instances.
-	local listHolder = Instance.new("Frame")
+	-- IT SCROLLS, because twenty faces have never fitted.
+	--
+	-- This was a plain Frame at 66% of the panel height with no clipping and no
+	-- scrolling, holding up to twenty rows. At 1080p that is roughly 570px of
+	-- frame for up to 1150px of rows: a D20's later faces rendered straight
+	-- THROUGH the cost label and the action bar below, and there was no way to
+	-- reach them. Raising the row height to fit the 44px controls would have made
+	-- a real defect slightly worse, which is what surfaced it.
+	--
+	-- A ScrollingFrame with an automatic canvas fixes the class rather than the
+	-- symptom: any face count fits, and adding a row later cannot reintroduce it.
+	local listHolder = Instance.new("ScrollingFrame")
 	-- Named so the face rows beneath it are reachable by path. An anonymous rung
 	-- anywhere in a chain makes the whole chain ambiguous (L-037) -- the rows and
 	-- their buttons were named, but this frame between them and the body was not,
@@ -254,6 +265,15 @@ function V7ForgePanel.new(): V7ForgeController
 	listHolder.Size = UDim2.fromScale(0.96, 0.66)
 	listHolder.Position = UDim2.fromScale(0.02, 0.18)
 	listHolder.BackgroundTransparency = 1
+	listHolder.BorderSizePixel = 0
+	listHolder.AutomaticCanvasSize = Enum.AutomaticSize.Y
+	listHolder.CanvasSize = UDim2.fromScale(0, 0)
+	listHolder.ScrollingDirection = Enum.ScrollingDirection.Y
+	listHolder.ScrollBarThickness = 6
+	listHolder.ScrollBarImageColor3 = UITheme.Colors.ShadowLight
+	listHolder.ScrollBarImageTransparency = 0.4
+	listHolder.ElasticBehavior = Enum.ElasticBehavior.WhenScrollable
+	listHolder.ClipsDescendants = true
 	listHolder.Parent = bodyFrame
 
 	local listLayout = Instance.new("UIListLayout")
@@ -319,47 +339,69 @@ function V7ForgePanel.new(): V7ForgeController
 		refresh()
 	end
 
+	-- ONE COLUMN RULER FOR EVERY FACE ROW.
+	--
+	-- The four readouts were placed at x 0.02 / 0.13 / 0.31 / 0.40 with widths
+	-- 0.10 / 0.16 / 0.16 / 0.14 -- so mass ended at 0.29 and probability began at
+	-- 0.31, a two-point gutter that closes entirely once a value grows a digit.
+	-- Declaring the columns once, in pixels, is what makes the grid a grid: every
+	-- row aligns with every other row because they share these numbers rather
+	-- than each carrying their own copy (L-025).
+	local COL_FACE = 46
+	local COL_MASS = 74
+	local COL_PROB = 74
+	local COL_PAY = 84
+
 	for i = 1, MAX_FACES do
-		local row = UITheme.panel(UDim2.fromScale(1, 0), UDim2.fromScale(0, 0))
+		local row, textCol, actions = UITheme.listRow(52)
 		row.Name = "FaceRow" .. tostring(i)
-		row.Size = UDim2.new(1, 0, 0, 46)
 		row.LayoutOrder = i
 		row.Visible = false
 		row.Parent = listHolder
 
-		local faceLbl = UITheme.label("", UDim2.fromScale(0.10, 0.6), UDim2.fromScale(0.02, 0.2),
-			UITheme.Colors.TextGold)
-		faceLbl.TextScaled = true
-		faceLbl.Parent = row
+		-- The readouts live in the text column as a HORIZONTAL strip of their own,
+		-- so they stay left while the controls stay right and neither can drift
+		-- into the other.
+		local readoutStrip = Instance.new("Frame")
+		readoutStrip.Name = "Readouts"
+		readoutStrip.Size = UDim2.fromScale(1, 1)
+		readoutStrip.BackgroundTransparency = 1
+		readoutStrip.Parent = textCol
 
-		local massLbl = UITheme.label("", UDim2.fromScale(0.16, 0.6), UDim2.fromScale(0.13, 0.2),
-			UITheme.Colors.TextPrimary)
-		massLbl.TextScaled = true
-		massLbl.Parent = row
+		local stripLayout = Instance.new("UIListLayout")
+		stripLayout.FillDirection = Enum.FillDirection.Horizontal
+		stripLayout.SortOrder = Enum.SortOrder.LayoutOrder
+		stripLayout.VerticalAlignment = Enum.VerticalAlignment.Center
+		stripLayout.Padding = UDim.new(0, UITheme.Scale.XS)
+		stripLayout.Parent = readoutStrip
 
+		local function readout(width: number, colour: Color3, order: number): TextLabel
+			local lbl = UITheme.textLine("", UITheme.Scale.TextBody, colour, UITheme.FontMono)
+			lbl.Size = UDim2.new(0, width, 1, 0)
+			lbl.LayoutOrder = order
+			lbl.Parent = readoutStrip
+			return lbl
+		end
+
+		local faceLbl = readout(COL_FACE, UITheme.Colors.TextGold, 1)
+		faceLbl.Font = UITheme.FontHeading
+		local massLbl = readout(COL_MASS, UITheme.Colors.TextPrimary, 2)
 		-- Landing probability. THE COUNTER-INTUITIVE NUMBER, shown next to the
 		-- mass it contradicts, because that adjacency is the whole lesson.
-		local probLbl = UITheme.label("", UDim2.fromScale(0.16, 0.6), UDim2.fromScale(0.31, 0.2),
-			UITheme.Colors.Gems)
-		probLbl.TextScaled = true
-		probLbl.Parent = row
-
-		local payLbl = UITheme.label("", UDim2.fromScale(0.14, 0.6), UDim2.fromScale(0.40, 0.2),
-			UITheme.Colors.Cash)
-		payLbl.TextScaled = true
-		payLbl.Parent = row
+		local probLbl = readout(COL_PROB, UITheme.Colors.Gems, 3)
+		local payLbl = readout(COL_PAY, UITheme.Colors.Cash, 4)
 
 		-- ELEMENT CHIP (FR-4.1). Cycles through the elements the player has
 		-- unlocked. A CYCLE rather than a dropdown because there are five options
 		-- and a dropdown inside a scrolling list is a layering problem nobody
 		-- needs; one tap advances, and the current element is always visible.
-		local elemC, elemB = UITheme.neumorphicButton("-", UITheme.Colors.Multiplier,
-			UDim2.fromScale(0.17, 0.66), UDim2.fromScale(0.50, 0.17))
+		local elemB = UITheme.actionButton("-", "secondary", UITheme.Colors.Multiplier)
 		-- NAMED, like every other control (L-037). These were anonymous, so all
 		-- three buttons on all twenty face rows shared one instance path and none
 		-- of them could be addressed by a test or a click driver.
-		elemC.Name = "Element"
-		elemC.Parent = row
+		elemB.Name = "Element"
+		elemB.LayoutOrder = 1
+		elemB.Parent = actions
 		UITheme.onPressed(elemB, function()
 			local current = faceElements[i] or "None"
 			-- Advance to the next UNLOCKED element, wrapping. If nothing else is
@@ -378,14 +420,18 @@ function V7ForgePanel.new(): V7ForgeController
 			end
 		end)
 
-		local minusC, minusB = UITheme.neumorphicButton("-", UITheme.Colors.Negative,
-			UDim2.fromScale(0.10, 0.66), UDim2.fromScale(0.70, 0.17))
-		minusC.Name = "Minus"
-		minusC.Parent = row
-		local plusC, plusB = UITheme.neumorphicButton("+", UITheme.Colors.Positive,
-			UDim2.fromScale(0.10, 0.66), UDim2.fromScale(0.83, 0.17))
-		plusC.Name = "Plus"
-		plusC.Parent = row
+		-- A MINUS SIGN, not a hyphen. U+2212 is the same width as the plus it sits
+		-- beside; a hyphen is narrower and sits lower, so the pair looked
+		-- misaligned in every row of the panel.
+		local minusB = UITheme.actionButton("\u{2212}", "secondary", UITheme.Colors.Negative)
+		minusB.Name = "Minus"
+		minusB.LayoutOrder = 2
+		minusB.Parent = actions
+
+		local plusB = UITheme.actionButton("+", "secondary", UITheme.Colors.Positive)
+		plusB.Name = "Plus"
+		plusB.LayoutOrder = 3
+		plusB.Parent = actions
 
 		UITheme.onPressed(minusB, function()
 			adjust(i, -STEP)
@@ -400,6 +446,27 @@ function V7ForgePanel.new(): V7ForgeController
 		})
 	end
 
+	-- THE ACTION BAR.
+	--
+	-- The four controls below were placed at x 0.02 / 0.29 / 0.46 / 0.63 with
+	-- widths 0.24 / 0.15 / 0.15 / 0.21 -- four fractions and four widths, none of
+	-- which relate to each other, and all of which have to be re-derived by hand
+	-- whenever a caption changes length. A right-aligned bar sizes each button to
+	-- its own caption and spaces them uniformly.
+	local actionBar = Instance.new("Frame")
+	actionBar.Name = "ActionBar"
+	actionBar.Size = UDim2.new(0.96, 0, 0, UITheme.Scale.TouchTarget)
+	actionBar.Position = UDim2.new(0.02, 0, 0.875, 0)
+	actionBar.BackgroundTransparency = 1
+	actionBar.Parent = bodyFrame
+
+	local barLayout = Instance.new("UIListLayout")
+	barLayout.FillDirection = Enum.FillDirection.Horizontal
+	barLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	barLayout.VerticalAlignment = Enum.VerticalAlignment.Center
+	barLayout.Padding = UDim.new(0, UITheme.Scale.SM)
+	barLayout.Parent = actionBar
+
 	local costLbl = UITheme.label("", UDim2.fromScale(0.5, 0.045), UDim2.fromScale(0.02, 0.825),
 		UITheme.Colors.TextDim)
 	costLbl.TextScaled = true
@@ -412,18 +479,19 @@ function V7ForgePanel.new(): V7ForgeController
 	-- Priced and validated entirely server-side through the existing
 	-- `BuyUpgrade` path -- the client names the upgrade and shows the result, and
 	-- never computes an entitlement.
-	local buyMassC, buyMassBtn = UITheme.neumorphicButton("+ MASS", UITheme.Colors.Positive,
-		UDim2.fromScale(0.24, 0.07), UDim2.fromScale(0.02, 0.875))
-	buyMassC.Parent = bodyFrame
+	local buyMassBtn = UITheme.actionButton("Buy mass", "secondary", UITheme.Colors.Positive)
+	buyMassBtn.Name = "BuyMass"
+	buyMassBtn.LayoutOrder = 1
+	buyMassBtn.Parent = actionBar
 	UITheme.onPressed(buyMassBtn, function()
-		UITheme.setEnabled(buyMassBtn, false)
+		UITheme.setActionEnabled(buyMassBtn, false)
 		task.spawn(function()
 			local ok, reason = NetClient.buyUpgrade("MassBudget")
 			if not ok then
-				UITheme.setButtonText(buyMassBtn, string.upper(tostring(reason or "NO")))
+				buyMassBtn.Text = tostring(reason or "Refused")
 				task.wait(1.2)
 			end
-			UITheme.setButtonText(buyMassBtn, "+ MASS")
+			buyMassBtn.Text = "Buy mass"
 			refresh()
 		end)
 	end)
@@ -436,9 +504,10 @@ function V7ForgePanel.new(): V7ForgeController
 	-- forged and still costs Cash. It is the "start over from neutral" button,
 	-- useful because rebuilding a flat spread by hand from a concentrated die is
 	-- a lot of taps.
-	local evenC, evenBtn = UITheme.neumorphicButton("EVEN", UITheme.Colors.Gems,
-		UDim2.fromScale(0.15, 0.07), UDim2.fromScale(0.29, 0.875))
-	evenC.Parent = bodyFrame
+	local evenBtn = UITheme.actionButton("Even", "secondary", UITheme.Colors.Gems)
+	evenBtn.Name = "Even"
+	evenBtn.LayoutOrder = 2
+	evenBtn.Parent = actionBar
 	UITheme.onPressed(evenBtn, function()
 		local count = #draft
 		if count == 0 then
@@ -452,13 +521,18 @@ function V7ForgePanel.new(): V7ForgeController
 		refresh()
 	end)
 
-	local resetC, resetBtn = UITheme.neumorphicButton("RESET", UITheme.Colors.TextDim,
-		UDim2.fromScale(0.15, 0.07), UDim2.fromScale(0.46, 0.875))
-	resetC.Parent = bodyFrame
+	local resetBtn = UITheme.actionButton("Reset", "quiet", UITheme.Colors.TextDim)
+	resetBtn.Name = "Reset"
+	resetBtn.LayoutOrder = 3
+	resetBtn.Parent = actionBar
 
-	local commitC, commitBtn = UITheme.neumorphicButton("FORGE", UITheme.Colors.Cash,
-		UDim2.fromScale(0.21, 0.07), UDim2.fromScale(0.63, 0.875))
-	commitC.Parent = bodyFrame
+	-- THE ONE PRIMARY ACTION ON THIS SCREEN (ui_ux_design skill S1: exactly one
+	-- dominant action per screen). Everything else here is secondary or quiet, so
+	-- committing the die is unmistakably the thing the panel is for.
+	local commitBtn = UITheme.actionButton("Forge", "primary", UITheme.Colors.Cash)
+	commitBtn.Name = "Forge"
+	commitBtn.LayoutOrder = 4
+	commitBtn.Parent = actionBar
 
 	----------------------------------------------------------------------------
 	-- Rendering
@@ -515,14 +589,14 @@ function V7ForgePanel.new(): V7ForgeController
 					end
 				end
 				if elemId ~= "None" then
-					UITheme.setButtonText(ui.elem, string.upper(elemId))
-					UITheme.setEnabled(ui.elem, choices > 0)
+					ui.elem.Text = elemId
+					UITheme.setActionEnabled(ui.elem, choices > 0)
 				elseif choices > 0 then
-					UITheme.setButtonText(ui.elem, "+ELEM")
-					UITheme.setEnabled(ui.elem, true)
+					ui.elem.Text = "Element"
+					UITheme.setActionEnabled(ui.elem, true)
 				else
-					UITheme.setButtonText(ui.elem, "LOCKED")
-					UITheme.setEnabled(ui.elem, false)
+					ui.elem.Text = "Locked"
+					UITheme.setActionEnabled(ui.elem, false)
 				end
 				ui.elem.Visible = true
 				ui.mass.Text = string.format("%.0f", m)
@@ -594,18 +668,18 @@ function V7ForgePanel.new(): V7ForgeController
 				local afford = cash >= quoted
 				costLbl.Text = "Cost: $" .. Format.formatNumber(quoted)
 				costLbl.TextColor3 = if afford then UITheme.Colors.TextGold else UITheme.Colors.Negative
-				UITheme.setEnabled(commitBtn, afford)
+				UITheme.setActionEnabled(commitBtn, afford)
 			else
 				costLbl.Text = "Invalid distribution"
 				costLbl.TextColor3 = UITheme.Colors.Negative
-				UITheme.setEnabled(commitBtn, false)
+				UITheme.setActionEnabled(commitBtn, false)
 			end
-			UITheme.setEnabled(resetBtn, true)
+			UITheme.setActionEnabled(resetBtn, true)
 		else
 			costLbl.Text = "No changes pending"
 			costLbl.TextColor3 = UITheme.Colors.TextDim
-			UITheme.setEnabled(commitBtn, false)
-			UITheme.setEnabled(resetBtn, false)
+			UITheme.setActionEnabled(commitBtn, false)
+			UITheme.setActionEnabled(resetBtn, false)
 		end
 	end
 
@@ -705,8 +779,8 @@ function V7ForgePanel.new(): V7ForgeController
 		-- FEEDBACK. A commit that silently succeeds or silently fails teaches the
 		-- player nothing; the button state is the only signal they get, so it has
 		-- to reflect the actual result.
-		UITheme.setButtonText(commitBtn, "...")
-		UITheme.setEnabled(commitBtn, false)
+		commitBtn.Text = "Forging..."
+		UITheme.setActionEnabled(commitBtn, false)
 		task.spawn(function()
 			-- `activeDie`, NOT a literal 1.
 			--
@@ -720,18 +794,18 @@ function V7ForgePanel.new(): V7ForgeController
 			local ok, reason = NetClient.forge(activeDie, out)
 			if ok then
 				dirty = false
-				UITheme.setButtonText(commitBtn, "FORGED")
+				commitBtn.Text = "Forged"
 			else
 				-- The server's refusal code, shown as-is. It is an enumerated
 				-- Notice, never an internal detail (T-7).
-				UITheme.setButtonText(commitBtn, string.upper(tostring(reason or "REFUSED")))
+				commitBtn.Text = tostring(reason or "Refused")
 				-- Snap the draft back to the truth so the panel cannot keep
 				-- displaying a distribution the server rejected.
 				draft = table.clone(committed)
 				dirty = false
 			end
 			task.wait(1.2)
-			UITheme.setButtonText(commitBtn, "FORGE")
+			commitBtn.Text = "Forge"
 			refresh()
 		end)
 	end)

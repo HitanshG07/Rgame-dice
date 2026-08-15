@@ -5,6 +5,12 @@
 local MarketplaceService = game:GetService("MarketplaceService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+
+-- The folder of generated dice solids, named the same way `DiceRenderer` names
+-- it. Both read the same replicated models: the SHAPES previews show the actual
+-- die a player would receive, never a stand-in.
+local DICE_SOURCE = "dice_faces"
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local MonetisationCatalog = require(Shared:WaitForChild("MonetisationCatalog"))
@@ -61,14 +67,25 @@ function V7MenuPanel.new(): V7MenuController
 	screenGui.DisplayOrder = UITheme.Layer.Overlay
 
 	-- 1. SHOP OVERLAY
-	local shopOverlay, shopBody = UITheme.overlay("🛒 MONETIZATION SHOP (GAMEPASSES & PRODUCTS)")
+	local shopOverlay, shopBody = UITheme.overlay("Shop")
 	shopOverlay.Parent = screenGui
 	overlays["shop"] = shopOverlay
 
-	local shopGrid = Instance.new("UIGridLayout")
-	shopGrid.CellSize = UDim2.fromScale(0.48, 0.44)
-	shopGrid.CellPadding = UDim2.fromScale(0.02, 0.04)
-	shopGrid.Parent = shopBody
+	-- A LIST, NOT A SCALED GRID.
+	--
+	-- The grid used `CellSize = 0.48 x 0.44` of the scrolling canvas, which is
+	-- the root of everything wrong with this panel in the operator's screenshot.
+	-- A cell 44% of the canvas HIGH is a different pixel height on every display,
+	-- and the card's contents were positioned as fractions OF THAT -- so the
+	-- blurb (y 0.35-0.65, TextScaled) and the tier small print (y 0.545-0.705)
+	-- overlapped by 10.5%, printing "Rolls for you..." straight through "Roll
+	-- continuously without tapping". TextScaled then sized the title to the cell
+	-- rather than to the hierarchy, which is why "Auto-Roll" rendered enormous
+	-- while its own explanatory line rendered tiny.
+	--
+	-- One column of fixed-height rows fixes all of it: heights are pixels, text
+	-- sizes come from the type ladder, and a vertical layout cannot overlap.
+	UITheme.verticalStack(shopBody, UITheme.Scale.SM, UITheme.Scale.LG)
 
 	-- Dynamically render sellable passes and products from MonetisationCatalog (P-5A3)
 	local sellableItems: { MonetisationCatalog.Entry } = {}
@@ -112,46 +129,69 @@ function V7MenuPanel.new(): V7MenuController
 	}
 
 	for _, entry in ipairs(sellableItems) do
-		local card = UITheme.panel(UDim2.fromScale(1, 1), UDim2.fromScale(0, 0))
+		-- THE CARD GROWS TO ITS TEXT rather than guessing a height for it.
+		--
+		-- A fixed 84/108px was a resolution assumption in disguise: the blurbs
+		-- wrap, and on a 600px viewport the VipVault detail line needs two rows
+		-- instead of one, overflowing the card and spilling past its rounded edge
+		-- into the card below. That is precisely the failure this whole pass
+		-- exists to remove, so a fixed height here would have reintroduced it on
+		-- the screens least able to afford it (NFR-3).
+		--
+		-- `AutomaticSize.Y` on the card plus a minimum height gives both: short
+		-- cards keep a consistent floor, and a card whose text wraps simply gets
+		-- taller. The vertical stack re-flows the rest.
+		local detail = SHOP_TIER_DETAIL[entry.key]
+
+		local card, content = UITheme.card(nil)
 		card.Name = "Item_" .. entry.key
 		card.Parent = shopBody
 
-		local titleLbl = Instance.new("TextLabel")
-		titleLbl.Size = UDim2.fromScale(0.9, 0.3)
-		titleLbl.Position = UDim2.fromScale(0.05, 0.05)
-		titleLbl.BackgroundTransparency = 1
-		titleLbl.Font = UITheme.FontHeading
-		titleLbl.Text = entry.name
-		titleLbl.TextColor3 = UITheme.Colors.TextGold
-		titleLbl.TextScaled = true
-		titleLbl.Parent = card
+		-- Self-measuring too, or a fixed row inside a growing card clips the very
+		-- text the card grew to fit.
+		local row, textCol, actions = UITheme.listRow(nil)
+		row.Parent = content
 
-		local blurbLbl = Instance.new("TextLabel")
-		blurbLbl.Size = UDim2.fromScale(0.9, 0.3)
-		blurbLbl.Position = UDim2.fromScale(0.05, 0.35)
-		blurbLbl.BackgroundTransparency = 1
-		blurbLbl.Font = UITheme.Font
-		blurbLbl.Text = entry.blurb
-		blurbLbl.TextColor3 = UITheme.Colors.TextPrimary
-		blurbLbl.TextScaled = true
-		blurbLbl.Parent = card
+		local titleLbl = UITheme.textLine(entry.name, UITheme.Scale.TextHeading,
+			UITheme.Colors.TextGold, UITheme.FontHeading)
+		titleLbl.Name = "Title"
+		titleLbl.LayoutOrder = 1
+		titleLbl.Parent = textCol
+
+		-- A WRAPPING PARAGRAPH, not a scaled single line. The blurbs are full
+		-- sentences of varying length and `TextScaled` shrank the long ones to
+		-- unreadable while blowing the short ones up.
+		local blurbLbl = UITheme.paragraph(entry.blurb, UITheme.Scale.TextBody,
+			UITheme.Colors.TextPrimary)
+		blurbLbl.Name = "Blurb"
+		blurbLbl.LayoutOrder = 2
+		blurbLbl.Parent = textCol
 
 		-- EXACT NUMBERS IN SMALL PRINT for the passes whose value is a rate rather
 		-- than a thing (operator-directed 2026-08-13). "A far higher ceiling on
 		-- offline earnings" is not something a player can evaluate against a
-		-- Robux price; "+25% rate, 24h capacity" is. Read from the shared catalog
+		-- Robux price; "+25% rate, 10h capacity" is. Read from the shared catalog
 		-- so the card cannot advertise a number the server does not grant.
-		local detail = SHOP_TIER_DETAIL[entry.key]
 		if detail ~= nil then
-			local fine = UITheme.smallPrint(detail, UDim2.fromScale(0.9, 0.16),
-				UDim2.fromScale(0.05, 0.545))
+			local fine = UITheme.paragraph(detail, UITheme.Scale.TextSmall,
+				UITheme.Colors.TextDim)
 			fine.Name = "TierDetail"
-			fine.Parent = card
+			fine.LayoutOrder = 3
+			fine.Parent = textCol
 		end
 
-		local buyContainer, buyBtn = UITheme.neumorphicButton("BUY", UITheme.Colors.Gems, UDim2.fromScale(0.8, 0.25), UDim2.fromScale(0.1, 0.7))
-		buyContainer.Name = "BuyButton"
-		buyContainer.Parent = card
+		-- An OWNED state chip, so ownership is not carried by the button caption
+		-- alone. Hidden until a snapshot says otherwise.
+		local ownedPill = UITheme.statusPill("Owned", UITheme.Colors.Positive)
+		ownedPill.Name = "OwnedPill"
+		ownedPill.Visible = false
+		ownedPill.LayoutOrder = 1
+		ownedPill.Parent = actions
+
+		local buyBtn = UITheme.actionButton("Buy", "primary", UITheme.Colors.Gems)
+		buyBtn.Name = "BuyButton"
+		buyBtn.LayoutOrder = 2
+		buyBtn.Parent = actions
 
 		local assetId = entry.assetId
 		local isPass = MonetisationCatalog.Passes[entry.key] ~= nil
@@ -185,7 +225,10 @@ function V7MenuPanel.new(): V7MenuController
 		UITheme.onPressed(buyBtn, promptPurchase)
 
 		if isPass then
-			passCards[entry.key] = { button = buyBtn, blurb = blurbLbl, baseBlurb = entry.blurb }
+			passCards[entry.key] = {
+				button = buyBtn, blurb = blurbLbl, baseBlurb = entry.blurb,
+				pill = ownedPill,
+			}
 		end
 	end
 
@@ -200,13 +243,21 @@ function V7MenuPanel.new(): V7MenuController
 			then state.ownedPasses else {}
 		for key, ui in pairs(passCards) do
 			if owned[key] == true then
-				UITheme.setButtonText(ui.button, "OWNED")
-				UITheme.setEnabled(ui.button, false)
-				ui.blurb.Text = ui.baseBlurb .. "  (active)"
-				ui.blurb.TextColor3 = UITheme.Colors.Positive
+				-- OWNERSHIP IS THE CHIP'S JOB NOW. Appending "(active)" to the
+				-- blurb is what produced "Double all cash earned from rolls,
+				-- permanently.  (active)" in the operator's screenshot -- a state
+				-- word smuggled into the end of a sentence, where it reads as part
+				-- of the description rather than as the player's status. The blurb
+				-- stays the blurb; the chip carries the state.
+				ui.pill.Visible = true
+				ui.button.Text = "Owned"
+				UITheme.setActionEnabled(ui.button, false)
+				ui.blurb.Text = ui.baseBlurb
+				ui.blurb.TextColor3 = UITheme.Colors.TextDim
 			else
-				UITheme.setButtonText(ui.button, "BUY")
-				UITheme.setEnabled(ui.button, true)
+				ui.pill.Visible = false
+				ui.button.Text = "Buy"
+				UITheme.setActionEnabled(ui.button, true)
 				ui.blurb.Text = ui.baseBlurb
 				ui.blurb.TextColor3 = UITheme.Colors.TextPrimary
 			end
@@ -214,7 +265,7 @@ function V7MenuPanel.new(): V7MenuController
 	end
 
 	-- 2. SHAPES OVERLAY
-	local shapesOverlay, shapesBody = UITheme.overlay("🎲 DICE SHAPES & BUILD CHOICE")
+	local shapesOverlay, shapesBody = UITheme.overlay("Dice Shapes")
 	shapesOverlay.Parent = screenGui
 	overlays["shapes"] = shapesOverlay
 
@@ -229,12 +280,131 @@ function V7MenuPanel.new(): V7MenuController
 	--
 	-- Everything below is computed from the shipping catalog and the live
 	-- snapshot, so it cannot drift from the server (L-026).
-	local shapesList = Instance.new("UIListLayout")
-	shapesList.Padding = UDim.new(0, 10)
-	shapesList.SortOrder = Enum.SortOrder.LayoutOrder
-	shapesList.Parent = shapesBody
+	UITheme.verticalStack(shapesBody, UITheme.Scale.SM, UITheme.Scale.LG)
 
 	local shapeCards: { [string]: any } = {}
+
+	-- THE ROTATING PREVIEWS (operator-directed: "maybe can display the dice they
+	-- will be buying with an animation which displays and rotates the dice").
+	--
+	-- Every card owns a ViewportFrame holding the REAL solid the board throws --
+	-- the same `DiceMeshBuilder` output, read and cloned, never rebuilt. This
+	-- code must not touch glyph geometry: the numerals are extruded parts and
+	-- their construction is frozen pending the shearing investigation (L-051).
+	--
+	-- ONE DRIVER FOR ALL OF THEM, and it only runs while the panel is open. A
+	-- RenderStepped connection per card would be a dozen connections spinning
+	-- models nobody is looking at; the loop below allocates nothing per frame
+	-- (roblox_luau skill S5) and disconnects when the overlay closes.
+	local previews: { { model: Model, pivot: CFrame } } = {}
+	local previewConn: RBXScriptConnection? = nil
+
+	local function stopPreviews(): ()
+		if previewConn ~= nil then
+			previewConn:Disconnect()
+			previewConn = nil
+		end
+	end
+
+	local function startPreviews(): ()
+		if previewConn ~= nil or #previews == 0 then
+			return
+		end
+		previewConn = RunService.RenderStepped:Connect(function(dt: number)
+			for _, entry in ipairs(previews) do
+				entry.pivot = entry.pivot * CFrame.Angles(0, dt * 0.9, 0)
+				entry.model:PivotTo(entry.pivot)
+			end
+		end)
+	end
+
+	-- THE DRIVER FOLLOWS THE PANEL'S VISIBILITY, not the code paths that change
+	-- it. Binding start/stop to `openOverlay` and `closeAll` alone missed the
+	-- header's own close button, which `UITheme.overlay` wires internally and
+	-- which simply sets `Visible = false` -- so closing the panel with the X left
+	-- eight invisible models being pivoted every frame for the rest of the
+	-- session, and the `previewConn ~= nil` guard then made reopening a no-op, so
+	-- the leak never healed.
+	--
+	-- Watching the property is what makes this correct for EVERY way the panel
+	-- can be hidden, including ones added later. A visibility-driven resource
+	-- should key off visibility, not off its callers.
+	local function bindPreviewLifecycle(overlay: Frame): ()
+		overlay:GetPropertyChangedSignal("Visible"):Connect(function()
+			if overlay.Visible then
+				startPreviews()
+			else
+				stopPreviews()
+			end
+		end)
+	end
+
+	-- Builds the little turntable for one shape. Returns nil when the shape has
+	-- no source model, which is not an error -- a catalog shape whose builder is
+	-- missing must show an empty frame rather than a stand-in die asserting a
+	-- geometry the player would not actually receive (L-041).
+	local function buildShapePreview(shapeId: string, parent: Instance): ViewportFrame?
+		-- The SAME folder the board renders from, resolved the same way. The
+		-- solids are generated server-side at boot and replicate asynchronously,
+		-- so absent is a legitimate state and not an error.
+		local folder = ReplicatedStorage:FindFirstChild(DICE_SOURCE)
+		if folder == nil or not folder:IsA("Folder") then
+			return nil
+		end
+		local source = folder:FindFirstChild(shapeId)
+		if source == nil or not source:IsA("Model") then
+			return nil
+		end
+
+		local vp = Instance.new("ViewportFrame")
+		vp.Name = "Preview"
+		vp.Size = UDim2.fromOffset(56, 56)
+		vp.BackgroundColor3 = UITheme.Colors.PanelDeep
+		vp.BackgroundTransparency = 0.35
+		vp.BorderSizePixel = 0
+		vp.LayoutOrder = 0
+		vp.ZIndex = 6
+		vp.Parent = parent
+
+		local vpCorner = Instance.new("UICorner")
+		vpCorner.CornerRadius = UDim.new(0, UITheme.Scale.RadiusControl)
+		vpCorner.Parent = vp
+
+		local model = source:Clone()
+
+		-- WITHOUT A PRIMARYPART THE DIE ORBITS INSTEAD OF SPINNING. `PivotTo`
+		-- turns a model about its pivot, and a clone can arrive with PrimaryPart
+		-- unset -- in which case the pivot is the bounding-box centre and the
+		-- turntable becomes a die swinging around an empty point. The builder
+		-- leaves an invisible `Pivot` part at the centroid for this.
+		if model.PrimaryPart == nil then
+			local pivot = model:FindFirstChild("Pivot")
+			if pivot ~= nil and pivot:IsA("BasePart") then
+				model.PrimaryPart = pivot
+			end
+		end
+
+		-- PIVOT BEFORE PARENT. A clone sits at its authored origin and renders on
+		-- the frame it is parented, so parenting first shows it wherever it
+		-- happens to be for one frame (L-052).
+		model:PivotTo(CFrame.new(0, 0, 0))
+		model.Parent = vp
+
+		local cam = Instance.new("Camera")
+		-- Framed from the solid's own extent rather than a fixed distance, so a
+		-- flat D2 and a fat D20 both fill the same box.
+		local _, size = model:GetBoundingBox()
+		local reach = math.max(size.X, size.Y, size.Z) * 0.5
+		local distance = math.max(2.2, reach * 3.6)
+		cam.CFrame = CFrame.new(Vector3.new(distance * 0.55, distance * 0.42, distance * 0.72),
+			Vector3.new(0, 0, 0))
+		cam.FieldOfView = 40
+		cam.Parent = vp
+		vp.CurrentCamera = cam
+
+		table.insert(previews, { model = model, pivot = CFrame.new(0, 0, 0) })
+		return vp
+	end
 
 	-- Server refusal codes rendered as sentences. The server sends an enumerated
 	-- code and never prose (NFR-5, T-7), so the wording lives here.
@@ -262,18 +432,35 @@ function V7MenuPanel.new(): V7MenuController
 	for rung, shapeId in ipairs(DiceCatalog.getUnlockOrder()) do
 		local def = DiceCatalog.getShape(shapeId)
 		if def ~= nil then
-			local card = UITheme.panel(UDim2.fromScale(1, 0), UDim2.fromScale(0, 0))
+			-- THE CARD IS NOW A LAID-OUT ROW, and that is the whole fix for this
+			-- panel. Previously the status label spanned x 0.44-0.66 while the
+			-- action button began at x 0.585 -- a hard 7.5% overlap, which is why
+			-- the operator's screenshot shows "OWNED" printed straight through
+			-- "USE 5<>". Two hand-picked fractions collided and nothing in the code
+			-- could notice. Here the preview, the text and the actions are three
+			-- tracks of one horizontal layout, so they cannot overlap whatever the
+			-- text turns out to say.
+			local card, content = UITheme.card(UITheme.Scale.RowHeight)
 			card.Name = "Shape_" .. shapeId
-			card.Size = UDim2.new(1, 0, 0, 86)
 			card.LayoutOrder = rung
 			card.Parent = shapesBody
 
-			local title = UITheme.label(
-				string.format("%s  -  %d faces", shapeId, def.faceCount),
-				UDim2.fromScale(0.34, 0.42), UDim2.fromScale(0.03, 0.08),
-				UITheme.Colors.TextGold)
-			title.TextScaled = true
-			title.Parent = card
+			local row, textCol, actions = UITheme.listRow(
+				UITheme.Scale.RowHeight - UITheme.Scale.SM * 2)
+			row.Parent = content
+
+			-- The turntable leads the row, so the player sees the die before the
+			-- words describing it.
+			local preview = buildShapePreview(shapeId, row)
+			if preview ~= nil then
+				preview.LayoutOrder = 0
+			end
+
+			local title = UITheme.textLine(
+				string.format("%s   %d faces", shapeId, def.faceCount),
+				UITheme.Scale.TextHeading, UITheme.Colors.TextGold, UITheme.FontHeading)
+			title.LayoutOrder = 1
+			title.Parent = textCol
 
 			-- The honest character line. Fewer faces means the same mass sits on
 			-- fewer of them, so payouts spike and Voids are frequent; more faces
@@ -288,22 +475,23 @@ function V7MenuPanel.new(): V7MenuController
 			else
 				character = "Grinder - steady income, rare Voids"
 			end
-			local sub = UITheme.label(character,
-				UDim2.fromScale(0.42, 0.34), UDim2.fromScale(0.03, 0.52),
+			local sub = UITheme.textLine(character, UITheme.Scale.TextSmall,
 				UITheme.Colors.TextDim)
-			sub.TextScaled = true
-			sub.Parent = card
+			sub.LayoutOrder = 2
+			sub.Parent = textCol
 
-			local status = UITheme.label("", UDim2.fromScale(0.22, 0.4),
-				UDim2.fromScale(0.44, 0.3), UITheme.Colors.TextDim)
-			status.TextScaled = true
-			status.TextXAlignment = Enum.TextXAlignment.Right
-			status.Parent = card
+			-- STATE AS A CHIP, not as loose coloured text beside a button. The
+			-- refusal messages land here too, which is why it is a pill rather
+			-- than a bare word: a sentence in a chip still reads as status.
+			local status = UITheme.statusPill("", UITheme.Colors.TextDim)
+			status.Name = "Status"
+			status.LayoutOrder = 1
+			status.Parent = actions
 
-			local btnContainer, btn = UITheme.neumorphicButton("", UITheme.Colors.Cash,
-				UDim2.fromScale(0.20, 0.56), UDim2.fromScale(0.585, 0.22))
-			btnContainer.Name = "Action"
-			btnContainer.Parent = card
+			local btn = UITheme.actionButton("", "secondary", UITheme.Colors.Cash)
+			btn.Name = "Use"
+			btn.LayoutOrder = 2
+			btn.Parent = actions
 
 			-- BUY ANOTHER DIE OF THIS SHAPE (operator decision, 2026-08-13: "in
 			-- shape we need to add options to buy multiple of the same dice - this
@@ -318,30 +506,31 @@ function V7MenuPanel.new(): V7MenuController
 			-- Shares the SLOT price curve and the ascension cap rather than having
 			-- its own: "buy a second D6" and "buy one more die" are the same
 			-- transaction, and two price tables would drift (L-025).
-			local addC, addBtn = UITheme.neumorphicButton("", UITheme.Colors.Positive,
-				UDim2.fromScale(0.185, 0.56), UDim2.fromScale(0.80, 0.22))
-			addC.Name = "AddDie"
-			addC.Visible = false
-			addC.Parent = card
+			local addBtn = UITheme.actionButton("", "primary", UITheme.Colors.Positive)
+			addBtn.Name = "AddDie"
+			addBtn.Visible = false
+			addBtn.LayoutOrder = 3
+			addBtn.Parent = actions
 
 			UITheme.onPressed(addBtn, function()
 				local entry = shapeCards[shapeId]
-				UITheme.setEnabled(addBtn, false)
+				UITheme.setActionEnabled(addBtn, false)
 				task.spawn(function()
 					local result = NetClient.addDieSlot(shapeId)
 					if not result.ok and entry ~= nil then
-						entry.status.Text = ADD_DIE_REFUSAL[tostring(result.reason)]
-							or "Cannot add a die right now."
-						entry.status.TextColor3 = UITheme.Colors.Negative
+						UITheme.setPill(entry.status,
+							ADD_DIE_REFUSAL[tostring(result.reason)]
+								or "Cannot add a die right now.",
+							UITheme.Colors.Negative)
 					end
-					UITheme.setEnabled(addBtn, true)
+					UITheme.setActionEnabled(addBtn, true)
 				end)
 			end)
 
 			UITheme.onPressed(btn, function()
 				local entry = shapeCards[shapeId]
 				local owned = entry and entry.owned
-				UITheme.setEnabled(btn, false)
+				UITheme.setActionEnabled(btn, false)
 				task.spawn(function()
 					local result
 					if owned then
@@ -357,21 +546,24 @@ function V7MenuPanel.new(): V7MenuController
 					-- next snapshot repaints the row, so this note is transient by
 					-- construction and cannot linger as a stale claim.
 					if not result.ok and entry ~= nil then
-						entry.status.Text = SHAPE_REFUSAL[tostring(result.reason)]
-							or "Not right now."
-						entry.status.TextColor3 = UITheme.Colors.Negative
+						UITheme.setPill(entry.status,
+							SHAPE_REFUSAL[tostring(result.reason)] or "Not right now.",
+							UITheme.Colors.Negative)
 					end
-					UITheme.setEnabled(btn, true)
+					UITheme.setActionEnabled(btn, true)
 				end)
 			end)
 
 			shapeCards[shapeId] = {
 				card = card, status = status, button = btn,
-				addContainer = addC, addButton = addBtn,
+				addButton = addBtn,
 				owned = false, rung = rung,
 			}
 		end
 	end
+
+	-- Bound AFTER the cards exist, so the first reveal has previews to drive.
+	bindPreviewLifecycle(shapesOverlay)
 
 	-- Redraws every rung from a snapshot. Called on each StateSync, so the panel
 	-- is correct whether it is open or not.
@@ -397,18 +589,17 @@ function V7MenuPanel.new(): V7MenuController
 
 			-- The +1 DIE button appears only on shapes the player OWNS, since the
 			-- server refuses a shape they have not unlocked.
-			if entry.addContainer ~= nil then
-				entry.addContainer.Visible = owned
+			if entry.addButton ~= nil then
+				entry.addButton.Visible = owned
 				if owned then
 					if addCost == nil then
 						-- At the die limit. Shown rather than hidden, so the ceiling
 						-- is legible and the player knows ascending raises it.
-						UITheme.setButtonText(entry.addButton, "MAX")
-						UITheme.setEnabled(entry.addButton, false)
+						entry.addButton.Text = "MAX"
+						UITheme.setActionEnabled(entry.addButton, false)
 					else
-						UITheme.setButtonText(entry.addButton,
-							"+1  $" .. Format.formatNumber(addCost))
-						UITheme.setEnabled(entry.addButton, cash >= addCost)
+						entry.addButton.Text = "+1 die   $" .. Format.formatNumber(addCost)
+						UITheme.setActionEnabled(entry.addButton, cash >= addCost)
 					end
 				end
 			end
@@ -417,10 +608,9 @@ function V7MenuPanel.new(): V7MenuController
 			local allowed = DiceCatalog.canUnlock(shapeId, ownedMap)
 
 			if shapeId == currentShape then
-				entry.status.Text = "IN USE"
-				entry.status.TextColor3 = UITheme.Colors.TextGold
-				UITheme.setButtonText(entry.button, "ACTIVE")
-				UITheme.setEnabled(entry.button, false)
+				UITheme.setPill(entry.status, "IN USE", UITheme.Colors.TextGold)
+				entry.button.Text = "Equipped"
+				UITheme.setActionEnabled(entry.button, false)
 			elseif owned then
 				-- THE SWITCH PRICE, ON THE BUTTON.
 				--
@@ -436,43 +626,37 @@ function V7MenuPanel.new(): V7MenuController
 				-- genuinely different facts and only the server knows the second.
 				local firstEquip = wornMap[shapeId] ~= true
 				if firstEquip then
-					entry.status.Text = "OWNED - free to equip"
-					entry.status.TextColor3 = UITheme.Colors.Positive
-					UITheme.setButtonText(entry.button, "USE")
-					UITheme.setEnabled(entry.button, true)
+					UITheme.setPill(entry.status, "Owned", UITheme.Colors.Positive)
+					entry.button.Text = "Equip - free"
+					UITheme.setActionEnabled(entry.button, true)
 				else
 					local affordable = diamonds >= switchCost
-					entry.status.Text = if affordable
-						then "OWNED"
-						else string.format("OWNED - needs %d\u{2666}", switchCost)
-					entry.status.TextColor3 = if affordable
-						then UITheme.Colors.Positive else UITheme.Colors.TextDim
-					UITheme.setButtonText(entry.button,
-						string.format("USE %d\u{2666}", switchCost))
-					UITheme.setEnabled(entry.button, affordable)
+					UITheme.setPill(entry.status, "Owned",
+						if affordable then UITheme.Colors.Positive else UITheme.Colors.TextDim)
+					entry.button.Text = string.format("Equip   %d\u{2666}", switchCost)
+					UITheme.setActionEnabled(entry.button, affordable)
 				end
 			elseif allowed then
 				-- The next rung. Affordability decides whether it is pressable,
 				-- but the price is shown either way so the goal is visible.
-				entry.status.Text = "$" .. Format.formatNumber(cost)
-				entry.status.TextColor3 = if cash >= cost
-					then UITheme.Colors.Positive else UITheme.Colors.TextDim
-				UITheme.setButtonText(entry.button, "UNLOCK")
-				UITheme.setEnabled(entry.button, cash >= cost)
+				UITheme.setPill(entry.status, "$" .. Format.formatNumber(cost),
+					if cash >= cost then UITheme.Colors.Positive else UITheme.Colors.TextDim)
+				entry.button.Text = "Unlock"
+				UITheme.setActionEnabled(entry.button, cash >= cost)
 			else
 				-- Locked behind an earlier rung. Naming the prerequisite is what
 				-- turns a wall into a goal.
 				local prereq = DiceCatalog.getPrerequisite(shapeId)
-				entry.status.Text = "needs " .. tostring(prereq)
-				entry.status.TextColor3 = UITheme.Colors.TextDim
-				UITheme.setButtonText(entry.button, "LOCKED")
-				UITheme.setEnabled(entry.button, false)
+				UITheme.setPill(entry.status, "Needs " .. tostring(prereq),
+					UITheme.Colors.TextDim)
+				entry.button.Text = "Locked"
+				UITheme.setActionEnabled(entry.button, false)
 			end
 		end
 	end
 
 	-- 3. LEADERBOARD OVERLAY
-	local boardsOverlay, boardsBody = UITheme.overlay("🏆 GLOBAL LEADERBOARDS")
+	local boardsOverlay, boardsBody = UITheme.overlay("Leaderboards")
 	boardsOverlay.Parent = screenGui
 	overlays["boards"] = boardsOverlay
 
@@ -660,7 +844,7 @@ function V7MenuPanel.new(): V7MenuController
 	end
 
 	-- 4. ASCENSION OVERLAY
-	local ascendOverlay, ascendBody = UITheme.overlay("🌌 ASCENSION & DIAMOND TREE")
+	local ascendOverlay, ascendBody = UITheme.overlay("Ascension")
 	ascendOverlay.Parent = screenGui
 	overlays["ascend"] = ascendOverlay
 
@@ -879,7 +1063,7 @@ function V7MenuPanel.new(): V7MenuController
 	end
 
 	-- 5. QUESTS OVERLAY
-	local questsOverlay, questsBody = UITheme.overlay("📜 DAILY QUESTS & REWARDS")
+	local questsOverlay, questsBody = UITheme.overlay("Daily Quests")
 	questsOverlay.Parent = screenGui
 	overlays["quests"] = questsOverlay
 
@@ -1005,7 +1189,7 @@ function V7MenuPanel.new(): V7MenuController
 		end
 	end
 
-	local vaultOverlay, vaultBody = UITheme.overlay("⏳ OFFLINE VAULT")
+	local vaultOverlay, vaultBody = UITheme.overlay("Offline Vault")
 	vaultOverlay.Parent = screenGui
 	overlays["vault"] = vaultOverlay
 
@@ -1284,7 +1468,7 @@ function V7MenuPanel.new(): V7MenuController
 	end
 
 	-- 7. SETTINGS OVERLAY
-	local settingsOverlay, settingsBody = UITheme.overlay("⚙️ SETTINGS & PROMO CODES")
+	local settingsOverlay, settingsBody = UITheme.overlay("Settings")
 	settingsOverlay.Parent = screenGui
 	overlays["settings"] = settingsOverlay
 
@@ -1499,27 +1683,52 @@ function V7MenuPanel.new(): V7MenuController
 	end
 
 	-- 8. SLOTS OVERLAY
-	local slotsOverlay, slotsBody = UITheme.overlay("⚡ DIE SLOTS")
+	local slotsOverlay, slotsBody = UITheme.overlay("Die Slots")
 	slotsOverlay.Parent = screenGui
 	overlays["slots"] = slotsOverlay
 
 	-- Also completely empty before this. FR-1.1 allows 1 to 7 dice.
-	local slotsInfo = UITheme.label("", UDim2.fromScale(0.94, 0.3), UDim2.fromScale(0.03, 0.06),
-		UITheme.Colors.TextPrimary)
-	slotsInfo.TextScaled = true
-	slotsInfo.TextWrapped = true
+	--
+	-- REBUILT AS A COMPOSED PANEL. It was three scale-positioned labels with a
+	-- huge dead region below them, and the count sentence was `TextScaled` at 30%
+	-- of the panel -- so on a monitor "You roll 1 die per throw" rendered at
+	-- headline size while meaning nothing more than it does at body size. The
+	-- count is now the headline BECAUSE IT IS THE POINT OF THE PANEL, stated as a
+	-- figure rather than as a large sentence.
+	UITheme.verticalStack(slotsBody, UITheme.Scale.MD, UITheme.Scale.LG)
+
+	local slotsHeadline = UITheme.textLine("", 34, UITheme.Colors.TextGold,
+		UITheme.FontHeading)
+	slotsHeadline.Name = "SlotsHeadline"
+	slotsHeadline.LayoutOrder = 1
+	slotsHeadline.Parent = slotsBody
+
+	local slotsInfo = UITheme.paragraph(
+		"More dice means more faces resolving at once, and elements that read "
+		.. "across dice have more to work with.",
+		UITheme.Scale.TextBody, UITheme.Colors.TextDim)
+	slotsInfo.Name = "SlotsInfo"
+	slotsInfo.LayoutOrder = 2
 	slotsInfo.Parent = slotsBody
 
-	local addSlotContainer, addSlotBtn = UITheme.neumorphicButton("ADD SLOT",
-		UITheme.Colors.Cash, UDim2.fromScale(0.44, 0.16), UDim2.fromScale(0.03, 0.42))
-	addSlotContainer.Name = "AddSlotButton"
-	addSlotContainer.Parent = slotsBody
+	-- The action sits in its own row so the button is measured to its caption
+	-- rather than stretched to 44% of the panel width.
+	local slotsActionRow, slotsActionText, slotsActions =
+		UITheme.listRow(UITheme.Scale.TouchTarget + UITheme.Scale.SM)
+	slotsActionRow.Name = "SlotsAction"
+	slotsActionRow.LayoutOrder = 3
+	slotsActionRow.Parent = slotsBody
 
-	local slotsStatus = UITheme.label("", UDim2.fromScale(0.94, 0.1), UDim2.fromScale(0.03, 0.62),
+	local slotsStatus = UITheme.textLine("", UITheme.Scale.TextSmall,
 		UITheme.Colors.TextDim)
 	slotsStatus.Name = "SlotsStatus"
-	slotsStatus.TextScaled = true
-	slotsStatus.Parent = slotsBody
+	slotsStatus.LayoutOrder = 1
+	slotsStatus.Parent = slotsActionText
+
+	local addSlotBtn = UITheme.actionButton("Add slot", "primary", UITheme.Colors.Cash)
+	addSlotBtn.Name = "AddSlotButton"
+	addSlotBtn.LayoutOrder = 1
+	addSlotBtn.Parent = slotsActions
 
 	local SLOT_REFUSAL: { [string]: string } = {
 		insufficient_funds = "Not enough Cash for the next slot.",
@@ -1530,7 +1739,7 @@ function V7MenuPanel.new(): V7MenuController
 	}
 
 	UITheme.onPressed(addSlotBtn, function()
-		UITheme.setEnabled(addSlotBtn, false)
+		UITheme.setActionEnabled(addSlotBtn, false)
 		task.spawn(function()
 			local result = NetClient.addDieSlot()
 			if result.ok then
@@ -1542,7 +1751,7 @@ function V7MenuPanel.new(): V7MenuController
 				slotsStatus.TextColor3 = UITheme.Colors.Negative
 			end
 			-- The next snapshot re-enables it if another slot is actually buyable.
-			UITheme.setEnabled(addSlotBtn, true)
+			UITheme.setActionEnabled(addSlotBtn, true)
 		end)
 	end)
 
@@ -1551,11 +1760,10 @@ function V7MenuPanel.new(): V7MenuController
 		local cash = if type(state) == "table" then tonumber(state.cash) or 0 else 0
 		local ascensions = if type(state) == "table" then tonumber(state.ascensions) or 0 else 0
 		local cap = DiceCatalog.dieSlotCapFor(ascensions)
-		slotsInfo.Text = string.format(
-			"You roll %d %s per throw.  Your limit is %d.\n\nMore dice means more "
-			.. "faces resolving at once, and elements that read across dice have "
-			.. "more to work with.",
-			slots, if slots == 1 then "die" else "dice", cap)
+		-- THE FIGURE IS THE HEADLINE. "1 of 7 dice" states the same fact as the
+		-- old sentence and states it as a quantity, which is what a player opening
+		-- this panel actually came to read.
+		slotsHeadline.Text = string.format("%d of %d dice", slots, cap)
 
 		-- THE PRICE, ON THE BUTTON.
 		--
@@ -1572,8 +1780,8 @@ function V7MenuPanel.new(): V7MenuController
 			-- hides the fact that ascending would raise it. The two cases now read
 			-- differently because they are different situations: one is finished,
 			-- the other has a clear next step.
-			UITheme.setButtonText(addSlotBtn, string.format("MAX (%d)", cap))
-			UITheme.setEnabled(addSlotBtn, false)
+			addSlotBtn.Text = string.format("At the limit (%d)", cap)
+			UITheme.setActionEnabled(addSlotBtn, false)
 			if cap < DiceCatalog.MAX_DIE_SLOTS then
 				slotsStatus.Text = string.format(
 					"Limit reached. Ascend to raise it to %d.", cap + 1)
@@ -1583,8 +1791,8 @@ function V7MenuPanel.new(): V7MenuController
 				slotsStatus.TextColor3 = UITheme.Colors.TextDim
 			end
 		else
-			UITheme.setButtonText(addSlotBtn, "ADD SLOT  $" .. Format.formatNumber(cost))
-			UITheme.setEnabled(addSlotBtn, cash >= cost)
+			addSlotBtn.Text = "Add slot   $" .. Format.formatNumber(cost)
+			UITheme.setActionEnabled(addSlotBtn, cash >= cost)
 			if cash < cost then
 				slotsStatus.Text = string.format("Next slot costs $%s.",
 					Format.formatNumber(cost))
@@ -1686,6 +1894,7 @@ function V7MenuPanel:openOverlay(name: string)
 			warn("[V7MenuPanel] board refresh failed: " .. tostring(err))
 		end
 	end
+
 end
 
 function V7MenuPanel:closeAll()

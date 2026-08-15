@@ -63,6 +63,58 @@ UITheme.FontHeading = Enum.Font.GothamBlack
 UITheme.FontMono = Enum.Font.Code
 UITheme.BorderThickness = 1
 
+--------------------------------------------------------------------------------
+-- THE SCALE
+--
+-- One 4px-based ladder for every gap, inset, radius and type size in the game.
+--
+-- WHY THIS EXISTS. Before it, every panel invented its own numbers -- 0.03 here,
+-- 10px there, 0.545 somewhere else -- and the result was not merely inconsistent
+-- but overlapping: the SHAPES card placed a status label spanning x 0.44-0.66
+-- and an action button starting at x 0.585, so "OWNED" was drawn straight
+-- through "USE 5<>". The SHOP card had the same collision vertically, its small
+-- print struck through its blurb. Neither was a styling mistake; both were two
+-- hand-picked numbers that happened to intersect, with nothing in the code able
+-- to notice.
+--
+-- A scale alone does not prevent that -- LAYOUTS do, and the builders below use
+-- UIListLayout so sibling content occupies disjoint tracks by construction. The
+-- scale is what keeps those tracks looking like one designer chose them.
+--
+-- Values are PIXELS. Scale-relative sizing stretches a gap on a monitor and
+-- crushes it on a phone; a 12px gutter is 12px everywhere, which is what makes
+-- spacing read as deliberate across resolutions (NFR-3).
+--------------------------------------------------------------------------------
+
+UITheme.Scale = {
+	-- Spacing ladder.
+	XS = 4,
+	SM = 8,
+	MD = 12,
+	LG = 16,
+	XL = 24,
+	XXL = 32,
+
+	-- Corner radii. Cards are gently rounded; controls are pill-round.
+	RadiusCard = 10,
+	RadiusControl = 8,
+
+	-- Type ladder. At most four sizes on any one screen (ui_ux_design skill S1).
+	TextTitle = 22,
+	TextHeading = 17,
+	TextBody = 14,
+	TextSmall = 12,
+
+	-- The accessibility floor. 44px is the platform minimum for a touch target
+	-- and is NOT negotiable per build tier (ui_ux_design skill S3). Every
+	-- interactive element built here is at least this tall.
+	TouchTarget = 44,
+
+	-- Standard row height for a list item carrying a title, a subtitle and an
+	-- action. Comfortably above the touch floor with room for two text lines.
+	RowHeight = 76,
+}
+
 UITheme.Layer = {
 	Arena   = 0,
 	HUD     = 10,
@@ -82,6 +134,22 @@ function UITheme.neumorphicButton(text: string, accentColor: Color3?, size: UDim
 	container.Position = position
 	container.BackgroundTransparency = 1
 	container.ZIndex = 1
+
+	-- THE TOUCH FLOOR, APPLIED IN THE BUILDER RATHER THAN AT EACH CALL SITE.
+	--
+	-- Almost every caller sizes these in SCALE, which is a statement about
+	-- proportion and says nothing about whether a thumb can hit the result. The
+	-- HUD's menu buttons measure 40px on a 420px-wide phone and the AUTO toggle
+	-- 29px -- both under the 44px platform minimum, on the controls a player uses
+	-- most. Patching them one at a time leaves the next scale-sized button to
+	-- rediscover it; the constraint belongs where the button is made.
+	--
+	-- A MINIMUM only. Buttons larger than the floor are untouched, so this
+	-- changes nothing on a desktop and rescues the small screens.
+	local floor = Instance.new("UISizeConstraint")
+	floor.Name = "TouchFloor"
+	floor.MinSize = Vector2.new(UITheme.Scale.TouchTarget, UITheme.Scale.TouchTarget)
+	floor.Parent = container
 
 	-- Shadow Offsets use a subtle, compact 3px pixel offset
 	local offset = 3
@@ -305,17 +373,28 @@ function UITheme.panel(size: UDim2, position: UDim2, dark: boolean?): Frame
 end
 
 function UITheme.overlay(title: string): (Frame, Frame, TextButton)
+	-- A REAL SCRIM. At 0.2 transparency in the SAME colour as the panel, the
+	-- backdrop neither dimmed the game nor separated the panel from it -- the
+	-- overlay simply washed everything one shade darker. A near-opaque black
+	-- scrim is what makes a modal read as being in front of something.
 	local fullOverlay = Instance.new("Frame")
 	fullOverlay.Size = UDim2.fromScale(1, 1)
 	fullOverlay.Position = UDim2.fromScale(0, 0)
-	fullOverlay.BackgroundColor3 = UITheme.Colors.BaseCream
-	fullOverlay.BackgroundTransparency = 0.2
+	fullOverlay.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+	fullOverlay.BackgroundTransparency = 0.45
 	fullOverlay.Visible = false
 	fullOverlay.ZIndex = UITheme.Layer.Overlay
 
+	-- CAPPED IN PIXELS AS WELL AS SCALED. At a flat 0.85 the panel stretched to
+	-- fill an ultrawide monitor, giving cards a metre of empty width and text
+	-- lines too long to track. Content has a comfortable maximum measure.
 	local container = Instance.new("Frame")
 	container.Name = "Panel"
-	container.Size = UDim2.fromScale(0.85, 0.85)
+	-- Header, divider and body are anchored to one another in pixels rather than
+	-- arranged by a layout -- disjoint bands by construction. Declared so the
+	-- overlap rule can tell a deliberate exception from an oversight.
+	container:SetAttribute("LayoutExempt", true)
+	container.Size = UDim2.fromScale(0.86, 0.86)
 	container.AnchorPoint = Vector2.new(0.5, 0.5)
 	container.Position = UDim2.fromScale(0.5, 0.5)
 	container.BackgroundColor3 = UITheme.Colors.BaseCream
@@ -323,44 +402,119 @@ function UITheme.overlay(title: string): (Frame, Frame, TextButton)
 	container.ZIndex = UITheme.Layer.Overlay + 1
 	container.Parent = fullOverlay
 
+	local sizeCap = Instance.new("UISizeConstraint")
+	sizeCap.MaxSize = Vector2.new(900, 1100)
+	sizeCap.Parent = container
+
 	local corner = Instance.new("UICorner")
-	corner.CornerRadius = UDim.new(0, 16)
+	corner.CornerRadius = UDim.new(0, UITheme.Scale.LG)
 	corner.Parent = container
 
+	-- A 1px EDGE, not a 4px band. The heavy stroke read as a border drawn around
+	-- the panel; a hairline reads as the panel's own edge.
 	local stroke = Instance.new("UIStroke")
 	stroke.Color = UITheme.Colors.ShadowLight
-	stroke.Thickness = 4
+	stroke.Thickness = 1
+	stroke.Transparency = 0.3
 	stroke.Parent = container
+
+	-- THE HEADER IS A FIXED PIXEL BAND, not a fraction of the panel.
+	--
+	-- At `0.08` scale the title was 40px tall on a monitor and 22px on a phone,
+	-- and because it was `TextScaled` the words changed size with the panel --
+	-- so the same screen read as two different designs depending on the display.
+	-- A fixed band with a fixed type size is what makes the chrome consistent.
+	local HEADER_H = 56
 
 	local header = Instance.new("Frame")
 	header.Name = "Header"
-	header.Size = UDim2.fromScale(1, 0.08)
+	header.Size = UDim2.new(1, 0, 0, HEADER_H)
 	header.BackgroundTransparency = 1
 	header.ZIndex = UITheme.Layer.Overlay + 2
 	header.Parent = container
 
+	local headerPad = Instance.new("UIPadding")
+	headerPad.PaddingLeft = UDim.new(0, UITheme.Scale.XL)
+	headerPad.PaddingRight = UDim.new(0, UITheme.Scale.MD)
+	headerPad.Parent = header
+
+	-- Title and close button in a layout, so a long title shortens instead of
+	-- running underneath the close button.
+	local headerLayout = Instance.new("UIListLayout")
+	headerLayout.FillDirection = Enum.FillDirection.Horizontal
+	headerLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	headerLayout.VerticalAlignment = Enum.VerticalAlignment.Center
+	headerLayout.Padding = UDim.new(0, UITheme.Scale.MD)
+	headerLayout.Parent = header
+
 	local titleLabel = Instance.new("TextLabel")
-	titleLabel.Size = UDim2.fromScale(0.8, 1)
-	titleLabel.Position = UDim2.fromScale(0.02, 0)
+	titleLabel.Name = "Title"
+	titleLabel.Size = UDim2.new(0, 0, 1, 0)
 	titleLabel.BackgroundTransparency = 1
 	titleLabel.Font = UITheme.FontHeading
 	titleLabel.Text = title
 	titleLabel.TextColor3 = UITheme.Colors.TextPrimary
-	titleLabel.TextScaled = true
+	titleLabel.TextSize = UITheme.Scale.TextTitle
+	titleLabel.TextScaled = false
 	titleLabel.TextXAlignment = Enum.TextXAlignment.Left
+	titleLabel.TextTruncate = Enum.TextTruncate.AtEnd
+	titleLabel.LayoutOrder = 1
 	titleLabel.ZIndex = UITheme.Layer.Overlay + 3
 	titleLabel.Parent = header
 
+	local titleFlex = Instance.new("UIFlexItem")
+	titleFlex.FlexMode = Enum.UIFlexMode.Fill
+	titleFlex.Parent = titleLabel
+
+	-- A REAL 44px TARGET. It was `0.08` of the panel wide and `0.8` tall, which
+	-- on a phone is roughly 26px -- under the touch floor, and the close control
+	-- is the one every player needs to hit.
 	local closeBtn = Instance.new("TextButton")
-	closeBtn.Size = UDim2.fromScale(0.08, 0.8)
-	closeBtn.Position = UDim2.fromScale(0.9, 0.1)
-	closeBtn.BackgroundTransparency = 1
-	closeBtn.Font = UITheme.Font
-	closeBtn.Text = "X"
-	closeBtn.TextColor3 = UITheme.Colors.Negative
-	closeBtn.TextScaled = true
+	closeBtn.Name = "Close"
+	closeBtn.Size = UDim2.fromOffset(UITheme.Scale.TouchTarget, UITheme.Scale.TouchTarget)
+	closeBtn.BackgroundColor3 = UITheme.Colors.PanelMaroon
+	closeBtn.BackgroundTransparency = 0.35
+	closeBtn.BorderSizePixel = 0
+	closeBtn.Font = UITheme.FontHeading
+	-- A MULTIPLICATION SIGN, not a capital X. The letter is a letter -- it sits
+	-- on the text baseline and reads as a word, which is why the old header
+	-- looked like it had a stray character in the corner.
+	closeBtn.Text = "\u{00D7}"
+	closeBtn.TextColor3 = UITheme.Colors.TextDim
+	closeBtn.TextSize = 24
+	closeBtn.TextScaled = false
+	closeBtn.AutoButtonColor = false
+	closeBtn.LayoutOrder = 2
 	closeBtn.ZIndex = UITheme.Layer.Overlay + 3
 	closeBtn.Parent = header
+
+	local closeCorner = Instance.new("UICorner")
+	closeCorner.CornerRadius = UDim.new(0, UITheme.Scale.RadiusControl)
+	closeCorner.Parent = closeBtn
+
+	-- Hover and press states. Closing is the one control on every panel, and a
+	-- control that never acknowledges the cursor reads as decoration.
+	closeBtn.MouseEnter:Connect(function()
+		closeBtn.TextColor3 = UITheme.Colors.Negative
+		closeBtn.BackgroundTransparency = 0.15
+	end)
+	closeBtn.MouseLeave:Connect(function()
+		closeBtn.TextColor3 = UITheme.Colors.TextDim
+		closeBtn.BackgroundTransparency = 0.35
+	end)
+
+	-- A HAIRLINE UNDER THE HEADER. Without it the title floated over the content
+	-- with nothing separating chrome from body, which is most of why these
+	-- panels read as unfinished.
+	local divider = Instance.new("Frame")
+	divider.Name = "Divider"
+	divider.Size = UDim2.new(1, -UITheme.Scale.XL * 2, 0, 1)
+	divider.Position = UDim2.new(0, UITheme.Scale.XL, 0, HEADER_H)
+	divider.BackgroundColor3 = UITheme.Colors.ShadowLight
+	divider.BackgroundTransparency = 0.5
+	divider.BorderSizePixel = 0
+	divider.ZIndex = UITheme.Layer.Overlay + 2
+	divider.Parent = container
 
 	closeBtn.MouseButton1Click:Connect(function()
 		fullOverlay.Visible = false
@@ -374,17 +528,22 @@ function UITheme.overlay(title: string): (Frame, Frame, TextButton)
 	-- AutomaticCanvasSize means callers do not have to compute their own content
 	-- height; adding a row to any overlay just works. Any UIGridLayout or
 	-- UIListLayout inside contributes to the canvas automatically.
+	-- ANCHORED TO THE HEADER IN PIXELS, so the gap between chrome and content is
+	-- the same on every display. The scale-based `0.1` offset it used to carry
+	-- left a growing dead band on tall screens and clipped into the title on
+	-- short ones.
 	local body = Instance.new("ScrollingFrame")
 	body.Name = "Body"
-	body.Size = UDim2.fromScale(0.96, 0.88)
-	body.Position = UDim2.fromScale(0.02, 0.1)
+	body.Size = UDim2.new(1, 0, 1, -(HEADER_H + UITheme.Scale.SM))
+	body.Position = UDim2.new(0, 0, 0, HEADER_H + UITheme.Scale.SM)
 	body.BackgroundTransparency = 1
 	body.BorderSizePixel = 0
 	body.ZIndex = UITheme.Layer.Overlay + 2
 	body.AutomaticCanvasSize = Enum.AutomaticSize.Y
 	body.CanvasSize = UDim2.fromScale(0, 0)
-	body.ScrollBarThickness = 8
+	body.ScrollBarThickness = 6
 	body.ScrollBarImageColor3 = UITheme.Colors.ShadowLight
+	body.ScrollBarImageTransparency = 0.4
 	body.ScrollingDirection = Enum.ScrollingDirection.Y
 	body.ElasticBehavior = Enum.ElasticBehavior.WhenScrollable
 	body.Parent = container
@@ -673,6 +832,478 @@ end
 
 function UITheme.elementColor(elementId: string): Color3
 	return (UITheme.ElementColors and UITheme.ElementColors[elementId]) or UITheme.Colors.TextDim
+end
+
+--------------------------------------------------------------------------------
+-- LAYOUT PRIMITIVES
+--
+-- These exist to make overlapping content IMPOSSIBLE rather than merely
+-- unlikely. Every builder below arranges its children with a UIListLayout, so
+-- two siblings cannot occupy the same pixels no matter what text arrives at
+-- runtime -- which is the failure mode hand-placed scale coordinates have, and
+-- the reason the shop and shapes panels had text drawn through their buttons.
+--
+-- The rule they encode: a container either POSITIONS its children with a layout,
+-- or it holds exactly one child. Never a mix of hand-placed siblings.
+--------------------------------------------------------------------------------
+
+-- A vertical stack. Children are laid out top to bottom with a uniform gap and
+-- a uniform inset, and the canvas grows to fit them.
+--
+-- `parent` may be a ScrollingFrame, in which case AutomaticCanvasSize is already
+-- doing the work and this just supplies the rhythm.
+function UITheme.verticalStack(parent: Instance, gap: number?, inset: number?): UIListLayout
+	local layout = Instance.new("UIListLayout")
+	layout.Name = "Stack"
+	layout.FillDirection = Enum.FillDirection.Vertical
+	layout.SortOrder = Enum.SortOrder.LayoutOrder
+	layout.Padding = UDim.new(0, gap or UITheme.Scale.MD)
+	layout.Parent = parent
+
+	local pad = Instance.new("UIPadding")
+	pad.Name = "StackPadding"
+	local i = inset or UITheme.Scale.LG
+	pad.PaddingTop = UDim.new(0, i)
+	pad.PaddingBottom = UDim.new(0, i)
+	pad.PaddingLeft = UDim.new(0, i)
+	pad.PaddingRight = UDim.new(0, i)
+	pad.Parent = parent
+
+	return layout
+end
+
+-- A CARD: one surface holding one idea.
+--
+-- Returns the card and its CONTENT frame. Callers parent into the content
+-- frame, never into the card itself, so the card's padding and its border are
+-- not something every call site has to re-derive.
+--
+-- Fixed pixel height by default because a card's height is set by what it
+-- holds, not by the screen it is on -- a 44%-of-panel card is a different thing
+-- on a phone and a monitor, and that is exactly how the shop grid ended up with
+-- text spilling past its own edges.
+-- Passing `height` fixes the card; passing nil lets it GROW TO ITS CONTENT,
+-- with `Scale.RowHeight` as the floor.
+--
+-- The growing form is the right default for anything holding wrapped prose. A
+-- fixed height is a resolution assumption: the same blurb occupies one line on a
+-- monitor and three on a phone, so a card sized for the first clips on the
+-- second -- content escaping its box, which is the exact defect class these
+-- primitives exist to make impossible.
+function UITheme.card(height: number?): (Frame, Frame)
+	local card = Instance.new("Frame")
+	card.Name = "Card"
+	if height ~= nil then
+		card.Size = UDim2.new(1, 0, 0, height)
+	else
+		card.Size = UDim2.new(1, 0, 0, 0)
+		card.AutomaticSize = Enum.AutomaticSize.Y
+		local floor = Instance.new("UISizeConstraint")
+		floor.MinSize = Vector2.new(0, UITheme.Scale.RowHeight)
+		floor.Parent = card
+	end
+	card.BackgroundColor3 = UITheme.Colors.PanelMaroon
+	card.BorderSizePixel = 0
+
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, UITheme.Scale.RadiusCard)
+	corner.Parent = card
+
+	-- A HAIRLINE, not a heavy frame. The old 2px stroke at 50% transparency read
+	-- as a box drawn around content rather than as a raised surface; at 1px in a
+	-- colour close to the card it reads as an edge catching light.
+	local stroke = Instance.new("UIStroke")
+	stroke.Color = UITheme.Colors.ShadowLight
+	stroke.Thickness = 1
+	stroke.Transparency = 0.45
+	stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+	stroke.Parent = card
+
+	local content = Instance.new("Frame")
+	content.Name = "Content"
+	if height ~= nil then
+		content.Size = UDim2.fromScale(1, 1)
+	else
+		-- A `fromScale(1, 1)` child inside an auto-sizing parent is circular --
+		-- the parent measures its children while this child measures the parent
+		-- -- and resolves to zero. Full width, self-measured height.
+		content.Size = UDim2.new(1, 0, 0, 0)
+		content.AutomaticSize = Enum.AutomaticSize.Y
+	end
+	content.BackgroundTransparency = 1
+	content.Parent = card
+
+	local pad = Instance.new("UIPadding")
+	pad.PaddingLeft = UDim.new(0, UITheme.Scale.MD)
+	pad.PaddingRight = UDim.new(0, UITheme.Scale.MD)
+	pad.PaddingTop = UDim.new(0, UITheme.Scale.SM)
+	pad.PaddingBottom = UDim.new(0, UITheme.Scale.SM)
+	pad.Parent = content
+
+	return card, content
+end
+
+-- A ROW: a text column on the left, an actions column on the right, which
+-- CANNOT overlap because a horizontal UIListLayout assigns them disjoint tracks.
+--
+-- THIS IS THE FIX FOR THE COLLISION CLASS. The shapes card previously placed a
+-- status label at x 0.44 width 0.22 and a button at x 0.585 -- a 7.5% overlap
+-- that no test could see and that only appeared once the status text was long
+-- enough to fill its box. Here the text column is sized by what remains after
+-- the actions are measured, so a longer label shortens the text rather than
+-- running underneath a button.
+--
+-- Returns the row, the text column, and the actions column. The actions column
+-- is right-aligned and sized to its content.
+-- As with `card`, a nil height means "measure yourself from the text column",
+-- which is what a row inside a growing card must do.
+function UITheme.listRow(height: number?): (Frame, Frame, Frame)
+	local row = Instance.new("Frame")
+	row.Name = "Row"
+	if height ~= nil then
+		row.Size = UDim2.new(1, 0, 0, height)
+	else
+		row.Size = UDim2.new(1, 0, 0, 0)
+		row.AutomaticSize = Enum.AutomaticSize.Y
+	end
+	row.BackgroundTransparency = 1
+
+	local layout = Instance.new("UIListLayout")
+	layout.FillDirection = Enum.FillDirection.Horizontal
+	layout.SortOrder = Enum.SortOrder.LayoutOrder
+	layout.VerticalAlignment = Enum.VerticalAlignment.Center
+	layout.Padding = UDim.new(0, UITheme.Scale.MD)
+	layout.Parent = row
+
+	-- WHICHEVER AXIS THE ROW DOES NOT FIX, THE COLUMNS MEASURE.
+	--
+	-- A `1, 0` scale height inside an auto-sizing row is the same circular
+	-- measurement as a `fromScale(1, 1)` child inside an auto-sizing card, and
+	-- collapses the same way. When the row is self-measuring, the text column is
+	-- what determines its height, so the column measures its own stack and the
+	-- actions match whatever results.
+	local autoHeight = height == nil
+
+	local textCol = Instance.new("Frame")
+	textCol.Name = "TextColumn"
+	-- Takes the remaining width. `UIFlexItem` is what makes this a real column
+	-- rather than a guess: the actions measure themselves first and the text
+	-- column absorbs whatever is left, at any resolution.
+	textCol.Size = if autoHeight then UDim2.new(0, 0, 0, 0) else UDim2.new(0, 0, 1, 0)
+	if autoHeight then
+		textCol.AutomaticSize = Enum.AutomaticSize.Y
+	end
+	textCol.BackgroundTransparency = 1
+	textCol.LayoutOrder = 1
+	textCol.Parent = row
+
+	local flex = Instance.new("UIFlexItem")
+	flex.FlexMode = Enum.UIFlexMode.Fill
+	flex.Parent = textCol
+
+	local textStack = Instance.new("UIListLayout")
+	textStack.FillDirection = Enum.FillDirection.Vertical
+	textStack.SortOrder = Enum.SortOrder.LayoutOrder
+	textStack.VerticalAlignment = Enum.VerticalAlignment.Center
+	textStack.Padding = UDim.new(0, UITheme.Scale.XS)
+	textStack.Parent = textCol
+
+	local actions = Instance.new("Frame")
+	actions.Name = "Actions"
+	-- Width always measures to the buttons. Height follows the row when the row
+	-- is fixed, and measures the buttons when it is not -- an `AutomaticSize.XY`
+	-- frame whose only children are 44px buttons is 44px tall, which is the
+	-- correct minimum for a self-measuring row.
+	actions.AutomaticSize = if autoHeight
+		then Enum.AutomaticSize.XY
+		else Enum.AutomaticSize.X
+	actions.Size = if autoHeight then UDim2.new(0, 0, 0, 0) else UDim2.new(0, 0, 1, 0)
+	actions.BackgroundTransparency = 1
+	actions.LayoutOrder = 2
+	actions.Parent = row
+
+	local actionLayout = Instance.new("UIListLayout")
+	actionLayout.FillDirection = Enum.FillDirection.Horizontal
+	actionLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	actionLayout.VerticalAlignment = Enum.VerticalAlignment.Center
+	actionLayout.HorizontalAlignment = Enum.HorizontalAlignment.Right
+	actionLayout.Padding = UDim.new(0, UITheme.Scale.SM)
+	actionLayout.Parent = actions
+
+	return row, textCol, actions
+end
+
+-- A text line for use INSIDE a laid-out column.
+--
+-- DELIBERATELY NOT `TextScaled`. TextScaled sizes text to its box, which makes
+-- every label a different size and is why the old panels read as ransom notes --
+-- a card title at 40px next to a row title at 19px, with no intent behind
+-- either. A fixed size from the type ladder is what makes a hierarchy legible.
+--
+-- Height is fixed to the line height so the vertical layout can measure it.
+function UITheme.textLine(text: string, size: number, colour: Color3?, weight: Enum.Font?): TextLabel
+	local label = Instance.new("TextLabel")
+	label.Name = "Line"
+	label.Size = UDim2.new(1, 0, 0, math.floor(size * 1.35 + 0.5))
+	label.BackgroundTransparency = 1
+	label.Font = weight or UITheme.Font
+	label.Text = text
+	label.TextSize = size
+	label.TextScaled = false
+	label.TextColor3 = colour or UITheme.Colors.TextPrimary
+	label.TextXAlignment = Enum.TextXAlignment.Left
+	label.TextYAlignment = Enum.TextYAlignment.Center
+	label.TextTruncate = Enum.TextTruncate.AtEnd
+	label.ZIndex = 5
+	return label
+end
+
+-- A wrapping paragraph that reports its own height, for prose whose length is
+-- not known up front. Sized by the layout, not by a guessed fraction.
+function UITheme.paragraph(text: string, size: number?, colour: Color3?): TextLabel
+	local label = Instance.new("TextLabel")
+	label.Name = "Paragraph"
+	label.Size = UDim2.new(1, 0, 0, 0)
+	label.AutomaticSize = Enum.AutomaticSize.Y
+	label.BackgroundTransparency = 1
+	label.Font = UITheme.Font
+	label.Text = text
+	label.TextSize = size or UITheme.Scale.TextBody
+	label.TextScaled = false
+	label.TextWrapped = true
+	label.TextColor3 = colour or UITheme.Colors.TextDim
+	label.TextXAlignment = Enum.TextXAlignment.Left
+	label.TextYAlignment = Enum.TextYAlignment.Top
+	label.ZIndex = 5
+	return label
+end
+
+-- A SOLID ACTION BUTTON, sized to its caption and never below the touch floor.
+--
+-- WHY NOT `neumorphicButton`. That builder takes a UDim2 size from the caller,
+-- which is how a "USE 5<>" caption ended up in a box narrower than its own text
+-- while a "BUY" caption got one four times too wide. This one measures the
+-- caption and adds padding, so a button is exactly as wide as it needs to be
+-- and every button in a row shares one height.
+--
+-- `emphasis` chooses the visual weight: "primary" is the one dominant action on
+-- a screen, "secondary" is subordinate, "quiet" is a text-weight action. Exactly
+-- one primary per screen (ui_ux_design skill S1).
+function UITheme.actionButton(text: string, emphasis: string, accent: Color3?): TextButton
+	local button = Instance.new("TextButton")
+	button.Name = "Action"
+	button.AutomaticSize = Enum.AutomaticSize.X
+	button.Size = UDim2.new(0, 0, 0, UITheme.Scale.TouchTarget)
+	button.Font = UITheme.FontHeading
+	button.Text = text
+	button.TextSize = UITheme.Scale.TextBody
+	button.TextScaled = false
+	button.BorderSizePixel = 0
+	button.AutoButtonColor = false
+	button.ZIndex = 6
+
+	local pad = Instance.new("UIPadding")
+	pad.PaddingLeft = UDim.new(0, UITheme.Scale.LG)
+	pad.PaddingRight = UDim.new(0, UITheme.Scale.LG)
+	pad.Parent = button
+
+	-- A MINIMUM WIDTH as well as a minimum height. A two-character caption like
+	-- "OK" would otherwise produce a button narrower than the touch floor even
+	-- with padding, which passes a height check and still cannot be hit.
+	local sizeConstraint = Instance.new("UISizeConstraint")
+	sizeConstraint.MinSize = Vector2.new(UITheme.Scale.TouchTarget, UITheme.Scale.TouchTarget)
+	sizeConstraint.Parent = button
+
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, UITheme.Scale.RadiusControl)
+	corner.Parent = button
+
+	local tone = accent or UITheme.Colors.Cash
+	if emphasis == "primary" then
+		button.BackgroundColor3 = tone
+		button.BackgroundTransparency = 0
+		-- Dark ink on a saturated fill. White on orange fails the 4.5:1 contrast
+		-- floor at this type size; the panel's own near-black clears it easily.
+		button.TextColor3 = UITheme.Colors.PanelDeep
+	elseif emphasis == "secondary" then
+		button.BackgroundColor3 = UITheme.Colors.BaseCream
+		button.BackgroundTransparency = 0
+		button.TextColor3 = tone
+		local stroke = Instance.new("UIStroke")
+		stroke.Color = tone
+		stroke.Thickness = 1
+		stroke.Transparency = 0.4
+		stroke.Parent = button
+	else
+		button.BackgroundTransparency = 1
+		button.TextColor3 = UITheme.Colors.TextDim
+	end
+
+	-- PRESSED STATE IS MANDATORY (ui_ux_design skill S3: every interactive
+	-- element has a visible pressed state).
+	--
+	-- THE PRESS AND THE DISABLED DIM MUST NOT SHARE A CHANNEL. Both wanted
+	-- `TextTransparency`, and because the press handlers restored a value
+	-- captured at CONSTRUCTION, moving the cursor across a disabled button fired
+	-- `MouseLeave` and reset it to fully opaque -- so a greyed-out FORGE button
+	-- repainted itself as enabled while staying unclickable. `Interactable =
+	-- false` does not suppress hover signals, so the handler still ran.
+	--
+	-- The press therefore paints a CHILD overlay instead, leaving
+	-- `TextTransparency` to mean one thing only: whether the control is
+	-- available. Two states, two properties, no interference.
+	local press = Instance.new("Frame")
+	press.Name = "PressVeil"
+	press.Size = UDim2.fromScale(1, 1)
+	press.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+	press.BackgroundTransparency = 1
+	press.BorderSizePixel = 0
+	press.Visible = false
+	press.ZIndex = button.ZIndex + 1
+	press.Parent = button
+
+	local pressCorner = Instance.new("UICorner")
+	pressCorner.CornerRadius = UDim.new(0, UITheme.Scale.RadiusControl)
+	pressCorner.Parent = press
+
+	button.MouseButton1Down:Connect(function()
+		press.BackgroundTransparency = 0.72
+		press.Visible = true
+	end)
+	button.MouseButton1Up:Connect(function()
+		press.Visible = false
+	end)
+	button.MouseLeave:Connect(function()
+		press.Visible = false
+	end)
+
+	return button
+end
+
+-- A STATUS PILL: a short state word in its own tinted chip.
+--
+-- Replaces the bare coloured text that used to sit loose next to buttons. A
+-- word like "OWNED" in orange next to a button in orange reads as part of the
+-- button; in a chip it reads as a state, which is what it is. Colour is never
+-- the only signal (skill S3) -- the chip's presence and its text both carry it.
+function UITheme.statusPill(text: string, colour: Color3): Frame
+	local pill = Instance.new("Frame")
+	pill.Name = "Pill"
+	pill.AutomaticSize = Enum.AutomaticSize.X
+	-- Height from the ladder, not a magic 22: small text plus a step of padding
+	-- above and below, so a chip stays proportional if the type scale moves.
+	pill.Size = UDim2.new(0, 0, 0, UITheme.Scale.TextSmall + UITheme.Scale.SM)
+	pill.BackgroundColor3 = colour
+	pill.BackgroundTransparency = 0.82
+	pill.BorderSizePixel = 0
+
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(1, 0)
+	corner.Parent = pill
+
+	local pad = Instance.new("UIPadding")
+	pad.PaddingLeft = UDim.new(0, UITheme.Scale.SM)
+	pad.PaddingRight = UDim.new(0, UITheme.Scale.SM)
+	pad.Parent = pill
+
+	local label = Instance.new("TextLabel")
+	label.Name = "Label"
+	label.AutomaticSize = Enum.AutomaticSize.X
+	label.Size = UDim2.new(0, 0, 1, 0)
+	label.BackgroundTransparency = 1
+	label.Font = UITheme.FontHeading
+	label.Text = text
+	label.TextSize = UITheme.Scale.TextSmall
+	label.TextScaled = false
+	label.TextColor3 = colour
+	label.ZIndex = 6
+	label.Parent = pill
+
+	return pill
+end
+
+-- Repoints a pill built by `statusPill` at a new state.
+function UITheme.setPill(pill: Frame, text: string, colour: Color3): ()
+	pill.BackgroundColor3 = colour
+	local label = pill:FindFirstChild("Label")
+	if label ~= nil and label:IsA("TextLabel") then
+		label.Text = text
+		label.TextColor3 = colour
+	end
+end
+
+-- THE LAYOUT CONTRACT, as a function rather than as a claim.
+--
+-- WHY THIS IS HERE. The panels' defining defect was overlapping siblings, and
+-- the natural acceptance criterion -- "no two elements in a card intersect" --
+-- cannot be checked by this project's suite: `new()` needs a LocalPlayer and the
+-- suite runs server-side, so no panel can be constructed and no AbsoluteSize
+-- measured (L-036). An acceptance criterion that cannot be evaluated is not a
+-- criterion, and asserting it anyway is how a green suite comes to certify a
+-- property nobody tested (L-051).
+--
+-- So the property is restated as something checkable. Overlap is impossible when
+-- a container positions its children with a layout; it is possible exactly when
+-- siblings are hand-placed. This function answers the question the suite CAN
+-- ask: does this container arbitrate its own children?
+--
+-- It takes an instance and is called on live panels by the in-Studio checks, and
+-- its RULE is asserted by the suite against synthetic containers -- which is the
+-- part that runs everywhere.
+function UITheme.arbitratesChildren(container: Instance): boolean
+	-- A layout of any direction assigns disjoint tracks.
+	if container:FindFirstChildOfClass("UIListLayout") ~= nil
+		or container:FindFirstChildOfClass("UIGridLayout") ~= nil
+		or container:FindFirstChildOfClass("UIPageLayout") ~= nil
+		or container:FindFirstChildOfClass("UITableLayout") ~= nil then
+		return true
+	end
+
+	-- PIXEL-ANCHORED CHROME IS THE ONE EXEMPTION, and it is declared rather than
+	-- assumed. The overlay's own container holds a header, a divider and a body
+	-- at fixed pixel offsets computed from one header height -- bands that cannot
+	-- overlap because each begins where the last ends, but which no layout
+	-- arbitrates. Requiring a layout there would mean nesting the scrolling body
+	-- inside another list for no benefit.
+	--
+	-- Opting in EXPLICITLY, by name, is what keeps this from becoming a hole:
+	-- a container claiming the exemption has to say so, and "someone marked this
+	-- deliberately" is auditable in a way that a silent pass is not.
+	if container:GetAttribute("LayoutExempt") == true then
+		return true
+	end
+
+	-- Otherwise it is safe only while it holds at most one positioned child.
+	-- Non-GuiObjects (UICorner, UIStroke, UIPadding, constraints) do not occupy
+	-- layout space and are not counted.
+	local positioned = 0
+	for _, child in ipairs(container:GetChildren()) do
+		if child:IsA("GuiObject") then
+			positioned += 1
+			if positioned > 1 then
+				return false
+			end
+		end
+	end
+	return true
+end
+
+-- Enables or disables a button built by `actionButton`.
+--
+-- Separate from `setEnabled`, which knows about neumorphic buttons and toggles.
+-- This one dims the whole control uniformly, which is correct here because the
+-- caption IS the button rather than a child label.
+function UITheme.setActionEnabled(button: TextButton, enabled: boolean): ()
+	button.Active = enabled
+	button.Interactable = enabled
+	button.TextTransparency = if enabled then 0 else 0.55
+	button.BackgroundTransparency = if button.BackgroundTransparency >= 1
+		then 1
+		else (if enabled then 0 else 0.6)
+	local stroke = button:FindFirstChildOfClass("UIStroke")
+	if stroke ~= nil then
+		stroke.Transparency = if enabled then 0.4 else 0.8
+	end
 end
 
 return UITheme
