@@ -328,14 +328,15 @@ end
 -- destructive button in the game.
 -- !! TEMPORARY TEST VALUE -- REVERT TO 1e6 BEFORE SHIPPING !!
 --
--- Lowered to 100_000 on 2026-08-12 at the operator's request, purely so the
--- ascension flow can be exercised end to end without grinding to $1M. The
--- shipping value is ONE MILLION and this line is the only thing to change back.
+-- RESTORED TO THE SHIPPING VALUE on 2026-08-15 at the operator's request, after
+-- being held at 100_000 since 2026-08-12 so the ascension flow could be
+-- exercised without grinding to $1M.
 --
--- Leaving this in would let a player ascend ten times sooner than the economy
--- was tuned for, which inflates Diamond income by roughly 3x per unit of cash
--- (the reward is sqrt-scaled, so ten cheap ascensions beat one expensive one).
-DiceCatalog.ASCEND_MIN_LIFETIME_CASH = 100000 -- TEST VALUE; ship 1e6
+-- The test value could not ship: it lets a player ascend ten times sooner than
+-- the economy was tuned for, inflating Diamond income by roughly 3x per unit of
+-- cash, because the reward is sqrt-scaled and ten cheap ascensions beat one
+-- expensive one.
+DiceCatalog.ASCEND_MIN_LIFETIME_CASH = 1e6
 
 -- Diamonds a reset would grant at a given lifetime cash. Sub-linear on purpose:
 -- doubling a run's earnings does not double its prestige payout, so a player is
@@ -362,13 +363,27 @@ function DiceCatalog.ascensionDiamonds(lifetimeCash: number): number
 	return math.max(1, earned)
 end
 
--- DIE SLOTS (FR-1.1: one to seven dice).
+-- DIE SLOTS.
 --
--- 7 is the ABSOLUTE ceiling and is a hard engineering bound, not a balance
--- knob: `BoardView` holds precomputed layouts for exactly 1..7 dice and
--- `DiceRenderer` pools 7 visuals. Raising this without adding layouts produces
--- dice stacked on top of each other, so the three must move together.
-DiceCatalog.MAX_DIE_SLOTS = 7
+-- RAISED FROM 7 TO 12 on 2026-08-15 at the operator's request, and the old
+-- comment here claiming 7 was "a hard engineering bound" was STALE -- it
+-- described a renderer that no longer exists. Both constraints it named were
+-- removed by the Route A rebuild: `BoardView` no longer holds precomputed
+-- `LAYOUTS[count][index]` tables (it rejection-samples rest points with a
+-- minimum-separation test) and `DiceRenderer` no longer pools a fixed seven
+-- visuals (`ensureSlot` grows on demand). A comment asserting a constraint that
+-- has since been engineered away is worse than no comment: it deters exactly
+-- the change it no longer guards against.
+--
+-- 12 IS A BALANCE NUMBER, and the board is not the limit. `getDieRadius` shrinks
+-- dice as 1/sqrt(count) past the curve, so total occupied felt is CONSTANT at
+-- any count -- measured, the dice need ~75 square studs against ~412 available
+-- at twelve. The binding constraint is legibility: at twelve the die radius is
+-- 1.53 studs and a numeral still reads; far beyond that the dice become tokens.
+--
+-- The ascension ladder below now has nine rungs instead of four, which is the
+-- point of raising it -- prestige had run out of slots to give back.
+DiceCatalog.MAX_DIE_SLOTS = 12
 DiceCatalog.SLOT_BASE_COST = 1000
 
 -- Slots available before the first ascension.
@@ -381,9 +396,15 @@ DiceCatalog.BASE_DIE_SLOT_CAP = 3
 -- entire slot progression was spent within the first run and prestige had one
 -- less thing to give back.
 --
---   ascensions 0 -> 3 slots      ascensions 3 -> 6 slots
---   ascensions 1 -> 4 slots      ascensions 4+ -> 7 slots (hard max)
---   ascensions 2 -> 5 slots
+--   ascensions 0 -> 3 slots       ascensions 5 -> 8 slots
+--   ascensions 1 -> 4 slots       ascensions 6 -> 9 slots
+--   ascensions 2 -> 5 slots       ascensions 7 -> 10 slots
+--   ascensions 3 -> 6 slots       ascensions 8 -> 11 slots
+--   ascensions 4 -> 7 slots       ascensions 9+ -> 12 slots (max)
+--
+-- Nine rungs since MAX_DIE_SLOTS rose to 12, where there were four. The Cash
+-- price doubles per slot, so the twelfth costs $1.02M against a $1M ascension
+-- threshold -- the last slots are a late-run goal rather than an afterthought.
 --
 -- Clamped at BOTH ends. The lower clamp matters because an existing player may
 -- already own more slots than their ascension count now permits -- see

@@ -401,11 +401,45 @@ function V7MenuPanel.new(): V7MenuController
 		model.Parent = vp
 
 		local cam = Instance.new("Camera")
-		-- Framed from the solid's own extent rather than a fixed distance, so a
-		-- flat D2 and a fat D20 both fill the same box.
 		local _, size = model:GetBoundingBox()
-		local reach = math.max(size.X, size.Y, size.Z) * 0.5
-		local distance = math.max(2.2, reach * 3.6)
+
+		-- FRAMED FROM THE BOUNDING SPHERE, NOT THE AXIS-ALIGNED EXTENT.
+		--
+		-- Extent is the wrong measure for a spinning object, and the D6 proved
+		-- it: the operator reported it "too huge compared to the rest".
+		-- Measured across all twelve solids, every bounding SPHERE is exactly
+		-- 3.00 -- the builder normalises them -- while the axis-aligned extents
+		-- range from 2.76 to 5.01. A cube's widest axis is its EDGE; a
+		-- polyhedron's is its long diagonal, so the same physical size reports
+		-- very differently. Framing on extent pulled the D6's camera 44% closer
+		-- than the D20's and made it apparent-size 1.21 against everything
+		-- else's ~0.68.
+		--
+		-- The sphere is also what the eye actually reads, because a rotating die
+		-- presents every orientation in turn -- so the silhouette the viewer
+		-- integrates is the sphere, not whichever axis happens to face front.
+		-- Same reasoning as `measureRadius` in DiceRenderer (L-029).
+		local centre = model:GetPivot().Position
+		local sphere = 0
+		for _, d in ipairs(model:GetDescendants()) do
+			if d:IsA("BasePart") and d.Name ~= "Pivot" then
+				local r = (d.Position - centre).Magnitude + d.Size.Magnitude * 0.5
+				if r > sphere then
+					sphere = r
+				end
+			end
+		end
+		-- Falls back to the extent if a model somehow has no measurable parts,
+		-- so a preview is never framed at distance zero.
+		if sphere <= 0 then
+			sphere = math.max(size.X, size.Y, size.Z) * 0.5
+		end
+		-- 2.9x rather than 3.6x. The multiplier was tuned against extents that
+		-- averaged ~4.8, and a sphere of 3.0 is a smaller number for the same
+		-- physical die -- so keeping 3.6 would have made every preview uniformly
+		-- correct and uniformly too small. This restores the framing the good
+		-- tiles already had, now applied to all twelve equally.
+		local distance = math.max(2.2, sphere * 2.9)
 
 		-- THE ELEVATION FOLLOWS THE SHAPE'S FLATNESS.
 		--

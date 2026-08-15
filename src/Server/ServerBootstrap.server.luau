@@ -185,7 +185,11 @@ end)
 -- EXACT, NOT ADDITIVE. It trims as well as grants, so lowering the number gives
 -- a smaller board on the next join rather than stranding the profile at whatever
 -- the high-water mark was. Without that this would be a one-way door.
-local PLAYTEST_DIE_COUNT = 1
+-- ZERO = OFF, which is the shipping state (restored 2026-08-15 at the
+-- operator's request). Set it to a positive number in Studio to force that many
+-- dice on the board for a playtest; the guard below makes it inert in any live
+-- server regardless.
+local PLAYTEST_DIE_COUNT = 0
 
 local function applyPlaytestDieCount(player: Player): ()
 	if PLAYTEST_DIE_COUNT <= 0 or not RunService:IsStudio() then
