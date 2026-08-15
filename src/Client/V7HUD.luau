@@ -19,6 +19,8 @@ export type V7HUDController = {
 	gemsLabel: TextLabel,
 	diamondsLabel: TextLabel,
 	multValue: TextLabel,
+	-- The MULT chip's caption, which reads "LOCKED" while StreakStrength is 0.
+	multCaption: TextLabel,
 	streakValue: TextLabel,
 	riskIcon: TextLabel,
 	riskValue: TextLabel,
@@ -35,7 +37,11 @@ export type V7HUDController = {
 	-- `voidRiskPct` is the CURRENT die's void probability, computed client-side
 	-- from its own mass distribution -- never sent by the server, which would be
 	-- an outcome-shaped value crossing the wire (NFR-5). nil means "unknown yet".
-	updateStreak: (self: V7HUDController, multiplier: number, streak: number, voidRiskPct: number?) -> (),
+	-- `multUnlocked` is false when StreakStrength is 0, which pins the multiplier
+	-- at 1 regardless of streak length. Optional so an un-updated caller keeps
+	-- the previous behaviour instead of wrongly reporting the bonus as locked.
+	updateStreak: (self: V7HUDController, multiplier: number, streak: number,
+		voidRiskPct: number?, multUnlocked: boolean?) -> (),
 	flashPayout: (self: V7HUDController, payout: number, voidHit: boolean) -> (),
 	onMenuClicked: (self: V7HUDController, callback: (menuId: string) -> ()) -> (),
 	onRollClicked: (self: V7HUDController, callback: () -> ()) -> (),
@@ -236,53 +242,23 @@ function V7HUD.new(): V7HUDController
 	-- carrying its own constraint.
 
 	do
-		local ring = Instance.new("Frame")
-		ring.Name = "GearRing"
-		ring.AnchorPoint = Vector2.new(0.5, 0.5)
-		ring.Position = UDim2.fromScale(0.5, 0.5)
-		ring.Size = UDim2.fromScale(0.52, 0.52)
-		ring.BackgroundTransparency = 1
-		ring.ZIndex = 6
-		ring.Parent = gearBtn
+		local gearIcon = Instance.new("ImageLabel")
+		gearIcon.Name = "GearIcon"
+		gearIcon.AnchorPoint = Vector2.new(0.5, 0.5)
+		gearIcon.Position = UDim2.fromScale(0.5, 0.5)
+		gearIcon.Size = UDim2.fromScale(0.85, 0.85)
+		gearIcon.BackgroundTransparency = 1
+		gearIcon.Image = UITheme.Icons.SettingsGear
+		gearIcon.ZIndex = 6
+		gearIcon.Parent = gearBtn
 
-		local ringCorner = Instance.new("UICorner")
-		ringCorner.CornerRadius = UDim.new(1, 0)
-		ringCorner.Parent = ring
+		local corner = Instance.new("UICorner")
+		corner.CornerRadius = UDim.new(1, 0)
+		corner.Parent = gearIcon
 
-		local ringStroke = Instance.new("UIStroke")
-		ringStroke.Color = UITheme.Colors.TextDim
-		ringStroke.Thickness = 3
-		ringStroke.Parent = ring
-
-		-- The hub. A gear reads as a gear because of the hole in the middle.
-		local hub = Instance.new("Frame")
-		hub.Name = "GearHub"
-		hub.AnchorPoint = Vector2.new(0.5, 0.5)
-		hub.Position = UDim2.fromScale(0.5, 0.5)
-		hub.Size = UDim2.fromScale(0.34, 0.34)
-		hub.BackgroundColor3 = UITheme.Colors.BaseCream
-		hub.BorderSizePixel = 0
-		hub.ZIndex = 7
-		hub.Parent = ring
-
-		local hubCorner = Instance.new("UICorner")
-		hubCorner.CornerRadius = UDim.new(1, 0)
-		hubCorner.Parent = hub
-
-		-- Four teeth on the diagonals. Rotation is a property, so these cost
-		-- nothing to place and never depend on a font.
-		for i = 0, 3 do
-			local tooth = Instance.new("Frame")
-			tooth.Name = "GearTooth" .. tostring(i)
-			tooth.AnchorPoint = Vector2.new(0.5, 0.5)
-			tooth.Position = UDim2.fromScale(0.5, 0.5)
-			tooth.Size = UDim2.fromScale(1.24, 0.26)
-			tooth.Rotation = i * 45
-			tooth.BackgroundColor3 = UITheme.Colors.TextDim
-			tooth.BorderSizePixel = 0
-			tooth.ZIndex = 5
-			tooth.Parent = ring
-		end
+		local aspect = Instance.new("UIAspectRatioConstraint")
+		aspect.AspectRatio = 1
+		aspect.Parent = gearIcon
 	end
 	-- NAMED. Every other pod in this GUI is an anonymous "Frame", which makes
 	-- them indistinguishable by path -- and a control that cannot be addressed by
@@ -378,7 +354,10 @@ function V7HUD.new(): V7HUDController
 		return holder, tag, value
 	end
 
-	local _, _, multValue = chip(1, "MultChip", "MULT", UITheme.Colors.Gems)
+	-- The MULT chip's caption is captured because it CHANGES: it reads "LOCKED"
+	-- until the StreakStrength node is bought, since a multiplier that cannot
+	-- move should say so rather than sit at x1.00 looking broken.
+	local _, multCaption, multValue = chip(1, "MultChip", "MULT", UITheme.Colors.Gems)
 	local _, _, streakValue = chip(2, "StreakChip", "STREAK", UITheme.Colors.Cash)
 	local _, riskIcon, riskValue = chip(3, "RiskChip", "RISK", UITheme.Colors.TextDim)
 
@@ -547,6 +526,7 @@ function V7HUD.new(): V7HUDController
 		gemsLabel = gemsLabel,
 		diamondsLabel = diamondsLabel,
 		multValue = multValue,
+		multCaption = multCaption,
 		streakValue = streakValue,
 		riskIcon = riskIcon,
 		riskValue = riskValue,
@@ -594,8 +574,33 @@ end
 -- `voidRiskPct` is nil until the client has computed one from a die's own
 -- distribution -- shown as "--" rather than a guessed 0%, because a die that has
 -- not been examined yet has an unknown risk, not a safe one.
-function V7HUD:updateStreak(multiplier: number, streak: number, voidRiskPct: number?)
-	self.multValue.Text = "x" .. string.format("%.2f", math.max(1, multiplier))
+function V7HUD:updateStreak(multiplier: number, streak: number, voidRiskPct: number?,
+	multUnlocked: boolean?)
+	-- LOCKED AND "NOT YET BUILDING" ARE DIFFERENT THINGS, and both used to print
+	-- a bare x1.00. StreakStrength is a Diamond node and defaults to zero, so for
+	-- every new player the multiplier is mathematically pinned at 1 no matter how
+	-- long the streak grows -- which reads as a broken readout, and was reported
+	-- as exactly that ("we have a multi option, have never seen it work").
+	--
+	-- `multUnlocked` is optional so any caller that has not been updated keeps
+	-- the old behaviour rather than silently claiming the bonus is locked.
+	if multUnlocked == false then
+		-- A DASH, not "x1.00". A number that cannot move should not be displayed
+		-- as a number -- it invites the player to watch it and conclude the game
+		-- is broken. The dash says "nothing here yet"; the dimmed colour and the
+		-- caption below say why.
+		self.multValue.Text = "--"
+		self.multValue.TextColor3 = UITheme.Colors.TextDim
+		if self.multCaption ~= nil then
+			self.multCaption.Text = "LOCKED"
+		end
+	else
+		self.multValue.Text = "x" .. string.format("%.2f", math.max(1, multiplier))
+		self.multValue.TextColor3 = UITheme.Colors.Gems
+		if self.multCaption ~= nil then
+			self.multCaption.Text = "MULT"
+		end
+	end
 
 	local streakN = math.max(0, math.floor(streak))
 	self.streakValue.Text = tostring(streakN)

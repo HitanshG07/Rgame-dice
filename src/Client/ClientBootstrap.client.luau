@@ -241,15 +241,30 @@ if type(V7HUDModule) == "table" and type(V7HUDModule.new) == "function" then
 	-- Between rolls this is an honest approximation, not a guess invented on the
 	-- client: it uses the same `(1+b)^streak` shape RollService computes.
 	local B_PER_LEVEL = 0.01
-	local function estimateMultiplier(state: any): number
+
+	-- RETURNS THE MULTIPLIER *AND* WHETHER THE BONUS IS EVEN UNLOCKED.
+	--
+	-- Both used to collapse to a bare `1`, and those are OPPOSITE situations
+	-- (L-053): a multiplier of 1 with StreakStrength bought means "keep rolling,
+	-- the streak is building"; a multiplier of 1 with StreakStrength at zero
+	-- means "this readout will never move no matter how long your streak gets".
+	-- Every new player is in the second state, so the HUD showed x1.00 beside a
+	-- STREAK of 10 and looked broken -- reported as "we have a multi option, have
+	-- never seen it work".
+	--
+	-- The maths was always right. What was missing was the display saying which
+	-- of the two states the player is in, which is exactly the defect class where
+	-- a working feature has no observer (L-039).
+	local function estimateMultiplier(state: any): (number, boolean)
 		local level = tonumber(state.diamondTree and state.diamondTree.StreakStrength) or 0
+		local unlocked = level > 0
 		local b = math.max(0, level) * B_PER_LEVEL
 		local streak = tonumber(state.streak) or 0
 		if b <= 0 or streak <= 0 then
-			return 1
+			return 1, unlocked
 		end
 		local m = (1 + b) ^ math.min(streak, 500)
-		return if ForgeMath.isFinite(m) then m else 1
+		return (if ForgeMath.isFinite(m) then m else 1), unlocked
 	end
 
 	-- Held so the RollResult handler below can redraw risk without waiting for
@@ -258,14 +273,22 @@ if type(V7HUDModule) == "table" and type(V7HUDModule.new) == "function" then
 	-- the last known risk is still correct at that instant.
 	local lastVoidRiskPct: number? = nil
 
+	-- Held for the same reason as `lastVoidRiskPct`: `RollResult` carries the
+	-- authoritative multiplier but says nothing about whether the bonus is
+	-- UNLOCKED, and without the last snapshot's answer the post-roll repaint
+	-- would drop the "LOCKED" caption straight back to a misleading x1.00.
+	local lastMultUnlocked = true
+
 	NetClient.onStateSync(function(state: any)
 		if type(state) ~= "table" then
 			return
 		end
 		hudCtrl:updateBalances(state.cash or 0, state.gems or 0, state.diamonds or 0)
 		lastVoidRiskPct = computeVoidRiskPct(state)
-		hudCtrl:updateStreak(estimateMultiplier(state), tonumber(state.streak) or 0,
-			lastVoidRiskPct)
+		local mult, multUnlocked = estimateMultiplier(state)
+		lastMultUnlocked = multUnlocked
+		hudCtrl:updateStreak(mult, tonumber(state.streak) or 0,
+			lastVoidRiskPct, multUnlocked)
 
 		-- THE SEAM THAT WAS MISSING. `updateBalances` was the ONLY thing any
 		-- snapshot reached: the forge never learned what dice existed, and every
@@ -290,7 +313,7 @@ if type(V7HUDModule) == "table" and type(V7HUDModule.new) == "function" then
 		end
 		local mult = tonumber(result.multiplier) or 1
 		local streak = tonumber(result.streak) or 0
-		hudCtrl:updateStreak(mult, streak, lastVoidRiskPct)
+		hudCtrl:updateStreak(mult, streak, lastVoidRiskPct, lastMultUnlocked)
 		local payout = tonumber(result.payout)
 		if payout ~= nil then
 			hudCtrl:flashPayout(payout, result.voidHit == true)
