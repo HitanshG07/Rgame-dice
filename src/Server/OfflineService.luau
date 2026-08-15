@@ -68,8 +68,39 @@ end
 
 OfflineService._hasPremium = hasPremium
 
+--------------------------------------------------------------------------------
+-- PASS OWNERSHIP, INJECTED RATHER THAN REQUIRED.
+--
+-- Three functions here need `PurchaseService.ownsPass` to apply the VIP Vault
+-- floor, and `PurchaseService` already requires this module -- so importing it
+-- back is a cycle. It was previously worked around with a lazy `require` in
+-- each of the three function bodies (L-035), which runs correctly and still
+-- leaves the analyser reporting the cycle at every one of those sites.
+--
+-- Inverting the edge removes it: the bootstrap registers the check, and this
+-- module never names PurchaseService. Three lazy requires collapse to one
+-- injected function, and the per-call `WaitForChild` they each performed goes
+-- with them.
+--
+-- FAIL-CLOSED DEFAULT: `false`, meaning "does not own the pass". An entitlement
+-- must never be granted because wiring is missing -- if the provider is absent
+-- the player gets the standard tier, which is the safe direction to be wrong in.
+local ownsPassProvider: ((Player, string) -> boolean)? = nil
+
+function OfflineService.setOwnsPassProvider(fn: (Player, string) -> boolean): ()
+	ownsPassProvider = fn
+end
+
+local function ownsPass(player: Player, passKey: string): boolean
+	local provider = ownsPassProvider
+	if provider == nil then
+		return false
+	end
+	local ok, result = pcall(provider, player, passKey)
+	return ok and result == true
+end
+
 function OfflineService.getCapacity(player: Player): number
-	local PurchaseService = require(script.Parent:WaitForChild("PurchaseService"))
 	local data = PlayerProfile.get(player)
 	local level = if data ~= nil then (data.Upgrades.VaultCapacity or 0) else 0
 
@@ -100,7 +131,7 @@ function OfflineService.getCapacity(player: Player): number
 	-- VIP SETS A FLOOR rather than overriding. It used to return 24h outright,
 	-- which meant a player with maxed Cash upgrades plus Premium could have been
 	-- entitled to more and been silently cut back to 24 by buying the pass.
-	if PurchaseService.ownsPass(player, "VipVault") then
+	if ownsPass(player, "VipVault") then
 		capacity = math.max(capacity, OfflineService.VIP_CAPACITY_SEC)
 	end
 	return capacity
@@ -123,7 +154,6 @@ end
 -- would have to climb before it clears whatever floor is already in effect, on
 -- top of what has already been bought, bounded by the purchase cap.
 function OfflineService.effectiveBuyableHours(player: Player): number
-	local PurchaseService = require(script.Parent:WaitForChild("PurchaseService"))
 	local data = PlayerProfile.get(player)
 	if not data then
 		return 0
@@ -149,7 +179,7 @@ function OfflineService.effectiveBuyableHours(player: Player): number
 	end
 
 	local floor = 0
-	if PurchaseService.ownsPass(player, "VipVault") then
+	if ownsPass(player, "VipVault") then
 		floor = OfflineService.VIP_CAPACITY_SEC
 	end
 
@@ -160,7 +190,6 @@ function OfflineService.effectiveBuyableHours(player: Player): number
 end
 
 function OfflineService.getEfficiency(player: Player): number
-	local PurchaseService = require(script.Parent:WaitForChild("PurchaseService"))
 	local data = PlayerProfile.get(player)
 	local level = if data ~= nil then (data.Upgrades.VaultEfficiency or 0) else 0
 
@@ -168,7 +197,7 @@ function OfflineService.getEfficiency(player: Player): number
 	if hasPremium(player) then
 		efficiency += OfflineService.PREMIUM_EFFICIENCY_BONUS
 	end
-	if PurchaseService.ownsPass(player, "VipVault") then
+	if ownsPass(player, "VipVault") then
 		efficiency += OfflineService.VIP_EFFICIENCY_BONUS
 	end
 	-- The cap is the whole safety property -- see the header.

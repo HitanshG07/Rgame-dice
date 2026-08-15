@@ -40,6 +40,28 @@ local DiceCatalog = require(script.Parent:WaitForChild("DiceCatalog"))
 
 local DiceMeshBuilder = {}
 
+--------------------------------------------------------------------------------
+-- THE SMALLEST CHAMFER WORTH DRAWING, in model space at the authored ~5-stud
+-- scale. A strip narrower than this bridges an edge whose faces are so nearly
+-- coplanar that the chamfer is invisible when it works, and a flickering
+-- sub-pixel sliver when it does not.
+--
+-- DERIVED FROM THE PROJECTION, not chosen by eye. The board camera resolves
+-- about 38 px per stud at 720p, and a die is rescaled from its 6-stud authored
+-- extent down to a 4-stud radius solo or 2-stud with a full board -- roughly
+-- 0.33x in the worst case. A feature must therefore be about
+--
+--     1 px / (38 px/stud * 0.33) ~= 0.08 studs
+--
+-- to be guaranteed at least one pixel wide with seven dice on the felt. The
+-- offending strips measured 0.0097 studs, an order of magnitude under it, while
+-- every strip that survives this filter is comfortably above.
+--
+-- Deliberately a floor on the BRIDGE distance rather than on the drawn size: it
+-- asks "is there a real gap between these two faces", which is the geometric
+-- question, instead of resizing a part to satisfy a number.
+local MIN_CHAMFER_BRIDGE = 0.08
+
 -- Visual Palette for all 12 shapes
 local DICE_COLORS: { [string]: Color3 } = {
 	D2  = Color3.fromRGB(240, 195, 60),   -- Radiant Gold
@@ -158,6 +180,32 @@ local function draw3DTriangle(
 		local dirBase = baseVec.Unit
 		local halfBase = baseLen / 2
 
+		-- DEGENERATE CHAMFER SLIVERS ARE SKIPPED, NOT DRAWN.
+		--
+		-- Each half of this split becomes a wedge `halfBase` deep, and on the D10
+		-- and D14 -- whose kite facets meet at very shallow angles around the
+		-- equator -- that collapses. MEASURED across the built solids: 10 of the
+		-- D10's chamfer wedges and 7 of the D14's came out 0.0097 studs deep,
+		-- against a healthy 0.062 thickness on their other axis.
+		--
+		-- Projected through the board camera that is 0.50 px at 720p and 0.25 px
+		-- with seven dice on the felt: permanently sub-pixel at every supported
+		-- resolution. A sub-pixel polygon does not draw as a thin line -- the
+		-- rasteriser catches it on some frames and misses it on others, and as
+		-- the die tumbles that per-frame flicker along an edge is exactly the
+		-- shearing that was reported.
+		--
+		-- SKIPPED RATHER THAN WIDENED, and only for CHAMFERS. Widening would push
+		-- the strip proud of the two faces it sits between and deform the
+		-- silhouette -- the same error as the thickness floor that inflated every
+		-- numeral into a cube (L-051). A chamfer this narrow is invisible when it
+		-- works, so dropping it costs nothing: the two facets already meet along
+		-- that edge. Facet plates and numeral strokes are never filtered here,
+		-- because for them a missing part IS a visible hole.
+		if isChamfer and halfBase < MIN_CHAMFER_BRIDGE then
+			return {}
+		end
+
 		local faceCenter = (pA + pB + pC) / 3
 		local rawNormal = baseVec:Cross(heightVec).Unit
 		local normal = if rawNormal:Dot(faceCenter) < 0 then -rawNormal else rawNormal
@@ -227,9 +275,17 @@ local function draw3DTriangle(
 	local rawNormal = (pB - pA):Cross(pC - pA).Unit
 	local normal = if rawNormal:Dot(faceCenter) < 0 then -rawNormal else rawNormal
 
+	-- THE SAME SLIVER FILTER AS THE ISOSCELES BRANCH ABOVE. This is the general
+	-- split, and the two halves it produces are `lenAD` and `lenDC` deep -- so a
+	-- near-degenerate triangle collapses here exactly as it does there. Both
+	-- guards below were `> 0.001`, which passes a 0.0097-stud sliver comfortably;
+	-- filtering only the isosceles path left 10 of these on the D10 and 7 on the
+	-- D14, which is how this second site was found rather than assumed absent.
+	local minSplit = if isChamfer then MIN_CHAMFER_BRIDGE else 0.001
+
 	local createdWedges: { WedgePart } = {}
 	local lenAD = (pA - pD).Magnitude
-	if lenAD > 0.001 then
+	if lenAD > minSplit then
 		local dirA = (pA - pD).Unit
 		local w1 = Instance.new("WedgePart")
 		w1.Name = if isChamfer then "ChamferWedge" else "FacetWedge"
@@ -251,7 +307,7 @@ local function draw3DTriangle(
 	end
 
 	local lenDC = (pC - pD).Magnitude
-	if lenDC > 0.001 then
+	if lenDC > minSplit then
 		local dirC = (pC - pD).Unit
 		local w2 = Instance.new("WedgePart")
 		w2.Name = if isChamfer then "ChamferWedge" else "FacetWedge"
@@ -323,13 +379,20 @@ local function drawQuadFace(
 	return all
 end
 
+-- ANNOTATION ONLY -- no geometry is changed anywhere in this function. The
+-- helpers it delegates to return `{ WedgePart }`, which is not exactly
+-- `{ Instance }`: Luau arrays are INVARIANT in their element type, so a
+-- `{WedgePart}` is not substitutable for an `{Instance}` even though a WedgePart
+-- IS an Instance. Widening the returned arrays at the point of return states the
+-- intent -- callers only ever parent and destroy these -- without touching a
+-- single vertex.
 local function drawPolygon(vertices: { Vector3 }, parent: Instance, color: Color3, thickness: number?): { Instance }
 	local k = #vertices
 	if k < 3 then return {} end
 	if k == 3 then
-		return draw3DTriangle(vertices[1], vertices[2], vertices[3], parent, color, thickness)
+		return draw3DTriangle(vertices[1], vertices[2], vertices[3], parent, color, thickness) :: { Instance }
 	elseif k == 4 then
-		return drawQuadFace(vertices[1], vertices[2], vertices[3], vertices[4], parent, color, thickness)
+		return drawQuadFace(vertices[1], vertices[2], vertices[3], vertices[4], parent, color, thickness) :: { Instance }
 	end
 	local center = Vector3.zero
 	for _, v in ipairs(vertices) do center += v end
@@ -844,7 +907,9 @@ local function buildD12(scale: number, color: Color3): Model
 
 	local faces = {}
 	for _, normal in ipairs(faceNormals) do
-		local fv = {}
+		-- Typed so the comparator below indexes `verts` with a number rather than
+		-- an `unknown`. Annotation only -- the same indices, in the same order.
+		local fv: { number } = {}
 		for vIdx, v in ipairs(verts) do
 			if v.Unit:Dot(normal) > 0.6 then table.insert(fv, vIdx) end
 		end
@@ -854,7 +919,7 @@ local function buildD12(scale: number, color: Color3): Model
 			c /= 5
 			local uAxis = (verts[fv[1]] - c).Unit
 			local vAxis = normal:Cross(uAxis).Unit
-			table.sort(fv, function(a, b)
+			table.sort(fv, function(a: number, b: number)
 				local angA = math.atan2((verts[a] - c):Dot(vAxis), (verts[a] - c):Dot(uAxis))
 				local angB = math.atan2((verts[b] - c):Dot(vAxis), (verts[b] - c):Dot(uAxis))
 				return angA < angB

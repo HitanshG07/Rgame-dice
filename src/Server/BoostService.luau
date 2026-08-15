@@ -26,13 +26,21 @@ function BoostService.addBoost(player: Player, kind: string, multiplier: number,
 		return false
 	end
 
-	return PlayerProfile.mutate(player, function(d)
+	-- BOUND, NOT FORWARDED. `PlayerProfile.mutate` returns `(boolean, string?)`,
+	-- so `return mutate(...)` forwarded BOTH values out of a function declared
+	-- to return one boolean -- "Expected this to be 'boolean', but got
+	-- 'boolean, string?'". Discarding the reason here is deliberate: this
+	-- function's contract is success or failure, and a caller wanting the reason
+	-- should be reading it from `mutate` directly rather than having a second
+	-- return value appear from a single-boolean signature.
+	local ok = PlayerProfile.mutate(player, function(d)
 		local now = os.time()
 		local existing = d.Upgrades["Boost_" .. kind .. "_Expiry"] or 0
 		local startTime = if existing > now then existing else now
 		d.Upgrades["Boost_" .. kind .. "_Expiry"] = startTime + math.floor(durationSec)
 		d.Upgrades["Boost_" .. kind .. "_Mult"] = math.floor(multiplier * 100) -- stored as integer percentage
 	end)
+	return ok
 end
 
 function BoostService.getMultiplier(player: Player, kind: string): number

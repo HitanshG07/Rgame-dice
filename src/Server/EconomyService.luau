@@ -20,6 +20,46 @@ local EconomyService = {}
 -- this we clamp rather than let a float go non-finite and poison the profile.
 local MAX_CURRENCY = 1e300
 
+--------------------------------------------------------------------------------
+-- THE CASH MULTIPLIER, INJECTED RATHER THAN REQUIRED.
+--
+-- `award` needs the 2x-Cash gamepass multiplier, which `PurchaseService` owns.
+-- `PurchaseService` already requires this module's siblings, so requiring it
+-- back forms a cycle: EconomyService -> PurchaseService -> OfflineService ->
+-- EconomyService. That cycle was previously broken with a lazy `require` inside
+-- the function body -- the L-035 workaround -- which WORKS at runtime and still
+-- leaves the analyser reporting the cycle at four separate sites, because the
+-- edge genuinely exists, merely deferred.
+--
+-- INVERTING THE EDGE REMOVES IT. `PurchaseService` registers its multiplier
+-- here at boot; this module never names it. The dependency now points one way,
+-- the analyser has nothing to report, and the runtime behaviour is unchanged.
+--
+-- FAIL-SAFE DEFAULT: 1.0, meaning "no multiplier". If registration has not
+-- happened yet -- a payout during boot, or a test that never wires it -- the
+-- player receives their base rate rather than an error or an inflated award.
+-- The dangerous direction here is UP, so the default is the floor.
+local cashMultiplierProvider: ((Player) -> number)? = nil
+
+function EconomyService.setCashMultiplierProvider(fn: (Player) -> number): ()
+	cashMultiplierProvider = fn
+end
+
+-- Reads the multiplier defensively. A provider that errors or returns nonsense
+-- must not stop a payout, and must never silently scale it by a non-finite
+-- value -- so anything unusable falls back to 1.0.
+local function cashMultiplierFor(player: Player): number
+	local provider = cashMultiplierProvider
+	if provider == nil then
+		return 1
+	end
+	local ok, value = pcall(provider, player)
+	if not ok or type(value) ~= "number" or not ForgeMath.isFinite(value) or value <= 0 then
+		return 1
+	end
+	return value
+end
+
 type Currency = "Cash" | "Gems" | "Diamonds"
 
 -- Currency access is EXPLICIT, one branch per field, rather than a computed
@@ -76,8 +116,7 @@ function EconomyService.credit(player: Player, currency: Currency, amount: numbe
 
 	local finalAmount = amount
 	if currency == "Cash" and source == "roll" then
-		local PurchaseService = require(script.Parent:WaitForChild("PurchaseService"))
-		finalAmount = amount * PurchaseService.cashMultiplier(player)
+		finalAmount = amount * cashMultiplierFor(player)
 	end
 
 	return PlayerProfile.mutate(player, function(data)

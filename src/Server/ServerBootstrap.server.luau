@@ -117,6 +117,26 @@ StateSyncService.setVaultProvider(OfflineService.getStatus)
 -- and the VAULT panel must not offer a purchase that would do nothing.
 StateSyncService.setBuyableHoursProvider(OfflineService.effectiveBuyableHours)
 
+-- THE 2x-CASH MULTIPLIER, injected for the same reason and to break a real
+-- cycle. `EconomyService.award` needs the gamepass multiplier that
+-- `PurchaseService` owns, but PurchaseService already depends on this module's
+-- siblings, so requiring it back formed
+-- EconomyService -> PurchaseService -> OfflineService -> EconomyService.
+--
+-- That was previously worked around with a lazy require inside `award` (L-035),
+-- which runs correctly and still leaves the analyser reporting the cycle at
+-- four sites -- the edge exists, merely deferred. Registering the function here
+-- inverts the edge instead of hiding it: EconomyService never names
+-- PurchaseService, and the dependency graph is genuinely acyclic.
+EconomyService.setCashMultiplierProvider(PurchaseService.cashMultiplier)
+
+-- VIP VAULT OWNERSHIP, injected for the same reason. `OfflineService` applies
+-- the VIP capacity floor in three places and needed `PurchaseService.ownsPass`
+-- for each, which it reached by lazy-requiring PurchaseService inside all three
+-- function bodies. One registration replaces all three, and removes the
+-- per-call `WaitForChild` they each performed.
+OfflineService.setOwnsPassProvider(PurchaseService.ownsPass)
+
 -- THE DICE SOLIDS. Generated ONCE, on the server, into ReplicatedStorage.
 do
 	local ok, err = pcall(function()

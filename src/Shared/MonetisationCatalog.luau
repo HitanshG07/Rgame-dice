@@ -300,7 +300,10 @@ function MonetisationCatalog.resolvedPasses(): { Entry }
 	end
 	-- Sorted so iteration order is stable across servers and runs; a pass sweep
 	-- that varies in order makes a bug reproduce only sometimes.
-	table.sort(out, function(a, b)
+	-- Comparator parameters ANNOTATED. Luau does not always infer them from the
+	-- array's element type, and unannotated they arrive as `unknown` -- which
+	-- makes `a.key < b.key` a comparison of two unknowns and warns twice.
+	table.sort(out, function(a: Entry, b: Entry)
 		return a.key < b.key
 	end)
 	return out

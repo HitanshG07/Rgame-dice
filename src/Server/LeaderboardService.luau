@@ -86,7 +86,15 @@ function LeaderboardService._resolveName(uid: number): string
 		return cached
 	end
 
-	local online = Players:GetPlayerByUserId(uid)
+	-- CAST AT THE BOUNDARY, and only here. Roblox now types these two parameters
+	-- as a BRANDED `User` rather than a plain number, so passing a UserId read
+	-- from a DataStore key warns "Expected this to be 'User', but got 'number'".
+	-- Verified against the live API before casting: both calls accept a plain
+	-- number and return correctly, so this is a type-declaration artefact and
+	-- not a call-shape defect. The cast is scoped to the argument rather than
+	-- applied to `uid` itself, so the value stays a number everywhere else and
+	-- the arithmetic around it keeps its checking.
+	local online = Players:GetPlayerByUserId(uid :: any)
 	if online ~= nil then
 		nameCache[uid] = online.Name
 		return online.Name
@@ -98,7 +106,7 @@ function LeaderboardService._resolveName(uid: number): string
 		namePending[uid] = true
 		task.spawn(function()
 			local ok, fetched = pcall(function()
-				return Players:GetNameFromUserIdAsync(uid)
+				return Players:GetNameFromUserIdAsync(uid :: any)
 			end)
 			if ok and type(fetched) == "string" and #fetched > 0 then
 				nameCache[uid] = fetched
@@ -111,7 +119,14 @@ function LeaderboardService._resolveName(uid: number): string
 	return "Player " .. tostring(uid)
 end
 
-local function getOrderedStore(boardId: string)
+-- RETURN TYPE STATED EXPLICITLY. Inferred, this returned
+-- `OrderedDataStore | nil` with the nil arm unnamed, and every caller then
+-- indexed it inside a `pcall` closure -- where Luau DISCARDS the narrowing an
+-- enclosing `if not store then return end` performed, because a closure may
+-- outlive the branch that narrowed it. That produced "Type 'nil' does not have
+-- key 'SetAsync'" and the same for 'GetSortedAsync' on code that is actually
+-- guarded and actually correct.
+local function getOrderedStore(boardId: string): OrderedDataStore?
 	local dsName = BOARDS[boardId]
 	if not dsName then
 		return nil
@@ -121,7 +136,7 @@ end
 
 function LeaderboardService.submitScore(player: Player, boardId: string, rawValue: number): ()
 	local store = getOrderedStore(boardId)
-	if not store then
+	if store == nil then
 		return
 	end
 	local score = LeaderboardService.transform(rawValue)
@@ -129,8 +144,13 @@ function LeaderboardService.submitScore(player: Player, boardId: string, rawValu
 		return
 	end
 
+	-- BOUND TO A NON-OPTIONAL LOCAL BEFORE THE CLOSURE CAPTURES IT. A closure
+	-- can outlive the branch that narrowed `store`, so Luau re-widens it to
+	-- `OrderedDataStore?` inside the pcall body and reports an index on nil.
+	-- Re-binding after the guard gives the closure something already narrowed.
+	local ds: OrderedDataStore = store
 	pcall(function()
-		store:SetAsync(tostring(player.UserId), score)
+		ds:SetAsync(tostring(player.UserId), score)
 	end)
 end
 
@@ -146,19 +166,26 @@ function LeaderboardService.getBoard(boardId: string): { Entry }
 	end
 
 	local store = getOrderedStore(boardId)
-	if not store then
+	if store == nil then
 		return cache.entries
 	end
 
+	-- Same re-bind as `submitScore`: narrowing does not survive into a closure.
+	local ds: OrderedDataStore = store
 	local ok, pages = pcall(function()
-		return store:GetSortedAsync(false, 50)
+		return ds:GetSortedAsync(false, 50)
 	end)
 
 	if not ok or not pages then
 		return cache.entries
 	end
 
-	local page = pages:GetCurrentPage()
+	-- `GetCurrentPage` is typed loosely, so `item.key` and `item.value` arrive as
+	-- `unknown` and indexing them warns. Naming the row shape states what the
+	-- DataStore contract actually returns, and the `tonumber` guards below stay
+	-- exactly as they were -- this annotates the boundary, it does not trust it.
+	type OrderedRow = { key: string, value: number }
+	local page = pages:GetCurrentPage() :: { OrderedRow }
 	local newEntries: { Entry } = {}
 
 	for rank, item in ipairs(page) do
