@@ -106,6 +106,27 @@ function V7ForgePanel.new(): V7ForgeController
 	-- face repeatedly walks the same list every time.
 	local ELEMENT_ORDER = { "None", "Fire", "Freeze", "Gold", "Multiplier" }
 
+	----------------------------------------------------------------------------
+	-- THE PANEL'S BANDS, IN PIXELS.
+	--
+	-- Every section below used to be placed at a scale offset -- tab strip 0.062
+	-- high, readout 0.125 down, face list 0.66 tall, action bar at 0.875. Those
+	-- fractions were tuned against one window size, and the overlay body is now
+	-- anchored to a fixed-pixel header, so on a short window they collapsed.
+	-- Measured at a 276px viewport: the tab strip rendered ELEVEN pixels tall and
+	-- the action bar hung 22px BELOW the panel, its FORGE button half outside the
+	-- card.
+	--
+	-- Declared ONCE here and read by every section, so the bands cannot drift
+	-- apart the way two copies of "34" immediately did (L-025). Chrome takes
+	-- known pixels top and bottom; the face list takes whatever is left.
+	----------------------------------------------------------------------------
+	local TAB_H = 34
+	local HEAD_H = 22
+	local READ_H = 18
+	local BAR_H = UITheme.Scale.TouchTarget
+	local TOP_BAND = TAB_H + HEAD_H + READ_H + UITheme.Scale.SM
+
 	-- DIE TABS (operator-directed). One row across the top; a tab per owned slot.
 	-- THE TAB STRIP SCROLLS, AND ITS TABS ARE BUILT ON DEMAND.
 	--
@@ -130,8 +151,10 @@ function V7ForgePanel.new(): V7ForgeController
 	-- the pool stable across snapshots (NFR-1).
 	local tabRow = Instance.new("ScrollingFrame")
 	tabRow.Name = "TabStrip"
-	tabRow.Size = UDim2.fromScale(0.96, 0.062)
-	tabRow.Position = UDim2.fromScale(0.02, 0.005)
+	-- A FIXED PIXEL BAND. At 0.062 of the body it measured ELEVEN pixels tall on
+	-- a short window -- a tab strip too thin to read or press.
+	tabRow.Size = UDim2.new(0.96, 0, 0, TAB_H)
+	tabRow.Position = UDim2.new(0.02, 0, 0, 0)
 	tabRow.BackgroundTransparency = 1
 	tabRow.BorderSizePixel = 0
 	tabRow.ScrollingDirection = Enum.ScrollingDirection.X
@@ -199,16 +222,34 @@ function V7ForgePanel.new(): V7ForgeController
 		end
 	end
 
-	local slotNote = UITheme.label("", UDim2.fromScale(0.34, 0.05), UDim2.fromScale(0.64, 0.008),
-		UITheme.Colors.TextDim)
-	slotNote.TextScaled = true
+	-- THE PANEL'S BANDS ARE PIXELS, NOT FRACTIONS.
+	--
+	-- Everything below used to be placed at scale offsets -- the tab strip at
+	-- 0.062 high, the readout at 0.125 down, the face list 0.66 tall, the action
+	-- bar at 0.875. Those fractions were tuned against one window size, and the
+	-- overlay body is now anchored to a fixed header in pixels, so on a short
+	-- window they collapsed: measured at a 276px viewport the tab strip rendered
+	-- ELEVEN pixels tall and the action bar hung 22px BELOW the panel, with its
+	-- FORGE button half outside the card.
+	--
+	-- A band layout fixes the class. Chrome takes a known number of pixels at the
+	-- top and bottom; the face list takes everything left over, whatever that is.
+	-- No fraction to retune, and nothing can fall outside the body.
+	local slotNote = UITheme.label("", UDim2.new(0.34, 0, 0, HEAD_H),
+		UDim2.new(0.64, 0, 0, TAB_H))
+	slotNote.TextScaled = false
+	slotNote.TextSize = UITheme.Scale.TextSmall
+	slotNote.TextColor3 = UITheme.Colors.TextDim
 	slotNote.TextXAlignment = Enum.TextXAlignment.Right
 	slotNote.Visible = false
 	slotNote.Parent = bodyFrame
 
-	local header = UITheme.label("", UDim2.fromScale(0.6, 0.055), UDim2.fromScale(0.02, 0.065),
-		UITheme.Colors.TextGold)
-	header.TextScaled = true
+	local header = UITheme.label("", UDim2.new(0.6, 0, 0, HEAD_H),
+		UDim2.new(0.02, 0, 0, TAB_H))
+	header.TextScaled = false
+	header.TextSize = UITheme.Scale.TextBody
+	header.Font = UITheme.FontHeading
+	header.TextColor3 = UITheme.Colors.TextGold
 	header.Parent = bodyFrame
 
 	-- MOVE THIS DIE (operator-requested 2026-08-13: "in forge there has to be an
@@ -223,24 +264,44 @@ function V7ForgePanel.new(): V7ForgeController
 	-- fights the scroll gesture, and on touch it is close to unusable. Arrows are
 	-- unambiguous, work identically on every input device, and the tab strip
 	-- above gives immediate feedback about where the die landed.
-	local moveLeftC, moveLeftBtn = UITheme.neumorphicButton("<", UITheme.Colors.Gems,
-		UDim2.fromScale(0.075, 0.05), UDim2.fromScale(0.655, 0.068))
-	moveLeftC.Name = "MoveLeft"
-	moveLeftC.Parent = bodyFrame
+	-- The move controls sit in the header band, right-aligned in their own row so
+	-- the two arrows and their caption cannot drift into the die title.
+	local moveRow = Instance.new("Frame")
+	moveRow.Name = "MoveRow"
+	moveRow.Size = UDim2.new(0, 150, 0, HEAD_H + 6)
+	moveRow.Position = UDim2.new(1, -150, 0, TAB_H - 3)
+	moveRow.BackgroundTransparency = 1
+	moveRow.Parent = bodyFrame
 
-	local moveRightC, moveRightBtn = UITheme.neumorphicButton(">", UITheme.Colors.Gems,
-		UDim2.fromScale(0.075, 0.05), UDim2.fromScale(0.74, 0.068))
-	moveRightC.Name = "MoveRight"
-	moveRightC.Parent = bodyFrame
+	local moveLayout = Instance.new("UIListLayout")
+	moveLayout.FillDirection = Enum.FillDirection.Horizontal
+	moveLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	moveLayout.VerticalAlignment = Enum.VerticalAlignment.Center
+	moveLayout.HorizontalAlignment = Enum.HorizontalAlignment.Right
+	moveLayout.Padding = UDim.new(0, UITheme.Scale.XS)
+	moveLayout.Parent = moveRow
 
-	local moveHint = UITheme.label("move", UDim2.fromScale(0.09, 0.04),
-		UDim2.fromScale(0.83, 0.073), UITheme.Colors.TextDim)
-	moveHint.TextScaled = true
-	moveHint.Parent = bodyFrame
+	local moveHint = UITheme.textLine("move", UITheme.Scale.TextSmall, UITheme.Colors.TextDim)
+	moveHint.Size = UDim2.new(0, 34, 1, 0)
+	moveHint.TextXAlignment = Enum.TextXAlignment.Right
+	moveHint.LayoutOrder = 1
+	moveHint.Parent = moveRow
 
-	local readout = UITheme.label("", UDim2.fromScale(0.96, 0.045), UDim2.fromScale(0.02, 0.125),
-		UITheme.Colors.TextDim)
-	readout.TextScaled = true
+	local moveLeftBtn = UITheme.actionButton("\u{2039}", "secondary", UITheme.Colors.Gems)
+	moveLeftBtn.Name = "MoveLeft"
+	moveLeftBtn.LayoutOrder = 2
+	moveLeftBtn.Parent = moveRow
+
+	local moveRightBtn = UITheme.actionButton("\u{203A}", "secondary", UITheme.Colors.Gems)
+	moveRightBtn.Name = "MoveRight"
+	moveRightBtn.LayoutOrder = 3
+	moveRightBtn.Parent = moveRow
+
+	local readout = UITheme.label("", UDim2.new(0.96, 0, 0, READ_H),
+		UDim2.new(0.02, 0, 0, TAB_H + HEAD_H))
+	readout.TextScaled = false
+	readout.TextSize = UITheme.Scale.TextSmall
+	readout.TextColor3 = UITheme.Colors.TextDim
 	readout.Parent = bodyFrame
 
 	-- The face list. Rows are created up to the largest shape and hidden when the
@@ -262,8 +323,9 @@ function V7ForgePanel.new(): V7ForgeController
 	-- their buttons were named, but this frame between them and the body was not,
 	-- so a driven click still could not find them.
 	listHolder.Name = "FaceList"
-	listHolder.Size = UDim2.fromScale(0.96, 0.66)
-	listHolder.Position = UDim2.fromScale(0.02, 0.18)
+	-- Takes the whole middle band: everything the chrome above and below leaves.
+	listHolder.Size = UDim2.new(0.96, 0, 1, -(TOP_BAND + BAR_H + UITheme.Scale.SM * 2))
+	listHolder.Position = UDim2.new(0.02, 0, 0, TOP_BAND)
 	listHolder.BackgroundTransparency = 1
 	listHolder.BorderSizePixel = 0
 	listHolder.AutomaticCanvasSize = Enum.AutomaticSize.Y
@@ -453,10 +515,14 @@ function V7ForgePanel.new(): V7ForgeController
 	-- which relate to each other, and all of which have to be re-derived by hand
 	-- whenever a caption changes length. A right-aligned bar sizes each button to
 	-- its own caption and spaces them uniformly.
+	-- ANCHORED TO THE BOTTOM EDGE, not to 87.5% of the height. At a short viewport
+	-- that fraction put the bar 22px BELOW the panel with the FORGE button hanging
+	-- outside the card -- measured, not theorised.
 	local actionBar = Instance.new("Frame")
 	actionBar.Name = "ActionBar"
-	actionBar.Size = UDim2.new(0.96, 0, 0, UITheme.Scale.TouchTarget)
-	actionBar.Position = UDim2.new(0.02, 0, 0.875, 0)
+	actionBar.Size = UDim2.new(0.96, 0, 0, BAR_H)
+	actionBar.AnchorPoint = Vector2.new(0, 1)
+	actionBar.Position = UDim2.new(0.02, 0, 1, -UITheme.Scale.XS)
 	actionBar.BackgroundTransparency = 1
 	actionBar.Parent = bodyFrame
 
@@ -467,9 +533,14 @@ function V7ForgePanel.new(): V7ForgeController
 	barLayout.Padding = UDim.new(0, UITheme.Scale.SM)
 	barLayout.Parent = actionBar
 
-	local costLbl = UITheme.label("", UDim2.fromScale(0.5, 0.045), UDim2.fromScale(0.02, 0.825),
-		UITheme.Colors.TextDim)
-	costLbl.TextScaled = true
+	-- Sits directly above the action bar, anchored to the same bottom edge, so the
+	-- cost and the button that charges it stay together at any panel height.
+	local costLbl = UITheme.label("", UDim2.new(0.6, 0, 0, READ_H),
+		UDim2.new(0.02, 0, 1, -(BAR_H + UITheme.Scale.XS + READ_H)))
+	costLbl.AnchorPoint = Vector2.new(0, 1)
+	costLbl.TextScaled = false
+	costLbl.TextSize = UITheme.Scale.TextSmall
+	costLbl.TextColor3 = UITheme.Colors.TextDim
 	costLbl.Parent = bodyFrame
 
 	-- BUY MASS (FR-3.6). The forge had no way to increase a die's TOTAL mass, so
@@ -632,12 +703,14 @@ function V7ForgePanel.new(): V7ForgeController
 		-- to speak of, and an always-visible dead control invites the press that
 		-- does nothing.
 		local canReorder = dieCount > 1
-		moveLeftC.Visible = canReorder
-		moveRightC.Visible = canReorder
-		moveHint.Visible = canReorder
+		-- The whole row hides together. It used to toggle three separate
+		-- containers, two of which no longer exist after the arrows became
+		-- `actionButton`s in a laid-out row -- which is what produced
+		-- "attempt to index nil with 'Visible'" on every snapshot.
+		moveRow.Visible = canReorder
 		if canReorder then
-			UITheme.setEnabled(moveLeftBtn, activeDie > 1)
-			UITheme.setEnabled(moveRightBtn, activeDie < dieCount)
+			UITheme.setActionEnabled(moveLeftBtn, activeDie > 1)
+			UITheme.setActionEnabled(moveRightBtn, activeDie < dieCount)
 		end
 		-- Owning a slot with no die in it is a real state and the player should
 		-- be told, not left wondering why the tab count does not match what they
@@ -718,8 +791,8 @@ function V7ForgePanel.new(): V7ForgeController
 			return
 		end
 
-		UITheme.setEnabled(moveLeftBtn, false)
-		UITheme.setEnabled(moveRightBtn, false)
+		UITheme.setActionEnabled(moveLeftBtn, false)
+		UITheme.setActionEnabled(moveRightBtn, false)
 		task.spawn(function()
 			local result = NetClient.swapDice(activeDie, target)
 			if result.ok then

@@ -350,6 +350,19 @@ local function run(): (boolean, string?, number)
 	-- it wherever it appears -- a title, a button caption, a status string --
 	-- rather than only in the places a test thought to look.
 	--
+	-- READING `Source` NEEDS A CAPABILITY THIS THREAD MAY NOT HAVE. Under Play
+	-- Solo the suite runs in the GAME context, where `LuaSourceContainer.Source`
+	-- raises "cannot read 'Source' (lacking capability PluginOrOpenCloud)". The
+	-- first version of this check read it unguarded and took the WHOLE suite from
+	-- 21 passed to 20 passed / 1 errored -- a check meant to protect the UI
+	-- instead destroyed the evidence for everything else in this file.
+	--
+	-- So the read is pcall'd and the check SKIPS where it cannot run, rather than
+	-- failing. A skip is honest; an error is not, and neither is silently
+	-- dropping the check. It still runs under a plugin or Open Cloud context,
+	-- which is where the pre-commit sweep happens, and the same scan is
+	-- reproducible from the shell against any commit.
+	--
 	-- TWO RANGES, because the offenders spanned both. Five were 4-byte sequences
 	-- in the emoji planes (trolley, die, trophy, scroll, galaxy) and five were
 	-- 3-byte symbols (gear, hourglass, high voltage) -- so a check for only the
@@ -417,22 +430,43 @@ local function run(): (boolean, string?, number)
 	end
 
 	local emojiOffenders: { string } = {}
+	local sourceReadable = true
+
 	for _, name in ipairs(VIEW_MODULES) do
 		local instance = clientRoot:FindFirstChild(name)
 		if instance ~= nil and instance:IsA("LuaSourceContainer") then
-			local at = findPictograph(instance.Source)
+			-- The capability check is per-thread, not per-instance, so one
+			-- failure means none of them are readable. Stop rather than pcall
+			-- eleven times for the same answer.
+			local ok, src = pcall(function()
+				return instance.Source
+			end)
+			if not ok then
+				sourceReadable = false
+				break
+			end
+			local at = findPictograph(src)
 			if at ~= nil then
 				-- Report the LINE, so the offender is addressable rather than
 				-- merely reported as present (L-037).
-				local _, line = string.gsub(string.sub(instance.Source, 1, at), "\n", "")
+				local _, line = string.gsub(string.sub(src, 1, at), "\n", "")
 				table.insert(emojiOffenders,
 					string.format("%s:%d", name, line + 1))
 			end
 		end
 	end
-	e = e or check(#emojiOffenders == 0, string.format(
-		"emoji in client UI source (icons must be drawn geometry, not font glyphs): %s",
-		table.concat(emojiOffenders, ", ")))
+
+	if sourceReadable then
+		e = e or check(#emojiOffenders == 0, string.format(
+			"emoji in client UI source (icons must be drawn geometry, not font glyphs): %s",
+			table.concat(emojiOffenders, ", ")))
+	else
+		-- SAID OUT LOUD, because a check that quietly does nothing is worse than
+		-- no check: it leaves a green suite implying a property nobody tested.
+		print("[UT-13] emoji scan SKIPPED -- this thread cannot read Source "
+			.. "(needs PluginOrOpenCloud). Runs under a plugin context; also "
+			.. "reproducible from the shell.")
+	end
 
 	----------------------------------------------------------------------------
 	-- IT LOADS. The single most valuable assertion in this file.

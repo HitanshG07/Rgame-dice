@@ -402,9 +402,40 @@ function UITheme.overlay(title: string): (Frame, Frame, TextButton)
 	container.ZIndex = UITheme.Layer.Overlay + 1
 	container.Parent = fullOverlay
 
+	-- A FLOOR AS WELL AS A CEILING, and the floor is the one that matters for
+	-- content-dense panels.
+	--
+	-- At a flat 0.86 the panel is only as tall as the window allows, and the
+	-- FORGE needs a fixed amount of chrome regardless: a tab strip, a die
+	-- header, a readout, a cost line and an action bar come to roughly 160px
+	-- before a single face row is drawn. Measured on a 276px-tall window the
+	-- body was 174px, leaving the face list THIRTY-TWO pixels -- less than one
+	-- row of a panel whose entire purpose is editing rows.
+	--
+	-- BOUNDED BY THE VIEWPORT, not a bare constant. A hard 420px minimum would
+	-- simply push the panel off a genuinely small screen, trading a cramped
+	-- panel for an unreachable one. This asks for 420px and accepts less when
+	-- less is all there is, so the panel grows to usable on any window that can
+	-- afford it and never exceeds the window that cannot.
+	-- ONE CONSTRAINT CARRYING BOTH BOUNDS. Two `UISizeConstraint`s on the same
+	-- instance do not compose -- only one takes effect -- so the floor and the
+	-- ceiling have to share an object.
 	local sizeCap = Instance.new("UISizeConstraint")
+	sizeCap.Name = "PanelBounds"
 	sizeCap.MaxSize = Vector2.new(900, 1100)
 	sizeCap.Parent = container
+
+	local function fitBounds()
+		local vp = fullOverlay.AbsoluteSize
+		if vp.Y <= 0 then
+			return
+		end
+		sizeCap.MinSize = Vector2.new(
+			math.min(320, vp.X),
+			math.min(420, vp.Y))
+	end
+	fitBounds()
+	fullOverlay:GetPropertyChangedSignal("AbsoluteSize"):Connect(fitBounds)
 
 	local corner = Instance.new("UICorner")
 	corner.CornerRadius = UDim.new(0, UITheme.Scale.LG)

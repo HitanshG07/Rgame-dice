@@ -182,7 +182,12 @@ function V7MenuPanel.new(): V7MenuController
 
 		-- An OWNED state chip, so ownership is not carried by the button caption
 		-- alone. Hidden until a snapshot says otherwise.
-		local ownedPill = UITheme.statusPill("Owned", UITheme.Colors.Positive)
+		-- `Gems` blue, not `Positive`. In this palette `Positive` is the SAME
+		-- orange as Cash and as the BUY button, so an "Owned" chip beside a BUY
+		-- button read as part of the button rather than as a state (L-042 made
+		-- exactly this point about the AUTO toggle). Owned is a settled fact, not
+		-- a call to action, and should not compete with the thing you can press.
+		local ownedPill = UITheme.statusPill("Owned", UITheme.Colors.Gems)
 		ownedPill.Name = "OwnedPill"
 		ownedPill.Visible = false
 		ownedPill.LayoutOrder = 1
@@ -249,13 +254,18 @@ function V7MenuPanel.new(): V7MenuController
 				-- word smuggled into the end of a sentence, where it reads as part
 				-- of the description rather than as the player's status. The blurb
 				-- stays the blurb; the chip carries the state.
+				-- THE CHIP SAYS IT; THE BUTTON GOES AWAY.
+				-- Showing an "Owned" chip beside a disabled button also reading
+				-- "Owned" says the same thing twice and leaves a dead control on
+				-- the card. A pass you already have needs no action, so the action
+				-- is removed and the state is stated once.
 				ui.pill.Visible = true
-				ui.button.Text = "Owned"
-				UITheme.setActionEnabled(ui.button, false)
+				ui.button.Visible = false
 				ui.blurb.Text = ui.baseBlurb
 				ui.blurb.TextColor3 = UITheme.Colors.TextDim
 			else
 				ui.pill.Visible = false
+				ui.button.Visible = true
 				ui.button.Text = "Buy"
 				UITheme.setActionEnabled(ui.button, true)
 				ui.blurb.Text = ui.baseBlurb
@@ -396,7 +406,28 @@ function V7MenuPanel.new(): V7MenuController
 		local _, size = model:GetBoundingBox()
 		local reach = math.max(size.X, size.Y, size.Z) * 0.5
 		local distance = math.max(2.2, reach * 3.6)
-		cam.CFrame = CFrame.new(Vector3.new(distance * 0.55, distance * 0.42, distance * 0.72),
+
+		-- THE ELEVATION FOLLOWS THE SHAPE'S FLATNESS.
+		--
+		-- One fixed angle suited the chunky solids and failed the flat ones: the
+		-- D2 is a coin, and viewed from a low angle it presented its EDGE -- a
+		-- gold sliver that reads as a bar, not a die. Its numbered face, the whole
+		-- point of the preview, was pointing away from the camera.
+		--
+		-- `flatness` is the ratio of the thinnest axis to the widest: about 1.0
+		-- for a D20 and near 0.2 for the coin. Flat shapes get a steeper, more
+		-- top-down camera so their face is what the player sees; round ones keep
+		-- the three-quarter view that shows a die's corners best.
+		local thinnest = math.min(size.X, size.Y, size.Z)
+		local widest = math.max(size.X, size.Y, size.Z)
+		local flatness = if widest > 0 then thinnest / widest else 1
+		-- 0.42 of the distance at flatness 1 (three-quarter), rising toward 1.35
+		-- (steeply overhead) as the solid approaches a disc.
+		local elevation = 0.42 + (1 - math.clamp(flatness, 0, 1)) * 0.93
+		local ground = math.max(0.18, 1 - (1 - math.clamp(flatness, 0, 1)) * 0.72)
+
+		cam.CFrame = CFrame.new(
+			Vector3.new(distance * 0.55 * ground, distance * elevation, distance * 0.72 * ground),
 			Vector3.new(0, 0, 0))
 		cam.FieldOfView = 40
 		cam.Parent = vp
