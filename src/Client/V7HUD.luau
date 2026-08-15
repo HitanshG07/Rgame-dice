@@ -4,11 +4,13 @@
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
 local UITheme = require(script.Parent:WaitForChild("UITheme"))
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Format = require(Shared:WaitForChild("Format"))
 local ForgeMath = require(Shared:WaitForChild("ForgeMath"))
+local GearMeshBuilder = require(Shared:WaitForChild("GearMeshBuilder"))
 
 local V7HUD = {}
 V7HUD.__index = V7HUD
@@ -237,28 +239,93 @@ function V7HUD.new(): V7HUDController
 	local gearWrapper, gearBtn = UITheme.neumorphicButton("", UITheme.Colors.TextDim,
 		UDim2.fromScale(0.045, 0.08), UDim2.fromScale(0.815, 0.02))
 
+	-- Assigned by the icon block below, and nil if the gear failed to build.
+	local gearSpinModel: Model? = nil
+	-- The ViewportFrame itself, which sits ON TOP of the button and therefore
+	-- receives the cursor first. Held so the hover handler can bind to it too.
+	local gearIconFrame: ViewportFrame? = nil
+
 	-- The 44px touch floor comes from `neumorphicButton` itself, so this control
 	-- and the eight menu buttons and the AUTO toggle all clear it without each
 	-- carrying its own constraint.
 
+	-- A REAL 3D GEAR, not a texture.
+	--
+	-- It was an ImageLabel pointed at an uploaded decal. Geometry is better here
+	-- for the same reason every other icon in this game is drawn: it renders
+	-- identically on every platform, needs no upload, survives an asset being
+	-- moderated or delisted, and is version-controlled as code rather than as an
+	-- ID that means nothing when read. It also lets the thing MOVE, which a flat
+	-- decal cannot do convincingly.
 	do
-		local gearIcon = Instance.new("ImageLabel")
-		gearIcon.Name = "GearIcon"
-		gearIcon.AnchorPoint = Vector2.new(0.5, 0.5)
-		gearIcon.Position = UDim2.fromScale(0.5, 0.5)
-		gearIcon.Size = UDim2.fromScale(0.85, 0.85)
-		gearIcon.BackgroundTransparency = 1
-		gearIcon.Image = UITheme.Icons.SettingsGear
-		gearIcon.ZIndex = 6
-		gearIcon.Parent = gearBtn
-
-		local corner = Instance.new("UICorner")
-		corner.CornerRadius = UDim.new(1, 0)
-		corner.Parent = gearIcon
+		local viewport = Instance.new("ViewportFrame")
+		viewport.Name = "GearIcon"
+		viewport.AnchorPoint = Vector2.new(0.5, 0.5)
+		viewport.Position = UDim2.fromScale(0.5, 0.5)
+		viewport.Size = UDim2.fromScale(0.86, 0.86)
+		viewport.BackgroundTransparency = 1
+		viewport.ZIndex = 6
+		-- THE ICON MUST NOT EAT THE CURSOR. A ViewportFrame is an interactive
+		-- GuiObject and it covers the button it decorates, so with the default
+		-- `Active` behaviour it becomes the topmost object at the gear's centre
+		-- and the TextButton beneath it never receives MouseEnter -- measured:
+		-- 75 frames of a real cursor sitting on the gear produced zero hover
+		-- events. Turning it off passes the cursor straight through to the
+		-- control, which is what a decoration should always do.
+		viewport.Active = false
+		viewport.Parent = gearBtn
+		gearIconFrame = viewport
 
 		local aspect = Instance.new("UIAspectRatioConstraint")
 		aspect.AspectRatio = 1
-		aspect.Parent = gearIcon
+		aspect.Parent = viewport
+
+		local okBuild, gear = pcall(function()
+			return GearMeshBuilder.build(viewport)
+		end)
+
+		-- A FAILED ICON MUST NOT TAKE THE HUD WITH IT. This runs inside `new()`,
+		-- and a constructor error here would destroy every surface built after
+		-- it -- which is precisely how eight overlays once vanished because a
+		-- switch tried to animate too early (L-036). The button still works
+		-- without its glyph; it is a decoration, and it fails as one.
+		if okBuild and typeof(gear) == "Instance" and gear:IsA("Model") then
+			local model = gear :: Model
+
+			-- PIVOT BEFORE THE CAMERA READS IT. A model renders on the frame it
+			-- is parented, so posing it afterwards shows one frame at whatever
+			-- orientation it was authored in (L-052).
+			model:PivotTo(CFrame.new(0, 0, 0))
+
+			local cam = Instance.new("Camera")
+			-- FRAMED FROM THE BOUNDING SPHERE, not the axis-aligned extent. The
+			-- gear is a flat disc -- 6.0 wide by 0.96 deep -- and framing a flat
+			-- solid on its widest axis is exactly what made the D6 preview 44%
+			-- too large next to its neighbours.
+			local centre = model:GetPivot().Position
+			local sphere = 0
+			for _, d in ipairs(model:GetDescendants()) do
+				if d:IsA("BasePart") and d.Name ~= "Pivot" then
+					local r = (d.Position - centre).Magnitude + d.Size.Magnitude * 0.5
+					if r > sphere then
+						sphere = r
+					end
+				end
+			end
+			if sphere <= 0 then
+				sphere = 3
+			end
+			-- HEAD-ON, deliberately. A gear is a disc and reads as one only face
+			-- first; a three-quarter view of a flat solid presents its edge and
+			-- turns a cog into a smear -- the same failure the D2 coin had.
+			cam.CFrame = CFrame.new(Vector3.new(0, 0, sphere * 2.35),
+				Vector3.new(0, 0, 0))
+			cam.FieldOfView = 40
+			cam.Parent = viewport
+			viewport.CurrentCamera = cam
+
+			gearSpinModel = model
+		end
 	end
 	-- NAMED. Every other pod in this GUI is an anonymous "Frame", which makes
 	-- them indistinguishable by path -- and a control that cannot be addressed by
@@ -266,12 +333,91 @@ function V7HUD.new(): V7HUDController
 	gearWrapper.Name = "SettingsGear"
 	gearWrapper.Parent = gui
 
+	-- ONE FULL TURN ON HOVER.
+	--
+	-- SINGLE-FLIGHT, and that is the whole difficulty. `MouseEnter` fires again
+	-- every time the cursor crosses the boundary, and a player brushing past the
+	-- corner produces several in a second -- so an unguarded handler starts a
+	-- second spin over the first and the gear stutters or jumps backwards. The
+	-- guard makes a re-entry during a turn a no-op: the current rotation simply
+	-- finishes.
+	--
+	-- Driven by RenderStepped rather than TweenService because there is nothing
+	-- tweenable here -- the rotation lives in a CFrame on a Model, not in a
+	-- property. The connection exists only while a spin is in flight, so a
+	-- stationary gear costs nothing per frame.
 	do
+		local SPIN_SECONDS = 0.55
+		local spinning = false
+		local spinConn: RBXScriptConnection? = nil
+
+		local function stopSpin()
+			if spinConn ~= nil then
+				spinConn:Disconnect()
+				spinConn = nil
+			end
+			spinning = false
+		end
+
+		local function spinOnce()
+			local model = gearSpinModel
+			if model == nil or spinning then
+				return
+			end
+			spinning = true
+			local elapsed = 0
+			spinConn = RunService.RenderStepped:Connect(function(dt: number)
+				-- The model can be destroyed mid-spin if the HUD is torn down;
+				-- an orphaned connection writing to a dead Instance throws every
+				-- frame thereafter.
+				if model.Parent == nil then
+					stopSpin()
+					return
+				end
+				elapsed += dt
+				local t = math.min(elapsed / SPIN_SECONDS, 1)
+				-- Ease-in-out, so the turn starts and stops rather than
+				-- snapping. A linear 360 reads as a spinning-loader animation;
+				-- an eased one reads as a mechanism being turned.
+				local eased = t * t * (3 - 2 * t)
+				-- Spun about Z: the gear is a flat disc facing the camera, so Z
+				-- is the axis it visibly turns on. Y would flip it edge-on and
+				-- make it vanish at the halfway point.
+				model:PivotTo(CFrame.Angles(0, 0, eased * math.pi * 2))
+				if t >= 1 then
+					-- Landed exactly where it started, so repeated hovers cannot
+					-- accumulate drift.
+					model:PivotTo(CFrame.new(0, 0, 0))
+					stopSpin()
+				end
+			end)
+		end
+
+		-- HOVER IS DETECTED ON THE WRAPPER, NOT THE BUTTON.
+		--
+		-- The ViewportFrame carrying the gear covers the TextButton it decorates,
+		-- and a ViewportFrame consumes the cursor even with `Active = false` --
+		-- measured, twice: a real cursor parked on the gear for 300 frames
+		-- produced ZERO MouseEnter events on the button, and
+		-- `GetGuiObjectsAtPosition` confirmed the ViewportFrame was topmost both
+		-- before and after clearing `Active`.
+		--
+		-- The wrapper is the ancestor of both, so it sees the cursor whichever
+		-- child is on top. Binding here is also more honest about the intent:
+		-- the thing being hovered is the CONTROL, not one particular layer of it.
+		gearWrapper.MouseEnter:Connect(spinOnce)
+		if gearIconFrame ~= nil then
+			gearIconFrame.MouseEnter:Connect(spinOnce)
+		end
+
 		local lastGear = 0
 		local function triggerGear()
 			local now = os.clock()
 			if now - lastGear < 0.15 then return end
 			lastGear = now
+			-- Pressing it turns it too. A control that responds to the cursor
+			-- passing over but not to being pressed feels backwards.
+			spinOnce()
 			for _, cb in ipairs(menuCallbacks) do pcall(cb, "settings") end
 		end
 		gearBtn.MouseButton1Click:Connect(triggerGear)

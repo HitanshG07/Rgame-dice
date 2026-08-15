@@ -63,6 +63,10 @@ UITheme.FontHeading = Enum.Font.GothamBlack
 UITheme.FontMono = Enum.Font.Code
 UITheme.BorderThickness = 1
 
+UITheme.Icons = {
+	SettingsGear = "rbxassetid://99435608372494", -- Custom Ethereal Gold Tech Gear Icon (Uploaded Asset)
+}
+
 --------------------------------------------------------------------------------
 -- THE SCALE
 --
