@@ -236,8 +236,79 @@ function V7HUD.new(): V7HUDController
 	-- it consistently. Every other icon in this game is geometry for the same
 	-- reason. Three concentric frames read as a gear at this size and render
 	-- identically everywhere.
-	local gearWrapper, gearBtn = UITheme.neumorphicButton("", UITheme.Colors.TextDim,
-		UDim2.fromScale(0.045, 0.08), UDim2.fromScale(0.815, 0.02))
+	--
+	-- A SMALL DISC BEHIND IT, not the neumorphic pod.
+	--
+	-- The pod stacked three opaque 56x62 frames -- two shadow layers and a body
+	-- -- which against this backdrop read as a dark rectangle with a gear
+	-- floating inside it. Removing it entirely was worse the other way: a bare
+	-- silhouette on the backdrop has nothing marking it as a control, and the
+	-- operator's verdict on both was the same word, "weird".
+	--
+	-- One subtle circular plate is the middle: it says "this is a button" and
+	-- follows the gear's own shape instead of fighting it with a rectangle.
+	-- BIGGER, operator-directed. It was 0.045 x 0.08 of the screen, which lands
+	-- at roughly 56x62 -- barely over the touch floor and visually slight next
+	-- to the currency bar it sits beside.
+	local gearWrapper = Instance.new("Frame")
+	gearWrapper.Size = UDim2.fromScale(0.058, 0.105)
+	gearWrapper.Position = UDim2.fromScale(0.812, 0.012)
+	gearWrapper.BackgroundTransparency = 1
+	gearWrapper.ZIndex = 5
+
+	local gearPlate = Instance.new("Frame")
+	gearPlate.Name = "Plate"
+	gearPlate.AnchorPoint = Vector2.new(0.5, 0.5)
+	gearPlate.Position = UDim2.fromScale(0.5, 0.5)
+	-- Square, so `UICorner` at 1.0 makes a true circle rather than a lozenge.
+	gearPlate.Size = UDim2.fromScale(1, 1)
+	-- READ FROM THE BUILDER, not chosen here. The gear's hub hole and rim hollow
+	-- are faked with discs painted to match whatever sits behind the model --
+	-- a runtime CSG subtraction is not available -- so the plate and those discs
+	-- must be the SAME colour or the fake holes show as wrong-coloured circles.
+	-- One declaration, read by both sides, rather than two literals that agree
+	-- today and drift the first time the plate is restyled (L-025).
+	gearPlate.BackgroundColor3 = GearMeshBuilder.PlateColour
+	-- OPAQUE, and that is a constraint rather than a preference. The gear's fake
+	-- holes are opaque discs painted `PlateColour`; if the plate itself were
+	-- semi-transparent it would blend toward the backdrop while the discs did
+	-- not, and the "holes" would show as visibly lighter circles. The colour
+	-- match only holds when both are solid.
+	gearPlate.BackgroundTransparency = 0
+	gearPlate.BorderSizePixel = 0
+	gearPlate.ZIndex = 4
+	gearPlate.Parent = gearWrapper
+
+	local plateAspect = Instance.new("UIAspectRatioConstraint")
+	plateAspect.AspectRatio = 1
+	plateAspect.Parent = gearPlate
+
+	local plateCorner = Instance.new("UICorner")
+	plateCorner.CornerRadius = UDim.new(1, 0)
+	plateCorner.Parent = gearPlate
+
+	local plateEdge = Instance.new("UIStroke")
+	plateEdge.Color = UITheme.Colors.ShadowLight
+	plateEdge.Thickness = 1
+	plateEdge.Transparency = 0.45
+	plateEdge.Parent = gearPlate
+
+	-- The 44px touch floor came from `neumorphicButton`, which is no longer in
+	-- play, so the control carries it directly. It is the accessibility minimum
+	-- and does not scale per build tier.
+	local gearFloor = Instance.new("UISizeConstraint")
+	gearFloor.Name = "TouchFloor"
+	gearFloor.MinSize = Vector2.new(UITheme.Scale.TouchTarget, UITheme.Scale.TouchTarget)
+	gearFloor.Parent = gearWrapper
+
+	local gearBtn = Instance.new("TextButton")
+	gearBtn.Name = "GearButton"
+	gearBtn.Size = UDim2.fromScale(1, 1)
+	gearBtn.BackgroundTransparency = 1
+	gearBtn.Text = ""
+	gearBtn.AutoButtonColor = false
+	gearBtn.ZIndex = 5
+	gearBtn.Parent = gearWrapper
 
 	-- Assigned by the icon block below, and nil if the gear failed to build.
 	local gearSpinModel: Model? = nil
@@ -258,11 +329,34 @@ function V7HUD.new(): V7HUDController
 	-- ID that means nothing when read. It also lets the thing MOVE, which a flat
 	-- decal cannot do convincingly.
 	do
+		-- A ViewportFrame RENDERS AT ITS PIXEL SIZE AND CANNOT BE SUPERSAMPLED.
+		--
+		-- The graininess is real and its cause is resolution: the buffer matches
+		-- `AbsoluteSize`, so 45 parts were resolving into 48 pixels across, with
+		-- the gear's spokes landing at 3.49 px each and every edge falling on a
+		-- hard pixel boundary with no anti-aliasing to soften it.
+		--
+		-- The obvious fix does not exist. Rendering large and scaling down was
+		-- tried and MEASURED both ways -- `UIScale` on the frame, then `UIScale`
+		-- on a parent wrapper -- and it shrinks `AbsoluteSize` in both cases, so
+		-- the buffer follows it down and nothing is gained. Proven with a
+		-- three-way probe: a plain 42px frame reports 42, a 126px frame under a
+		-- 1/3 parent scale also reports 42, and only an unscaled 126px frame
+		-- reports 126. There is no way to hold a big buffer at a small display
+		-- size.
+		--
+		-- SO THE FIX IS FEWER, FATTER FEATURES, NOT MORE PIXELS. The frame is
+		-- made as large as the control honestly allows, and the gear's own
+		-- geometry does the rest -- see the tooth-count reduction below. This is
+		-- the same lesson as the dice chamfers: when a feature cannot be given
+		-- more pixels, give it fewer neighbours to compete with.
 		local viewport = Instance.new("ViewportFrame")
 		viewport.Name = "GearIcon"
 		viewport.AnchorPoint = Vector2.new(0.5, 0.5)
 		viewport.Position = UDim2.fromScale(0.5, 0.5)
-		viewport.Size = UDim2.fromScale(0.86, 0.86)
+		-- Fills the control rather than insetting to 0.86. Every pixel of the
+		-- 44px touch target is a pixel the gear can use.
+		viewport.Size = UDim2.fromScale(1, 1)
 		viewport.BackgroundTransparency = 1
 		viewport.ZIndex = 6
 		-- THE ICON MUST NOT EAT THE CURSOR. A ViewportFrame is an interactive
@@ -318,7 +412,16 @@ function V7HUD.new(): V7HUDController
 			-- HEAD-ON, deliberately. A gear is a disc and reads as one only face
 			-- first; a three-quarter view of a flat solid presents its edge and
 			-- turns a cog into a smear -- the same failure the D2 coin had.
-			cam.CFrame = CFrame.new(Vector3.new(0, 0, sphere * 2.35),
+			-- PULLED BACK SO THE TEETH FIT. At 2.35x the gear's outermost teeth
+			-- ran off the frame edge and were sliced flat -- a ViewportFrame
+			-- clips hard at its bounds, it does not letterbox. `sphere` is the
+			-- furthest reach of any part, so framing must clear it with room to
+			-- spare, and it must clear it AT EVERY ROTATION: the gear spins, and
+			-- a corner that fits at 0 degrees can swing outside at 22.
+			--
+			-- 3.1x leaves roughly a quarter of the radius as margin, which holds
+			-- through a full turn and still fills the plate.
+			cam.CFrame = CFrame.new(Vector3.new(0, 0, sphere * 3.1),
 				Vector3.new(0, 0, 0))
 			cam.FieldOfView = 40
 			cam.Parent = viewport
