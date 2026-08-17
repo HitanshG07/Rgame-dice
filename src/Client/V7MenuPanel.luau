@@ -303,7 +303,13 @@ function V7MenuPanel.new(): V7MenuController
 		-- the gutter, so `2 * cell + gutter` is exactly the row, at any width.
 		local shopGutter = UITheme.Scale.LG
 		local gridLayout = Instance.new("UIGridLayout")
-		gridLayout.CellSize = UDim2.new(0.5, -shopGutter / 2, 0, 168)
+		-- 192, NOT 168. At the raised type sizes the longest tier small print
+		-- wraps to three lines, and a 168px card could not hold title + blurb +
+		-- three lines + a 38px action row -- the small print rendered straight
+		-- through the button beneath it. Sized for the WORST case rather than
+		-- the average, because every card in a grid shares one height and the
+		-- tallest content is what has to fit.
+		gridLayout.CellSize = UDim2.new(0.5, -shopGutter / 2, 0, 192)
 		gridLayout.CellPadding = UDim2.new(0, shopGutter, 0, shopGutter)
 		gridLayout.SortOrder = Enum.SortOrder.LayoutOrder
 		gridLayout.Parent = shopBody
@@ -443,19 +449,26 @@ function V7MenuPanel.new(): V7MenuController
 			-- are given.
 			local textStack = Instance.new("Frame")
 			textStack.Name = "TextStack"
-			textStack.Size = UDim2.new(1, 0, 1, -(38 + UITheme.Scale.MD))
+			-- Reserves the action row plus a gap ABOVE it, so the last line of
+			-- small print does not sit flush against the button.
+			textStack.Size = UDim2.new(1, 0, 1, -(38 + UITheme.Scale.MD * 2))
 			textStack.BackgroundTransparency = 1
 			textStack.Parent = card
 
 			local cardList = Instance.new("UIListLayout")
 			cardList.Padding = UDim.new(0, 6)
 			cardList.SortOrder = Enum.SortOrder.LayoutOrder
+			-- Stated explicitly because the blurb below is a `UIFlexItem`, and
+			-- flex only distributes along a declared fill direction.
+			cardList.FillDirection = Enum.FillDirection.Vertical
 			cardList.Parent = textStack
 
 			-- Row 1: Tag Badge Frame (Border stroke, no text glow) + Title
 			local tagRow = Instance.new("Frame")
 			tagRow.Name = "TagRow"
-			tagRow.Size = UDim2.new(1, 0, 0, 24)
+			-- Taller to carry the raised title size without clipping its
+			-- descenders. 24 was sized for a 17px title; this holds 20px.
+			tagRow.Size = UDim2.new(1, 0, 0, 28)
 			tagRow.BackgroundTransparency = 1
 			tagRow.LayoutOrder = 1
 			tagRow.Parent = textStack
@@ -481,7 +494,7 @@ function V7MenuPanel.new(): V7MenuController
 			categoryLabel.Font = Enum.Font.Code
 			categoryLabel.Text = categoryType
 			categoryLabel.TextColor3 = Color3.fromRGB(212, 175, 55)
-			categoryLabel.TextSize = 11
+			categoryLabel.TextSize = UITheme.Scale.TextSmall
 			categoryLabel.TextStrokeTransparency = 1
 			categoryLabel.Parent = categoryBadgeFrame
 
@@ -493,13 +506,23 @@ function V7MenuPanel.new(): V7MenuController
 			titleLbl.Font = Enum.Font.GothamBold
 			titleLbl.Text = entry.name
 			titleLbl.TextColor3 = Color3.fromRGB(245, 239, 230)
-			titleLbl.TextSize = 17
+			titleLbl.TextSize = 20
 			titleLbl.TextStrokeTransparency = 1
 			titleLbl.TextXAlignment = Enum.TextXAlignment.Left
 			titleLbl.TextTruncate = Enum.TextTruncate.AtEnd
 			titleLbl.Parent = tagRow
 
 			-- Row 2: Blurb (Matte Cream, NO glow)
+			-- THE BLURB ABSORBS WHATEVER IS LEFT, which is what evens the cards out.
+			--
+			-- Every card is a fixed 168 tall, but only the ones with tier small
+			-- print filled it: measured, a three-row card used 82 of its 94px
+			-- text area while a two-row card used 58, leaving 36px of dead space.
+			-- That gap is what read as some cards looking empty.
+			--
+			-- A flex item takes the remainder rather than a fixed 34, so a card
+			-- with no small print gives its blurb the room instead of leaving a
+			-- hole, and a card with small print is unchanged.
 			local blurbLbl = Instance.new("TextLabel")
 			blurbLbl.Name = "Blurb"
 			blurbLbl.Size = UDim2.new(1, 0, 0, 34)
@@ -507,7 +530,7 @@ function V7MenuPanel.new(): V7MenuController
 			blurbLbl.Font = Enum.Font.Gotham
 			blurbLbl.Text = entry.blurb
 			blurbLbl.TextColor3 = Color3.fromRGB(245, 239, 230)
-			blurbLbl.TextSize = 15
+			blurbLbl.TextSize = UITheme.Scale.TextHeading
 			blurbLbl.TextStrokeTransparency = 1
 			blurbLbl.TextWrapped = true
 			blurbLbl.TextXAlignment = Enum.TextXAlignment.Left
@@ -515,16 +538,34 @@ function V7MenuPanel.new(): V7MenuController
 			blurbLbl.LayoutOrder = 2
 			blurbLbl.Parent = textStack
 
+			local blurbFlex = Instance.new("UIFlexItem")
+			blurbFlex.FlexMode = Enum.UIFlexMode.Fill
+			blurbFlex.Parent = blurbLbl
+
+			-- A FLOOR, because flex distributes what is LEFT and that can be
+			-- nothing. On the two cards whose small print wraps to three lines
+			-- the blurb was squeezed to a 13px box for 17px text and clipped its
+			-- own single line. Fill is the right behaviour when there is room to
+			-- spare; it must not be allowed to take the row below legibility.
+			local blurbFloor = Instance.new("UISizeConstraint")
+			blurbFloor.MinSize = Vector2.new(0, 22)
+			blurbFloor.Parent = blurbLbl
+
 			-- Row 3: Detail (Matte Brass Gold, NO glow)
 			if detail ~= nil then
 				local fine = Instance.new("TextLabel")
 				fine.Name = "TierDetail"
-				fine.Size = UDim2.new(1, 0, 0, 24)
+				-- MEASURES ITSELF. At the raised type size these lines wrap to
+				-- two rows and a fixed 24px box truncated five of them mid-word.
+				-- `AutomaticSize.Y` lets the row take the height its text needs,
+				-- and the blurb's flex above gives back whatever is left over.
+				fine.Size = UDim2.new(1, 0, 0, 0)
+				fine.AutomaticSize = Enum.AutomaticSize.Y
 				fine.BackgroundTransparency = 1
 				fine.Font = Enum.Font.Code
 				fine.Text = detail
 				fine.TextColor3 = Color3.fromRGB(212, 175, 55)
-				fine.TextSize = 11
+				fine.TextSize = UITheme.Scale.TextBody
 				fine.TextStrokeTransparency = 1
 				fine.TextWrapped = true
 				fine.TextXAlignment = Enum.TextXAlignment.Left
@@ -563,7 +604,7 @@ function V7MenuPanel.new(): V7MenuController
 			ownedPill.Font = Enum.Font.GothamBold
 			ownedPill.Text = "OWNED"
 			ownedPill.TextColor3 = Color3.fromRGB(160, 148, 140)
-			ownedPill.TextSize = 14
+			ownedPill.TextSize = UITheme.Scale.TextBody
 			ownedPill.TextStrokeTransparency = 1
 			ownedPill.Visible = false
 			ownedPill.Parent = actionRow
@@ -584,7 +625,7 @@ function V7MenuPanel.new(): V7MenuController
 			buyBtn.Font = Enum.Font.GothamBold
 			buyBtn.Text = "BUY"
 			buyBtn.TextColor3 = Color3.fromRGB(26, 22, 20)
-			buyBtn.TextSize = 14
+			buyBtn.TextSize = UITheme.Scale.TextHeading
 			buyBtn.TextStrokeTransparency = 1
 			buyBtn.Parent = actionRow
 
