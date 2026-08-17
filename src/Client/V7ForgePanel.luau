@@ -60,7 +60,10 @@ function V7ForgePanel.new(): V7ForgeController
 	local screenGui = Instance.new("ScreenGui")
 	screenGui.Name = "V7ForgeGui"
 	screenGui.ResetOnSpawn = false
-	screenGui.IgnoreGuiInset = true
+	-- Respects the inset for the same reason as the menu overlays: this is a
+	-- modal dialog, so its canvas should be the visible screen and a plain
+	-- 0.5/0.5 centre should mean what it says.
+	screenGui.IgnoreGuiInset = false
 	screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 	screenGui.DisplayOrder = UITheme.Layer.Overlay
 

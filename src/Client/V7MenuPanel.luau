@@ -62,7 +62,23 @@ function V7MenuPanel.new(): V7MenuController
 	local screenGui = Instance.new("ScreenGui")
 	screenGui.Name = "V7MenuGui"
 	screenGui.ResetOnSpawn = false
-	screenGui.IgnoreGuiInset = true
+	-- THE INSET IS RESPECTED, and that is what centres these panels.
+	--
+	-- With `IgnoreGuiInset = true` the canvas starts ABOVE the Roblox topbar --
+	-- measured, y = -58 on a 780px screen -- so a panel at 0.5/0.5 centres on a
+	-- rectangle the player cannot fully see. It rendered with 25px above and
+	-- 84px below, reading as shoved up into the corner, and no amount of
+	-- arithmetic correction fixed it cleanly: four attempts each produced a
+	-- different constant bias.
+	--
+	-- The menu is a modal DIALOG, not a full-bleed HUD. It has no reason to draw
+	-- under the topbar, and respecting the inset makes the canvas equal to the
+	-- visible screen -- at which point a plain 0.5/0.5 is exactly centred with
+	-- no offset to compute and nothing to keep in sync on resize.
+	--
+	-- The HUD keeps `IgnoreGuiInset = true` deliberately: its currency bar is
+	-- meant to sit flush at the very top edge.
+	screenGui.IgnoreGuiInset = false
 	screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 	screenGui.DisplayOrder = UITheme.Layer.Overlay
 

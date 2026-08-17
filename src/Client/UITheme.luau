@@ -400,11 +400,13 @@ function UITheme.overlay(title: string): (Frame, Frame, TextButton)
 	container:SetAttribute("LayoutExempt", true)
 	container.Size = UDim2.fromScale(0.86, 0.86)
 	container.AnchorPoint = Vector2.new(0.5, 0.5)
+
 	container.Position = UDim2.fromScale(0.5, 0.5)
 	container.BackgroundColor3 = UITheme.Colors.BaseCream
 	container.BorderSizePixel = 0
 	container.ZIndex = UITheme.Layer.Overlay + 1
 	container.Parent = fullOverlay
+
 
 	-- A FLOOR AS WELL AS A CEILING, and the floor is the one that matters for
 	-- content-dense panels.
