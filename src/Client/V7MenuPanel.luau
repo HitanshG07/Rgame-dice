@@ -383,6 +383,49 @@ function V7MenuPanel.new(): V7MenuController
 				table.insert(parts, "1 die slot")
 				return "Grants " .. table.concat(parts, ", ") .. ". One purchase only."
 			end)(),
+
+			-- THE LAST SIX, so every card carries the same three rows.
+			--
+			-- These were the cards that read as empty: eight items had small
+			-- print and six did not, and the gap where the third row would go is
+			-- what the eye picked up. Filling it beats stretching the layout to
+			-- disguise it -- the row was missing CONTENT, not height.
+			--
+			-- Each says what the blurb cannot: the blurb states WHAT you get,
+			-- this states what it is FOR. A gem count means nothing to a player
+			-- who does not know that gems buy vault hours. Every figure is read
+			-- from the shared catalogs, so a card cannot advertise a rate the
+			-- server does not honour (L-025).
+			DiamondCache = string.format(
+				"Diamonds re-roll a die's shape -- %d per change -- and unlock "
+				.. "nodes on the ascension tree.",
+				DiceCatalog.SHAPE_CHANGE_DIAMOND_COST),
+			GemsLarge = string.format(
+				"Gems buy vault capacity at %d per hour, up to a cap of %dh.",
+				VaultCatalog.GEMS_PER_CAPACITY_HOUR,
+				math.floor(VaultCatalog.MAX_PURCHASED_CAPACITY_SEC / 3600)),
+			GemsSmall = string.format(
+				"Gems buy vault capacity at %d per hour, up to a cap of %dh.",
+				VaultCatalog.GEMS_PER_CAPACITY_HOUR,
+				math.floor(VaultCatalog.MAX_PURCHASED_CAPACITY_SEC / 3600)),
+			LuckBoost = (function(): string
+				local e = MonetisationCatalog.Products.LuckBoost
+				return string.format(
+					"For %d minutes, heavy faces land closer to even odds. Your "
+					.. "mass and payouts are unchanged.",
+					math.floor((e.durationSeconds or 900) / 60))
+			end)(),
+			OfflineX2 = string.format(
+				"Multiplies the NEXT vault claim by %sx. Applies once, to that "
+				.. "claim only.",
+				tostring(MonetisationCatalog.Products.OfflineX2.amount or 2)),
+			TimeSkip24 = (function(): string
+				local e = MonetisationCatalog.Products.TimeSkip24
+				return string.format(
+					"Pays %d hours at YOUR OWN earning rate, not a fixed sum. Roll "
+					.. "a few times first so that rate is established.",
+					math.floor((e.durationSeconds or 24 * 3600) / 3600))
+			end)(),
 		}
 		
 		local function createCorner(parent: Instance, radius: number): UICorner
