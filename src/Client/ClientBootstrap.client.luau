@@ -220,11 +220,35 @@ if type(V7HUDModule) == "table" and type(V7HUDModule.new) == "function" then
 		if type(die) ~= "table" or type(die.Faces) ~= "table" or type(die.Shape) ~= "string" then
 			return nil
 		end
+		-- A FACE MAY BE A NUMBER OR A TABLE, and reading only one shape is what
+		-- took the whole client down. This accepted `{ Mass = n }` and scored
+		-- anything else as 0 -- so a snapshot carrying plain numeric faces
+		-- produced an all-zero mass list, `ForgeMath.voidProbability` raised
+		-- "total mass must be positive", and the error escaped the StateSync
+		-- handler ENTIRELY. Every panel downstream of that line -- shop, shapes,
+		-- slots, settings, vault, quests, ascend, and the forge -- silently
+		-- stopped receiving snapshots, which is why the whole UI read as
+		-- unhooked rather than as one broken readout.
 		local masses: { number } = {}
+		local total = 0
 		for i, face in ipairs(die.Faces) do
-			masses[i] = if type(face) == "table" then tonumber(face.Mass) or 0 else 0
+			local m: number
+			if type(face) == "table" then
+				m = tonumber(face.Mass) or 0
+			else
+				m = tonumber(face) or 0
+			end
+			if m < 0 or m ~= m then
+				m = 0
+			end
+			masses[i] = m
+			total += m
 		end
-		if #masses == 0 then
+		-- GUARD THE PRECONDITION, not just the emptiness. `voidProbability`
+		-- requires a positive total; a list of zeros is the wrong input, not an
+		-- error to propagate. Unknown risk is `nil`, which the HUD renders as
+		-- "--" -- honest about not knowing rather than fatal.
+		if #masses == 0 or total <= 0 then
 			return nil
 		end
 		local floor = DiceCatalog.getMassFloor(die.Shape)
@@ -284,7 +308,21 @@ if type(V7HUDModule) == "table" and type(V7HUDModule.new) == "function" then
 			return
 		end
 		hudCtrl:updateBalances(state.cash or 0, state.gems or 0, state.diamonds or 0)
-		lastVoidRiskPct = computeVoidRiskPct(state)
+
+		-- ISOLATED, because a display calculation must never cost the snapshot.
+		-- This raised once -- an all-zero mass list reaching
+		-- `ForgeMath.voidProbability` -- and the throw escaped the whole handler,
+		-- so the eight menu overlays and the forge stopped being fed while the
+		-- HUD above kept updating. A wrong risk percentage is a cosmetic defect;
+		-- losing every panel's data path is not, and the two should not share a
+		-- fate.
+		local okRisk, risk = pcall(computeVoidRiskPct, state)
+		if okRisk then
+			lastVoidRiskPct = risk
+		else
+			lastVoidRiskPct = nil
+			warn("[ClientBootstrap] void-risk calculation failed: " .. tostring(risk))
+		end
 		local mult, multUnlocked = estimateMultiplier(state)
 		lastMultUnlocked = multUnlocked
 		hudCtrl:updateStreak(mult, tonumber(state.streak) or 0,

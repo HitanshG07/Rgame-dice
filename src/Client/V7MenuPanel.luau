@@ -66,210 +66,524 @@ function V7MenuPanel.new(): V7MenuController
 	screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 	screenGui.DisplayOrder = UITheme.Layer.Overlay
 
-	-- 1. SHOP OVERLAY
-	local shopOverlay, shopBody = UITheme.overlay("Shop")
+	-- FORWARD-DECLARED AT FUNCTION SCOPE, and this is load-bearing.
+	--
+	-- `refreshShop` is defined with `local function` inside a nested block that
+	-- closes long before the controller table is built, so the assignment
+	-- `shopRefresh = refreshShop` several hundred lines later read a DIFFERENT,
+	-- undeclared name and silently stored nil. Lua does not warn about that --
+	-- it is a valid read of an unassigned global-ish local -- so the shop simply
+	-- never received a snapshot: measured live, `applyState` reported
+	-- `shopRefresh=nil` while its siblings were functions, and none of the
+	-- fourteen cards ever showed its OWNED chip.
+	--
+	-- Declaring the name out here makes the inner `function refreshShop(...)`
+	-- assign to THIS local rather than create a new one scoped to the block.
+	local refreshShop: ((any) -> ())? = nil
+
+	-- 1. SHOP OVERLAY (Replicated from Finalized Mock Preview)
+	local shopOverlay, shopBody = UITheme.overlay("Shop & Exchange")
 	shopOverlay.Parent = screenGui
 	overlays["shop"] = shopOverlay
 
-	-- A LIST, NOT A SCALED GRID.
-	--
-	-- The grid used `CellSize = 0.48 x 0.44` of the scrolling canvas, which is
-	-- the root of everything wrong with this panel in the operator's screenshot.
-	-- A cell 44% of the canvas HIGH is a different pixel height on every display,
-	-- and the card's contents were positioned as fractions OF THAT -- so the
-	-- blurb (y 0.35-0.65, TextScaled) and the tier small print (y 0.545-0.705)
-	-- overlapped by 10.5%, printing "Rolls for you..." straight through "Roll
-	-- continuously without tapping". TextScaled then sized the title to the cell
-	-- rather than to the hierarchy, which is why "Auto-Roll" rendered enormous
-	-- while its own explanatory line rendered tiny.
-	--
-	-- One column of fixed-height rows fixes all of it: heights are pixels, text
-	-- sizes come from the type ladder, and a vertical layout cannot overlap.
-	UITheme.verticalStack(shopBody, UITheme.Scale.SM, UITheme.Scale.LG)
-
-	-- Dynamically render sellable passes and products from MonetisationCatalog (P-5A3)
-	local sellableItems: { MonetisationCatalog.Entry } = {}
-
-	for _, entry in pairs(MonetisationCatalog.Passes) do
-		if MonetisationCatalog.isSellable(entry) then
-			table.insert(sellableItems, entry)
-		end
-	end
-	for _, entry in pairs(MonetisationCatalog.Products) do
-		if MonetisationCatalog.isSellable(entry) then
-			table.insert(sellableItems, entry)
-		end
-	end
-
-	table.sort(sellableItems, function(a, b)
-		return a.key < b.key
-	end)
-
-	-- Cards that represent a PASS, keyed so a snapshot can mark them owned. A
-	-- developer product is consumable and is deliberately absent from this map:
-	-- buying gems twice is a legitimate repeat purchase, owning Auto-Roll twice
-	-- is not.
-	local passCards: { [string]: any } = {}
-
-	-- Exact figures for the passes whose worth is a RATE. Built from the shared
-	-- catalogs, never typed as prose, so a card cannot promise something the
-	-- server does not deliver (L-025). Entries absent here simply show no small
-	-- print -- a pass that grants a concrete thing ("+2 die slots") is already
-	-- self-explanatory in its blurb.
-	local SHOP_TIER_DETAIL: { [string]: string } = {
-		VipVault = string.format(
-			"Vault: +%d%% of your earning rate, capacity raised to %dh.\n"
-			.. "Standard is %d%% and %dh. Stacks with Roblox Premium.",
-			math.floor(VaultCatalog.VIP_EFFICIENCY_BONUS * 100 + 0.5),
-			math.floor(VaultCatalog.VIP_CAPACITY_SEC / 3600),
-			math.floor(VaultCatalog.BASE_EFFICIENCY * 100 + 0.5),
-			math.floor(VaultCatalog.BASE_CAPACITY_SEC / 3600)),
-		AutoRoll = "Rolls for you. Manual rolling is capped lower than auto.",
-		UltraAutoRoll = "Raises the auto-roll speed ceiling above the standard pass.",
-	}
-
-	for _, entry in ipairs(sellableItems) do
-		-- THE CARD GROWS TO ITS TEXT rather than guessing a height for it.
-		--
-		-- A fixed 84/108px was a resolution assumption in disguise: the blurbs
-		-- wrap, and on a 600px viewport the VipVault detail line needs two rows
-		-- instead of one, overflowing the card and spilling past its rounded edge
-		-- into the card below. That is precisely the failure this whole pass
-		-- exists to remove, so a fixed height here would have reintroduced it on
-		-- the screens least able to afford it (NFR-3).
-		--
-		-- `AutomaticSize.Y` on the card plus a minimum height gives both: short
-		-- cards keep a consistent floor, and a card whose text wraps simply gets
-		-- taller. The vertical stack re-flows the rest.
-		local detail = SHOP_TIER_DETAIL[entry.key]
-
-		local card, content = UITheme.card(nil)
-		card.Name = "Item_" .. entry.key
-		card.Parent = shopBody
-
-		-- Self-measuring too, or a fixed row inside a growing card clips the very
-		-- text the card grew to fit.
-		local row, textCol, actions = UITheme.listRow(nil)
-		row.Parent = content
-
-		local titleLbl = UITheme.textLine(entry.name, UITheme.Scale.TextHeading,
-			UITheme.Colors.TextGold, UITheme.FontHeading)
-		titleLbl.Name = "Title"
-		titleLbl.LayoutOrder = 1
-		titleLbl.Parent = textCol
-
-		-- A WRAPPING PARAGRAPH, not a scaled single line. The blurbs are full
-		-- sentences of varying length and `TextScaled` shrank the long ones to
-		-- unreadable while blowing the short ones up.
-		local blurbLbl = UITheme.paragraph(entry.blurb, UITheme.Scale.TextBody,
-			UITheme.Colors.TextPrimary)
-		blurbLbl.Name = "Blurb"
-		blurbLbl.LayoutOrder = 2
-		blurbLbl.Parent = textCol
-
-		-- EXACT NUMBERS IN SMALL PRINT for the passes whose value is a rate rather
-		-- than a thing (operator-directed 2026-08-13). "A far higher ceiling on
-		-- offline earnings" is not something a player can evaluate against a
-		-- Robux price; "+25% rate, 10h capacity" is. Read from the shared catalog
-		-- so the card cannot advertise a number the server does not grant.
-		if detail ~= nil then
-			local fine = UITheme.paragraph(detail, UITheme.Scale.TextSmall,
-				UITheme.Colors.TextDim)
-			fine.Name = "TierDetail"
-			fine.LayoutOrder = 3
-			fine.Parent = textCol
+	local panelContainer = shopOverlay:FindFirstChild("Panel") :: Frame?
+	if panelContainer then
+		-- Style panel container with dark mocha fill & gold border
+		panelContainer.BackgroundColor3 = Color3.fromRGB(26, 22, 20)
+		local existingStroke = panelContainer:FindFirstChildOfClass("UIStroke")
+		if existingStroke then
+			existingStroke.Color = Color3.fromRGB(234, 179, 8)
+			existingStroke.Thickness = 2
+		else
+			local stroke = Instance.new("UIStroke")
+			stroke.Color = Color3.fromRGB(234, 179, 8)
+			stroke.Thickness = 2
+			stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+			stroke.Parent = panelContainer
 		end
 
-		-- An OWNED state chip, so ownership is not carried by the button caption
-		-- alone. Hidden until a snapshot says otherwise.
-		-- `Gems` blue, not `Positive`. In this palette `Positive` is the SAME
-		-- orange as Cash and as the BUY button, so an "Owned" chip beside a BUY
-		-- button read as part of the button rather than as a state (L-042 made
-		-- exactly this point about the AUTO toggle). Owned is a settled fact, not
-		-- a call to action, and should not compete with the thing you can press.
-		local ownedPill = UITheme.statusPill("Owned", UITheme.Colors.Gems)
-		ownedPill.Name = "OwnedPill"
-		ownedPill.Visible = false
-		ownedPill.LayoutOrder = 1
-		ownedPill.Parent = actions
+		-- Style Header to match Mock Preview (~ Shop & Exchange ~)
+		local header = panelContainer:FindFirstChild("Header") :: Frame?
+		if header then
+			header.Size = UDim2.new(1, -28, 0, 56)
+			header.Position = UDim2.new(0, 14, 0, 10)
+			header.BackgroundColor3 = Color3.fromRGB(36, 30, 26)
+			header.BackgroundTransparency = 0
 
-		local buyBtn = UITheme.actionButton("Buy", "primary", UITheme.Colors.Gems)
-		buyBtn.Name = "BuyButton"
-		buyBtn.LayoutOrder = 2
-		buyBtn.Parent = actions
-
-		local assetId = entry.assetId
-		local isPass = MonetisationCatalog.Passes[entry.key] ~= nil
-
-		-- THE PROMPT CAN FAIL, and silently. `PromptGamePassPurchase` throws if
-		-- the id does not exist or the place is not configured for it, and an
-		-- unhandled throw inside a click handler leaves the player pressing a
-		-- button that does nothing with no clue why. pcall + an on-card message.
-		local function promptPurchase()
-			if assetId == nil then
-				-- FR-12.6 fail-closed: an unresolved entry is not purchasable.
-				blurbLbl.Text = "Not available yet."
-				return
+			local hCorner = header:FindFirstChildOfClass("UICorner")
+			if not hCorner then
+				hCorner = Instance.new("UICorner")
+				hCorner.CornerRadius = UDim.new(0, 8)
+				hCorner.Parent = header
 			end
-			local ok, err
+
+			local hStroke = header:FindFirstChildOfClass("UIStroke")
+			if not hStroke then
+				hStroke = Instance.new("UIStroke")
+				hStroke.Color = Color3.fromRGB(234, 179, 8)
+				hStroke.Thickness = 1
+				hStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+				hStroke.Parent = header
+			end
+
+			local titleLbl = header:FindFirstChild("Title") :: TextLabel?
+			if titleLbl then
+				titleLbl.Text = "~ Shop & Exchange ~"
+				titleLbl.TextColor3 = Color3.fromRGB(234, 179, 8)
+				titleLbl.Font = Enum.Font.GothamBold
+				titleLbl.TextSize = 22
+			end
+
+			local closeBtn = header:FindFirstChild("Close") :: TextButton?
+			if closeBtn then
+				closeBtn.Size = UDim2.new(0, 42, 0, 42)
+				closeBtn.BackgroundColor3 = Color3.fromRGB(48, 40, 36)
+				closeBtn.TextColor3 = Color3.fromRGB(234, 179, 8)
+				closeBtn.TextSize = 26
+				local cCorner = closeBtn:FindFirstChildOfClass("UICorner")
+				if not cCorner then
+					cCorner = Instance.new("UICorner")
+					cCorner.CornerRadius = UDim.new(0, 6)
+					cCorner.Parent = closeBtn
+				end
+				local cStroke = closeBtn:FindFirstChildOfClass("UIStroke")
+				if not cStroke then
+					cStroke = Instance.new("UIStroke")
+					cStroke.Color = Color3.fromRGB(234, 179, 8)
+					cStroke.Thickness = 1
+					cStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+					cStroke.Parent = closeBtn
+				end
+			end
+		end
+
+		-- Category Selector Tabs Bar (Fixed on Panel, above scrolling body)
+		local categoryBar = Instance.new("Frame")
+		categoryBar.Name = "CategoryBar"
+		categoryBar.Size = UDim2.new(1, -28, 0, 44)
+		categoryBar.Position = UDim2.new(0, 14, 0, 72)
+		categoryBar.BackgroundTransparency = 1
+		categoryBar.Parent = panelContainer
+
+		local categoryList = Instance.new("UIListLayout")
+		categoryList.Padding = UDim.new(0, 10)
+		categoryList.SortOrder = Enum.SortOrder.LayoutOrder
+		categoryList.FillDirection = Enum.FillDirection.Horizontal
+		categoryList.Parent = categoryBar
+
+		-- FOUR TABS, BECAUSE THERE ARE THREE KINDS OF THING FOR SALE.
+		--
+		-- It was ALL / GAMEPASSES / CURRENCY, and everything that was not a pass
+		-- fell into CURRENCY -- so a 24-hour Time Skip, a Luck Boost and the
+		-- Starter Bundle all sat under a heading that describes none of them.
+		-- Six of fourteen items were mislabelled.
+		--
+		-- The catalog already knows the difference: `entry.kind` is "Currency"
+		-- for the gem and diamond packs and "Boost", "Bundle" or "TimeSkip" for
+		-- the consumables. Reading it beats re-deriving the category from
+		-- whether the key happens to live in `Passes`.
+		local categories = {
+			{ id = "ALL", label = "ALL ITEMS" },
+			{ id = "GAMEPASS", label = "GAMEPASSES" },
+			{ id = "CURRENCY", label = "CURRENCY & GEMS" },
+			{ id = "BOOST", label = "BOOSTS & BUNDLES" },
+		}
+
+		local categoryButtons: { [string]: TextButton } = {}
+		local itemFrames: { [string]: Frame } = {}
+
+		local function updateCategoryFilter(catId: string)
+			for id, btn in pairs(categoryButtons) do
+				if id == catId then
+					btn.BackgroundColor3 = Color3.fromRGB(212, 175, 55)
+					btn.TextColor3 = Color3.fromRGB(26, 22, 20)
+				else
+					btn.BackgroundColor3 = Color3.fromRGB(36, 30, 26)
+					btn.TextColor3 = Color3.fromRGB(212, 175, 55)
+				end
+			end
+
+			for _, itemFrame in pairs(itemFrames) do
+				local catTag = itemFrame:GetAttribute("Category")
+				if catId == "ALL" or catTag == catId then
+					itemFrame.Visible = true
+				else
+					itemFrame.Visible = false
+				end
+			end
+		end
+
+		-- WIDTH DERIVED FROM THE COUNT, not a literal tuned for three tabs.
+		--
+		-- It was a flat `0.32` each, which fits three across with a gutter and
+		-- nothing else -- adding the fourth pushed BOOSTS & BUNDLES 260px past
+		-- the panel's right edge, measured. Sharing the row means the tabs stay
+		-- inside whatever the panel is, at any count, so the next category added
+		-- cannot reintroduce this.
+		local tabCount = #categories
+		local tabGutter = 10
+		local tabWidth = (1 / tabCount)
+
+		for i, cat in ipairs(categories) do
+			local tabBtn = Instance.new("TextButton")
+			tabBtn.Name = "Tab_" .. cat.id
+			-- The offset term reclaims this tab's share of the gutters the
+			-- layout inserts between them, so the row totals exactly 100%.
+			tabBtn.Size = UDim2.new(tabWidth, -(tabGutter * (tabCount - 1)) / tabCount, 1, 0)
+			tabBtn.BackgroundColor3 = if cat.id == "ALL" then Color3.fromRGB(212, 175, 55) else Color3.fromRGB(36, 30, 26)
+			tabBtn.BorderSizePixel = 0
+			tabBtn.Font = Enum.Font.GothamBold
+			tabBtn.Text = cat.label
+			tabBtn.TextColor3 = if cat.id == "ALL" then Color3.fromRGB(26, 22, 20) else Color3.fromRGB(212, 175, 55)
+			tabBtn.TextSize = 13
+			tabBtn.TextStrokeTransparency = 1
+			tabBtn.LayoutOrder = i
+			tabBtn.Parent = categoryBar
+
+			local tabCorner = Instance.new("UICorner")
+			tabCorner.CornerRadius = UDim.new(0, 6)
+			tabCorner.Parent = tabBtn
+
+			local tabStroke = Instance.new("UIStroke")
+			tabStroke.Color = Color3.fromRGB(212, 175, 55)
+			tabStroke.Thickness = 1
+			tabStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+			tabStroke.Parent = tabBtn
+
+			categoryButtons[cat.id] = tabBtn
+
+			UITheme.onPressed(tabBtn, function()
+				updateCategoryFilter(cat.id)
+			end)
+		end
+
+		-- Position Scrolling Body below the fixed Category Bar with right padding for scrollbar
+		shopBody.Position = UDim2.new(0, 14, 0, 122)
+		shopBody.Size = UDim2.new(1, -28, 1, -128)
+
+		local shopPadding = Instance.new("UIPadding")
+		shopPadding.PaddingTop = UDim.new(0, 8)
+		shopPadding.PaddingBottom = UDim.new(0, 16)
+		shopPadding.PaddingLeft = UDim.new(0, 0)
+		shopPadding.PaddingRight = UDim.new(0, 20)
+		shopPadding.Parent = shopBody
+
+		-- 2-Column Responsive Card Grid inside shopBody
+		local gridLayout = Instance.new("UIGridLayout")
+		gridLayout.CellSize = UDim2.new(0.485, -8, 0, 168)
+		gridLayout.CellPadding = UDim2.new(0.03, 0, 0, 16)
+		gridLayout.SortOrder = Enum.SortOrder.LayoutOrder
+		gridLayout.Parent = shopBody
+
+		local sellableItems: { MonetisationCatalog.Entry } = {}
+		for _, entry in pairs(MonetisationCatalog.Passes) do
+			if MonetisationCatalog.isSellable(entry) then
+				table.insert(sellableItems, entry)
+			end
+		end
+		for _, entry in pairs(MonetisationCatalog.Products) do
+			if MonetisationCatalog.isSellable(entry) then
+				table.insert(sellableItems, entry)
+			end
+		end
+		table.sort(sellableItems, function(a, b)
+			return a.key < b.key
+		end)
+
+		local passCards: { [string]: any } = {}
+
+		local SHOP_TIER_DETAIL: { [string]: string } = {
+			VipVault = string.format(
+				"Vault: +%d%% of your earning rate, capacity raised to %dh.\n"
+				.. "Standard is %d%% and %dh. Stacks with Roblox Premium.",
+				math.floor(VaultCatalog.VIP_EFFICIENCY_BONUS * 100 + 0.5),
+				math.floor(VaultCatalog.VIP_CAPACITY_SEC / 3600),
+				math.floor(VaultCatalog.BASE_EFFICIENCY * 100 + 0.5),
+				math.floor(VaultCatalog.BASE_CAPACITY_SEC / 3600)),
+			AutoRoll = "Rolls for you. Manual rolling is capped lower than auto.",
+			UltraAutoRoll = "Raises the auto-roll speed ceiling above the standard pass.",
+
+			-- THE OTHER FIVE, so every card carries the same three text rows.
+			--
+			-- Three of eight passes had small print and five did not, which is
+			-- what made the shop look uneven: the cards were identical in
+			-- geometry -- measured, all 405x168 -- but two of them had a third
+			-- line of text and the rest had a gap where it would go.
+			--
+			-- EVERY FIGURE IS READ FROM THE CATALOG, never typed here. A card
+			-- must not be able to advertise a multiplier or a count the server
+			-- does not actually grant, and a second copy of the number would
+			-- drift the first time it is tuned (L-025).
+			CashX2 = string.format(
+				"Multiplies Cash from every roll by %sx. Applies to the roll "
+				.. "payout only, not to Gems or Diamonds.",
+				tostring(MonetisationCatalog.Passes.CashX2.amount or 2)),
+			DieSlots2 = string.format(
+				"Adds %d slots on top of whatever your ascension count allows, "
+				.. "up to the cap of %d.",
+				MonetisationCatalog.Passes.DieSlots2.amount or 2,
+				DiceCatalog.MAX_DIE_SLOTS),
+			VipForge = string.format(
+				"Re-forging costs %d%% of the standard price. Moving mass stays "
+				.. "zero-sum -- this changes the fee, never the mass.",
+				math.floor((MonetisationCatalog.Passes.VipForge.amount or 0.6) * 100 + 0.5)),
+			StreakShield = "A Void face pays nothing but no longer resets your "
+				.. "streak, so a bad roll costs you the payout and not the run.",
+			StarterBundle = (function(): string
+				-- Built from the bundle's actual contents so the card lists what
+				-- the handler grants, in the handler's own order, rather than a
+				-- prose summary that can quietly fall out of date.
+				local parts: { string } = {}
+				local bundle = MonetisationCatalog.Products.StarterBundle.bundle
+				if type(bundle) == "table" then
+					for _, grant in ipairs(bundle) do
+						table.insert(parts, string.format("%d %s",
+							grant.amount, tostring(grant.currency)))
+					end
+				end
+				table.insert(parts, "1 die slot")
+				return "Grants " .. table.concat(parts, ", ") .. ". One purchase only."
+			end)(),
+		}
+		
+		local function createCorner(parent: Instance, radius: number): UICorner
+			local corner = Instance.new("UICorner")
+			corner.CornerRadius = UDim.new(0, radius)
+			corner.Parent = parent
+			return corner
+		end
+
+		for order, entry in ipairs(sellableItems) do
+			local detail = SHOP_TIER_DETAIL[entry.key]
+			local isPass = MonetisationCatalog.Passes[entry.key] ~= nil
+			-- CATEGORY READ FROM THE CATALOG, not inferred. A product is
+			-- CURRENCY only when it actually grants currency; the boosts,
+			-- bundles and time skips are consumables and say so.
+			local categoryType: string
 			if isPass then
-				ok, err = pcall(MarketplaceService.PromptGamePassPurchase,
-					MarketplaceService, player, assetId)
+				categoryType = "GAMEPASS"
+			elseif entry.kind == "Currency" then
+				categoryType = "CURRENCY"
 			else
-				ok, err = pcall(MarketplaceService.PromptProductPurchase,
-					MarketplaceService, player, assetId)
+				categoryType = "BOOST"
 			end
-			if not ok then
-				warn(string.format("[V7MenuPanel] purchase prompt failed for %s: %s",
-					entry.key, tostring(err)))
-				blurbLbl.Text = "Could not open the purchase window."
-				blurbLbl.TextColor3 = UITheme.Colors.Negative
+
+			local card = Instance.new("Frame")
+			card.Name = "Item_" .. entry.key
+			card.BackgroundColor3 = Color3.fromRGB(36, 30, 26)
+			card.BorderSizePixel = 0
+			card.LayoutOrder = order
+			card.Parent = shopBody
+			card:SetAttribute("Category", categoryType)
+
+			itemFrames[entry.key] = card
+
+			createCorner(card, 10)
+
+			local cardStroke = Instance.new("UIStroke")
+			cardStroke.Name = "RowStroke"
+			cardStroke.Color = if entry.owned then Color3.fromRGB(212, 175, 55) else Color3.fromRGB(70, 58, 48)
+			cardStroke.Thickness = 1
+			cardStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+			cardStroke.Parent = card
+
+			local cardPadding = Instance.new("UIPadding")
+			cardPadding.PaddingTop = UDim.new(0, 12)
+			cardPadding.PaddingBottom = UDim.new(0, 12)
+			cardPadding.PaddingLeft = UDim.new(0, 14)
+			cardPadding.PaddingRight = UDim.new(0, 14)
+			cardPadding.Parent = card
+
+			local cardList = Instance.new("UIListLayout")
+			cardList.Padding = UDim.new(0, 6)
+			cardList.SortOrder = Enum.SortOrder.LayoutOrder
+			cardList.Parent = card
+
+			-- Row 1: Tag Badge Frame (Border stroke, no text glow) + Title
+			local tagRow = Instance.new("Frame")
+			tagRow.Name = "TagRow"
+			tagRow.Size = UDim2.new(1, 0, 0, 24)
+			tagRow.BackgroundTransparency = 1
+			tagRow.LayoutOrder = 1
+			tagRow.Parent = card
+
+			local categoryBadgeFrame = Instance.new("Frame")
+			categoryBadgeFrame.Name = "CategoryBadge"
+			categoryBadgeFrame.Size = UDim2.new(0, 92, 1, 0)
+			categoryBadgeFrame.BackgroundColor3 = Color3.fromRGB(20, 16, 14)
+			categoryBadgeFrame.BorderSizePixel = 0
+			categoryBadgeFrame.Parent = tagRow
+			createCorner(categoryBadgeFrame, 4)
+
+			local catStroke = Instance.new("UIStroke")
+			catStroke.Color = Color3.fromRGB(212, 175, 55)
+			catStroke.Thickness = 1
+			catStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+			catStroke.Parent = categoryBadgeFrame
+
+			local categoryLabel = Instance.new("TextLabel")
+			categoryLabel.Name = "Label"
+			categoryLabel.Size = UDim2.fromScale(1, 1)
+			categoryLabel.BackgroundTransparency = 1
+			categoryLabel.Font = Enum.Font.Code
+			categoryLabel.Text = categoryType
+			categoryLabel.TextColor3 = Color3.fromRGB(212, 175, 55)
+			categoryLabel.TextSize = 11
+			categoryLabel.TextStrokeTransparency = 1
+			categoryLabel.Parent = categoryBadgeFrame
+
+			local titleLbl = Instance.new("TextLabel")
+			titleLbl.Name = "Title"
+			titleLbl.Size = UDim2.new(1, -100, 1, 0)
+			titleLbl.Position = UDim2.new(0, 100, 0, 0)
+			titleLbl.BackgroundTransparency = 1
+			titleLbl.Font = Enum.Font.GothamBold
+			titleLbl.Text = entry.name
+			titleLbl.TextColor3 = Color3.fromRGB(245, 239, 230)
+			titleLbl.TextSize = 17
+			titleLbl.TextStrokeTransparency = 1
+			titleLbl.TextXAlignment = Enum.TextXAlignment.Left
+			titleLbl.TextTruncate = Enum.TextTruncate.AtEnd
+			titleLbl.Parent = tagRow
+
+			-- Row 2: Blurb (Matte Cream, NO glow)
+			local blurbLbl = Instance.new("TextLabel")
+			blurbLbl.Name = "Blurb"
+			blurbLbl.Size = UDim2.new(1, 0, 0, 34)
+			blurbLbl.BackgroundTransparency = 1
+			blurbLbl.Font = Enum.Font.Gotham
+			blurbLbl.Text = entry.blurb
+			blurbLbl.TextColor3 = Color3.fromRGB(245, 239, 230)
+			blurbLbl.TextSize = 15
+			blurbLbl.TextStrokeTransparency = 1
+			blurbLbl.TextWrapped = true
+			blurbLbl.TextXAlignment = Enum.TextXAlignment.Left
+			blurbLbl.TextYAlignment = Enum.TextYAlignment.Top
+			blurbLbl.LayoutOrder = 2
+			blurbLbl.Parent = card
+
+			-- Row 3: Detail (Matte Brass Gold, NO glow)
+			if detail ~= nil then
+				local fine = Instance.new("TextLabel")
+				fine.Name = "TierDetail"
+				fine.Size = UDim2.new(1, 0, 0, 24)
+				fine.BackgroundTransparency = 1
+				fine.Font = Enum.Font.Code
+				fine.Text = detail
+				fine.TextColor3 = Color3.fromRGB(212, 175, 55)
+				fine.TextSize = 11
+				fine.TextStrokeTransparency = 1
+				fine.TextWrapped = true
+				fine.TextXAlignment = Enum.TextXAlignment.Left
+				fine.TextYAlignment = Enum.TextYAlignment.Top
+				fine.LayoutOrder = 3
+				fine.Parent = card
+			end
+
+			-- Row 4: Action Control
+			local actionRow = Instance.new("Frame")
+			actionRow.Name = "ActionRow"
+			actionRow.Size = UDim2.new(1, 0, 0, 38)
+			actionRow.BackgroundTransparency = 1
+			actionRow.LayoutOrder = 4
+			actionRow.Parent = card
+
+			local ownedPill = Instance.new("TextLabel")
+			ownedPill.Name = "OwnedPill"
+			ownedPill.Size = UDim2.fromScale(1, 1)
+			ownedPill.BackgroundColor3 = Color3.fromRGB(20, 16, 14)
+			ownedPill.BorderSizePixel = 0
+			ownedPill.Font = Enum.Font.GothamBold
+			ownedPill.Text = "OWNED"
+			ownedPill.TextColor3 = Color3.fromRGB(160, 148, 140)
+			ownedPill.TextSize = 14
+			ownedPill.TextStrokeTransparency = 1
+			ownedPill.Visible = false
+			ownedPill.Parent = actionRow
+
+			createCorner(ownedPill, 6)
+
+			local pillStroke = Instance.new("UIStroke")
+			pillStroke.Color = Color3.fromRGB(48, 40, 36)
+			pillStroke.Thickness = 1
+			pillStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+			pillStroke.Parent = ownedPill
+
+			local buyBtn = Instance.new("TextButton")
+			buyBtn.Name = "BuyButton"
+			buyBtn.Size = UDim2.fromScale(1, 1)
+			buyBtn.BackgroundColor3 = Color3.fromRGB(212, 175, 55)
+			buyBtn.BorderSizePixel = 0
+			buyBtn.Font = Enum.Font.GothamBold
+			buyBtn.Text = "BUY"
+			buyBtn.TextColor3 = Color3.fromRGB(26, 22, 20)
+			buyBtn.TextSize = 14
+			buyBtn.TextStrokeTransparency = 1
+			buyBtn.Parent = actionRow
+
+			createCorner(buyBtn, 6)
+
+			local btnStroke = Instance.new("UIStroke")
+			btnStroke.Color = Color3.fromRGB(212, 175, 55)
+			btnStroke.Thickness = 1
+			btnStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+			btnStroke.Parent = buyBtn
+
+			local assetId = entry.assetId
+
+			local function promptPurchase()
+				if assetId == nil then
+					blurbLbl.Text = "Not available yet."
+					return
+				end
+				local ok, err
+				if isPass then
+					ok, err = pcall(MarketplaceService.PromptGamePassPurchase,
+						MarketplaceService, player, assetId)
+				else
+					ok, err = pcall(MarketplaceService.PromptProductPurchase,
+						MarketplaceService, player, assetId)
+				end
+				if not ok then
+					warn(string.format("[V7MenuPanel] purchase prompt failed for %s: %s",
+						entry.key, tostring(err)))
+					blurbLbl.Text = "Could not open the purchase window."
+					blurbLbl.TextColor3 = UITheme.Colors.Negative
+				end
+			end
+
+			UITheme.onPressed(buyBtn, promptPurchase)
+
+			if isPass then
+				passCards[entry.key] = {
+					button = buyBtn, blurb = blurbLbl, baseBlurb = entry.blurb,
+					pill = ownedPill, stroke = cardStroke,
+				}
 			end
 		end
 
-		UITheme.onPressed(buyBtn, promptPurchase)
-
-		if isPass then
-			passCards[entry.key] = {
-				button = buyBtn, blurb = blurbLbl, baseBlurb = entry.blurb,
-				pill = ownedPill,
-			}
-		end
-	end
-
-	-- Marks owned passes so the shop stops offering what the player already has.
-	--
-	-- Without this every card showed an identical BUY regardless of ownership,
-	-- and the only way to find out you already owned a pass was to press BUY and
-	-- have Roblox tell you. Products are intentionally untouched -- they are
-	-- consumable and repeat purchases are legitimate.
-	local function refreshShop(state: any)
-		local owned = if type(state) == "table" and type(state.ownedPasses) == "table"
-			then state.ownedPasses else {}
-		for key, ui in pairs(passCards) do
-			if owned[key] == true then
-				-- OWNERSHIP IS THE CHIP'S JOB NOW. Appending "(active)" to the
-				-- blurb is what produced "Double all cash earned from rolls,
-				-- permanently.  (active)" in the operator's screenshot -- a state
-				-- word smuggled into the end of a sentence, where it reads as part
-				-- of the description rather than as the player's status. The blurb
-				-- stays the blurb; the chip carries the state.
-				-- THE CHIP SAYS IT; THE BUTTON GOES AWAY.
-				-- Showing an "Owned" chip beside a disabled button also reading
-				-- "Owned" says the same thing twice and leaves a dead control on
-				-- the card. A pass you already have needs no action, so the action
-				-- is removed and the state is stated once.
-				ui.pill.Visible = true
-				ui.button.Visible = false
-				ui.blurb.Text = ui.baseBlurb
-				ui.blurb.TextColor3 = UITheme.Colors.TextDim
-			else
-				ui.pill.Visible = false
-				ui.button.Visible = true
-				ui.button.Text = "Buy"
-				UITheme.setActionEnabled(ui.button, true)
-				ui.blurb.Text = ui.baseBlurb
-				ui.blurb.TextColor3 = UITheme.Colors.TextPrimary
+		-- Assigns the FUNCTION-SCOPE local declared at the top of `new`, not a
+		-- new block-scoped one. `local function` here would shadow it and the
+		-- controller would receive nil again.
+		refreshShop = function(state: any)
+			local owned = if type(state) == "table" and type(state.ownedPasses) == "table"
+				then state.ownedPasses else {}
+			for key, ui in pairs(passCards) do
+				if owned[key] == true then
+					ui.pill.Visible = true
+					ui.button.Visible = false
+					ui.blurb.Text = ui.baseBlurb
+					ui.blurb.TextColor3 = UITheme.Colors.TextDim
+					ui.stroke.Color = Color3.fromRGB(234, 179, 8)
+				else
+					ui.pill.Visible = false
+					ui.button.Visible = true
+					ui.button.Text = "BUY"
+					UITheme.setActionEnabled(ui.button, true)
+					ui.blurb.Text = ui.baseBlurb
+					ui.blurb.TextColor3 = Color3.fromRGB(245, 239, 230)
+					ui.stroke.Color = Color3.fromRGB(70, 58, 48)
+				end
 			end
 		end
 	end
@@ -1532,133 +1846,376 @@ function V7MenuPanel.new(): V7MenuController
 		UITheme.setButtonText(claimVaultBtn, if unclaimed > 0 then "CLAIM" else "EMPTY")
 	end
 
-	-- 7. SETTINGS OVERLAY
+	-- 7. SETTINGS OVERLAY (Casino Ledger - Cozy Mocha & Gold Redesign)
 	local settingsOverlay, settingsBody = UITheme.overlay("Settings")
 	settingsOverlay.Parent = screenGui
 	overlays["settings"] = settingsOverlay
 
-	-- THIS OVERLAY HAD ZERO CHILDREN and no button anywhere opened it. It was a
-	-- titled empty rectangle that nothing could reach.
-	--
-	-- Everything below is driven by `SettingsCatalog`, so the rows drawn here and
-	-- the keys the server will accept are the same list by construction (L-025).
+	local settingsPanel = settingsOverlay:FindFirstChild("Panel") :: Frame?
+	if settingsPanel then
+		settingsPanel.BackgroundColor3 = Color3.fromRGB(26, 22, 20)
+		
+		local panelCorner = settingsPanel:FindFirstChildOfClass("UICorner")
+		if panelCorner then
+			panelCorner.CornerRadius = UDim.new(0, 14)
+		end
+		
+		local panelStroke = settingsPanel:FindFirstChildOfClass("UIStroke")
+		if panelStroke then
+			panelStroke.Color = Color3.fromRGB(212, 175, 55)
+			panelStroke.Thickness = 2
+			panelStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+		end
+
+		local headerFrame = settingsPanel:FindFirstChild("Header") :: Frame?
+		if headerFrame then
+			headerFrame.Size = UDim2.new(1, -28, 0, 56)
+			headerFrame.Position = UDim2.new(0, 14, 0, 10)
+			headerFrame.BackgroundColor3 = Color3.fromRGB(36, 30, 26)
+			headerFrame.BackgroundTransparency = 0
+
+			local headCorner = Instance.new("UICorner")
+			headCorner.CornerRadius = UDim.new(0, 8)
+			headCorner.Parent = headerFrame
+
+			local headStroke = Instance.new("UIStroke")
+			headStroke.Color = Color3.fromRGB(212, 175, 55)
+			headStroke.Thickness = 1
+			headStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+			headStroke.Parent = headerFrame
+
+			local headPadding = Instance.new("UIPadding")
+			headPadding.PaddingLeft = UDim.new(0, 18)
+			headPadding.PaddingRight = UDim.new(0, 18)
+			headPadding.Parent = headerFrame
+
+			local titleLabel = headerFrame:FindFirstChild("Title") :: TextLabel?
+			if titleLabel then
+				titleLabel.Text = "~ Settings & Options ~"
+				titleLabel.TextColor3 = Color3.fromRGB(212, 175, 55)
+				titleLabel.Font = Enum.Font.GothamBold
+				titleLabel.TextSize = 22
+				titleLabel.TextStrokeTransparency = 1
+			end
+
+			local closeBtn = headerFrame:FindFirstChild("Close") :: TextButton?
+			if closeBtn then
+				closeBtn.Size = UDim2.new(0, 42, 0, 42)
+				closeBtn.Position = UDim2.new(1, -42, 0.5, -21)
+				closeBtn.BackgroundColor3 = Color3.fromRGB(48, 40, 36)
+				closeBtn.BackgroundTransparency = 0
+				closeBtn.TextColor3 = Color3.fromRGB(212, 175, 55)
+				closeBtn.Font = Enum.Font.GothamBold
+				closeBtn.Text = "\u{00D7}"
+				closeBtn.TextSize = 26
+				closeBtn.TextStrokeTransparency = 1
+
+				local closeCorner = Instance.new("UICorner")
+				closeCorner.CornerRadius = UDim.new(0, 6)
+				closeCorner.Parent = closeBtn
+
+				local closeStroke = Instance.new("UIStroke")
+				closeStroke.Color = Color3.fromRGB(212, 175, 55)
+				closeStroke.Thickness = 1
+				closeStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+				closeStroke.Parent = closeBtn
+			end
+		end
+
+		settingsBody.Position = UDim2.new(0, 14, 0, 74)
+		settingsBody.Size = UDim2.new(1, -28, 1, -84)
+	end
+
+	local settingsPadding = Instance.new("UIPadding")
+	settingsPadding.PaddingTop = UDim.new(0, 6)
+	settingsPadding.PaddingBottom = UDim.new(0, 16)
+	settingsPadding.PaddingLeft = UDim.new(0, 0)
+	settingsPadding.PaddingRight = UDim.new(0, 16)
+	settingsPadding.Parent = settingsBody
+
 	local settingsList = Instance.new("UIListLayout")
-	settingsList.Padding = UDim.new(0, 10)
+	settingsList.Padding = UDim.new(0, 12)
 	settingsList.SortOrder = Enum.SortOrder.LayoutOrder
 	settingsList.Parent = settingsBody
 
 	local settingRows: { [string]: any } = {}
 
-	-- WHICH CLIENT CAPABILITIES ARE ACTUALLY PRESENT.
-	--
-	-- Filled by the composition root through `setCapability`, never by this module
-	-- reaching sideways into AudioDirector. A view module that requires another
-	-- view module turns the UI layer into a graph instead of a tree, and
-	-- ClientBootstrap already holds both -- so it is the one place that can answer
-	-- without adding an edge.
-	--
-	-- Absent means UNAVAILABLE, which is the right default: a capability that has
-	-- not reported in has not proven it exists.
 	local capabilities: { [string]: boolean } = {}
 
 	for order, def in ipairs(SettingsCatalog.ordered()) do
-		local row = UITheme.panel(UDim2.fromScale(1, 0), UDim2.fromScale(0, 0))
-		-- NAMED PER SETTING. Every row is otherwise an anonymous "Frame", so all
-		-- four resolved to the identical instance path and none of them could be
-		-- addressed -- not by a click driver, not by an inspector, not by anything
-		-- that needs to say WHICH switch it means.
+		local row = Instance.new("Frame")
 		row.Name = "Setting_" .. def.key
 		row.Size = UDim2.new(1, 0, 0, 76)
+		row.BackgroundColor3 = Color3.fromRGB(36, 30, 26)
+		row.BorderSizePixel = 0
 		row.LayoutOrder = order
 		row.Parent = settingsBody
 
-		local label = UITheme.label(def.label, UDim2.fromScale(0.5, 0.36),
-			UDim2.fromScale(0.03, 0.12), UITheme.Colors.TextGold)
-		label.TextScaled = true
-		label.Parent = row
+		local rowCorner = Instance.new("UICorner")
+		rowCorner.CornerRadius = UDim.new(0, 10)
+		rowCorner.Parent = row
 
-		local blurb = UITheme.label(def.blurb, UDim2.fromScale(0.66, 0.3),
-			UDim2.fromScale(0.03, 0.52), UITheme.Colors.TextDim)
-		blurb.TextScaled = true
+		local rowStroke = Instance.new("UIStroke")
+		rowStroke.Name = "RowStroke"
+		rowStroke.Color = Color3.fromRGB(212, 175, 55)
+		rowStroke.Thickness = 1
+		rowStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+		rowStroke.Parent = row
+
+		local rowPadding = Instance.new("UIPadding")
+		rowPadding.PaddingTop = UDim.new(0, 12)
+		rowPadding.PaddingBottom = UDim.new(0, 12)
+		rowPadding.PaddingLeft = UDim.new(0, 16)
+		rowPadding.PaddingRight = UDim.new(0, 16)
+		rowPadding.Parent = row
+
+		local infoFrame = Instance.new("Frame")
+		infoFrame.Name = "InfoFrame"
+		infoFrame.Size = UDim2.new(1, -145, 1, 0)
+		infoFrame.BackgroundTransparency = 1
+		infoFrame.Parent = row
+
+		local infoList = Instance.new("UIListLayout")
+		infoList.Padding = UDim.new(0, 3)
+		infoList.SortOrder = Enum.SortOrder.LayoutOrder
+		infoList.Parent = infoFrame
+
+		local label = Instance.new("TextLabel")
+		label.Name = "Label"
+		label.Size = UDim2.new(1, 0, 0, 24)
+		label.BackgroundTransparency = 1
+		label.Font = Enum.Font.GothamBold
+		label.Text = def.label
+		label.TextColor3 = Color3.fromRGB(212, 175, 55)
+		label.TextSize = 17
+		label.TextStrokeTransparency = 1
+		label.TextXAlignment = Enum.TextXAlignment.Left
+		label.LayoutOrder = 1
+		label.Parent = infoFrame
+
+		local blurb = Instance.new("TextLabel")
+		blurb.Name = "Blurb"
+		blurb.Size = UDim2.new(1, 0, 0, 26)
+		blurb.BackgroundTransparency = 1
+		blurb.Font = Enum.Font.Gotham
+		blurb.Text = def.blurb
+		blurb.TextColor3 = Color3.fromRGB(245, 239, 230)
+		blurb.TextSize = 14
+		blurb.TextStrokeTransparency = 1
 		blurb.TextWrapped = true
-		blurb.Parent = row
+		blurb.TextXAlignment = Enum.TextXAlignment.Left
+		blurb.LayoutOrder = 2
+		blurb.Parent = infoFrame
 
-		local toggleC, toggleBtn, setToggle = UITheme.toggle(
-			UDim2.fromScale(0.16, 0.34), UDim2.fromScale(0.78, 0.33))
-		toggleC.Parent = row
+		local toggleBtn = Instance.new("TextButton")
+		toggleBtn.Name = "ToggleButton"
+		toggleBtn.Size = UDim2.new(0, 130, 0, 40)
+		toggleBtn.Position = UDim2.new(1, -130, 0.5, -20)
+		toggleBtn.BackgroundColor3 = Color3.fromRGB(212, 175, 55)
+		toggleBtn.BorderSizePixel = 0
+		toggleBtn.Font = Enum.Font.GothamBold
+		toggleBtn.Text = "ACTIVE"
+		toggleBtn.TextColor3 = Color3.fromRGB(26, 22, 20)
+		toggleBtn.TextSize = 14
+		toggleBtn.TextStrokeTransparency = 1
+		toggleBtn.AutoButtonColor = true
+		toggleBtn.Parent = row
+
+		local btnCorner = Instance.new("UICorner")
+		btnCorner.CornerRadius = UDim.new(0, 6)
+		btnCorner.Parent = toggleBtn
+
+		local btnStroke = Instance.new("UIStroke")
+		btnStroke.Name = "BtnStroke"
+		btnStroke.Color = Color3.fromRGB(212, 175, 55)
+		btnStroke.Thickness = 1
+		btnStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+		btnStroke.Parent = toggleBtn
 
 		local key = def.key
 		UITheme.onPressed(toggleBtn, function()
-			-- Sends the OPPOSITE of what the server last told us, not the opposite
-			-- of what the knob is showing. Those are the same thing while the panel
-			-- is in sync, and when they are not, the server's value is the one worth
-			-- inverting.
 			local entry = settingRows[key]
 			local current = entry ~= nil and entry.value == true
-			-- The knob does not move here. It moves when the snapshot comes back
-			-- confirming the write, so a refusal leaves the switch showing the
-			-- truth instead of a value that never saved.
 			NetClient.setSetting(key, not current)
 		end)
 
+		-- THREE STATES, NOT TWO. A setting is ON, OFF, or UNAVAILABLE, and the
+		-- third is not a shade of the other two: Music and SFX control audio that
+		-- does not exist yet -- every asset id is still a `DUMMY_ID_*` placeholder
+		-- -- so their switches must read as locked rather than as merely off.
+		--
+		-- WHY THIS EXISTS AT ALL. `refreshSettings` calls
+		-- `UITheme.setEnabled(entry.button, available)` to express the third
+		-- state, and that helper is written for `UITheme.toggle` -- it looks for a
+		-- `Knob` child, finds none on this button, and falls through to
+		-- recolouring `TextColor3`. So it silently overwrote the ACTIVE colour and
+		-- painted nothing legible in its place: measured live, all four rows read
+		-- ACTIVE and all four were interactable, including the two that are
+		-- supposed to be locked.
+		--
+		-- Owning the disabled paint here rather than in the shared helper keeps
+		-- the new design's colours intact and stops the two fighting over the
+		-- same properties.
+		local function setDisplayState(active: boolean, available: boolean?)
+			local usable = available ~= false
+			if not usable then
+				-- Locked: desaturated, and it says WHY in a word rather than
+				-- relying on colour alone (ui_ux_design S3).
+				toggleBtn.BackgroundColor3 = Color3.fromRGB(40, 35, 31)
+				toggleBtn.TextColor3 = Color3.fromRGB(120, 110, 100)
+				toggleBtn.Text = "LOCKED"
+				btnStroke.Color = Color3.fromRGB(70, 58, 48)
+				toggleBtn.AutoButtonColor = false
+				toggleBtn.Active = false
+				toggleBtn.Interactable = false
+				return
+			end
+
+			toggleBtn.AutoButtonColor = true
+			toggleBtn.Active = true
+			toggleBtn.Interactable = true
+			if active then
+				toggleBtn.BackgroundColor3 = Color3.fromRGB(212, 175, 55)
+				toggleBtn.TextColor3 = Color3.fromRGB(26, 22, 20)
+				toggleBtn.Text = "ACTIVE"
+				btnStroke.Color = Color3.fromRGB(212, 175, 55)
+			else
+				toggleBtn.BackgroundColor3 = Color3.fromRGB(48, 24, 24)
+				toggleBtn.TextColor3 = Color3.fromRGB(240, 180, 180)
+				toggleBtn.Text = "INACTIVE"
+				btnStroke.Color = Color3.fromRGB(180, 60, 60)
+			end
+		end
+
 		settingRows[key] = {
-			set = setToggle, value = def.default, button = toggleBtn,
-			blurb = blurb, requires = def.requires, baseBlurb = def.blurb,
+			set = setDisplayState,
+			value = def.default,
+			button = toggleBtn,
+			blurb = blurb,
+			requires = def.requires,
+			baseBlurb = def.blurb,
+			stroke = rowStroke,
 		}
 	end
 
-	-- PROMO CODES (FR-10.6). The server already had `RedeemCode` wired to a real
-	-- code table; there was no way for a player to type one in.
-	local codeCard = UITheme.panel(UDim2.fromScale(1, 0), UDim2.fromScale(0, 0))
+	-- PROMO CODES (Casino Ledger Style)
+	local codeCard = Instance.new("Frame")
 	codeCard.Name = "PromoCard"
-	codeCard.Size = UDim2.new(1, 0, 0, 118)
+	codeCard.Size = UDim2.new(1, 0, 0, 120)
+	codeCard.BackgroundColor3 = Color3.fromRGB(36, 30, 26)
+	codeCard.BorderSizePixel = 0
 	codeCard.LayoutOrder = 90
 	codeCard.Parent = settingsBody
 
-	local codeTitle = UITheme.label("PROMO CODE", UDim2.fromScale(0.5, 0.24),
-		UDim2.fromScale(0.03, 0.06), UITheme.Colors.TextGold)
-	codeTitle.TextScaled = true
+	local promoCorner = Instance.new("UICorner")
+	promoCorner.CornerRadius = UDim.new(0, 10)
+	promoCorner.Parent = codeCard
+
+	local promoStroke = Instance.new("UIStroke")
+	promoStroke.Color = Color3.fromRGB(212, 175, 55)
+	promoStroke.Thickness = 1
+	promoStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+	promoStroke.Parent = codeCard
+
+	local promoPad = Instance.new("UIPadding")
+	promoPad.PaddingTop = UDim.new(0, 14)
+	promoPad.PaddingBottom = UDim.new(0, 14)
+	promoPad.PaddingLeft = UDim.new(0, 16)
+	promoPad.PaddingRight = UDim.new(0, 16)
+	promoPad.Parent = codeCard
+
+	local promoList = Instance.new("UIListLayout")
+	promoList.Padding = UDim.new(0, 8)
+	promoList.SortOrder = Enum.SortOrder.LayoutOrder
+	promoList.Parent = codeCard
+
+	local codeTitle = Instance.new("TextLabel")
+	codeTitle.Name = "PromoTitle"
+	codeTitle.Size = UDim2.new(1, 0, 0, 20)
+	codeTitle.BackgroundTransparency = 1
+	codeTitle.Font = Enum.Font.GothamBold
+	codeTitle.Text = "PROMO CODE REDEMPTION"
+	codeTitle.TextColor3 = Color3.fromRGB(212, 175, 55)
+	codeTitle.TextSize = 14
+	codeTitle.TextStrokeTransparency = 1
+	codeTitle.TextXAlignment = Enum.TextXAlignment.Left
+	codeTitle.LayoutOrder = 1
 	codeTitle.Parent = codeCard
+
+	local inputRow = Instance.new("Frame")
+	inputRow.Name = "InputRow"
+	inputRow.Size = UDim2.new(1, 0, 0, 38)
+	inputRow.BackgroundTransparency = 1
+	inputRow.LayoutOrder = 2
+	inputRow.Parent = codeCard
 
 	local codeBox = Instance.new("TextBox")
 	codeBox.Name = "CodeBox"
-	codeBox.Size = UDim2.fromScale(0.58, 0.34)
-	codeBox.Position = UDim2.fromScale(0.03, 0.36)
-	codeBox.BackgroundColor3 = UITheme.Colors.BaseCream
+	codeBox.Size = UDim2.new(1, -140, 1, 0)
+	codeBox.BackgroundColor3 = Color3.fromRGB(20, 16, 14)
 	codeBox.BorderSizePixel = 0
-	codeBox.Font = UITheme.FontMono
+	codeBox.Font = Enum.Font.Code
 	codeBox.PlaceholderText = "ENTER CODE"
+	codeBox.PlaceholderColor3 = Color3.fromRGB(140, 130, 120)
 	codeBox.Text = ""
-	codeBox.TextColor3 = UITheme.Colors.TextPrimary
-	codeBox.TextScaled = true
+	codeBox.TextColor3 = Color3.fromRGB(245, 239, 230)
+	codeBox.TextSize = 14
+	codeBox.TextStrokeTransparency = 1
+	codeBox.TextXAlignment = Enum.TextXAlignment.Left
 	codeBox.ClearTextOnFocus = false
-	codeBox.ZIndex = 4
-	codeBox.Parent = codeCard
+	codeBox.Parent = inputRow
 
-	local codeCorner = Instance.new("UICorner")
-	codeCorner.CornerRadius = UDim.new(0, 8)
-	codeCorner.Parent = codeBox
+	local boxCorner = Instance.new("UICorner")
+	boxCorner.CornerRadius = UDim.new(0, 6)
+	boxCorner.Parent = codeBox
 
-	local codeStroke = Instance.new("UIStroke")
-	codeStroke.Color = UITheme.Colors.ShadowDark
-	codeStroke.Thickness = 2
-	codeStroke.Parent = codeBox
+	local boxStroke = Instance.new("UIStroke")
+	boxStroke.Color = Color3.fromRGB(212, 175, 55)
+	boxStroke.Thickness = 1
+	boxStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+	boxStroke.Parent = codeBox
 
-	local codeStatus = UITheme.label("", UDim2.fromScale(0.94, 0.2),
-		UDim2.fromScale(0.03, 0.76), UITheme.Colors.TextDim)
+	local boxPad = Instance.new("UIPadding")
+	boxPad.PaddingLeft = UDim.new(0, 12)
+	boxPad.PaddingRight = UDim.new(0, 12)
+	boxPad.Parent = codeBox
+
+	local redeemBtn = Instance.new("TextButton")
+	redeemBtn.Name = "RedeemButton"
+	redeemBtn.Size = UDim2.new(0, 130, 1, 0)
+	redeemBtn.Position = UDim2.new(1, -130, 0, 0)
+	redeemBtn.BackgroundColor3 = Color3.fromRGB(212, 175, 55)
+	redeemBtn.BorderSizePixel = 0
+	redeemBtn.Font = Enum.Font.GothamBold
+	redeemBtn.Text = "REDEEM"
+	redeemBtn.TextColor3 = Color3.fromRGB(26, 22, 20)
+	redeemBtn.TextSize = 14
+	redeemBtn.TextStrokeTransparency = 1
+	redeemBtn.Parent = inputRow
+
+	local redeemCorner = Instance.new("UICorner")
+	redeemCorner.CornerRadius = UDim.new(0, 6)
+	redeemCorner.Parent = redeemBtn
+
+	local redeemStroke = Instance.new("UIStroke")
+	redeemStroke.Color = Color3.fromRGB(212, 175, 55)
+	redeemStroke.Thickness = 1
+	redeemStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+	redeemStroke.Parent = redeemBtn
+
+	local codeStatus = Instance.new("TextLabel")
 	codeStatus.Name = "CodeStatus"
-	codeStatus.TextScaled = true
+	codeStatus.Size = UDim2.new(1, 0, 0, 20)
+	codeStatus.BackgroundTransparency = 1
+	codeStatus.Font = Enum.Font.Gotham
+	codeStatus.Text = ""
+	codeStatus.TextColor3 = Color3.fromRGB(140, 130, 120)
+	codeStatus.TextSize = 13
+	codeStatus.TextStrokeTransparency = 1
+	codeStatus.TextXAlignment = Enum.TextXAlignment.Left
+	codeStatus.LayoutOrder = 3
 	codeStatus.Parent = codeCard
 
-	local redeemC, redeemBtn = UITheme.neumorphicButton("REDEEM", UITheme.Colors.Positive,
-		UDim2.fromScale(0.28, 0.3), UDim2.fromScale(0.66, 0.38))
-	redeemC.Name = "RedeemButton"
-	redeemC.Parent = codeCard
-
-	-- The reasons the server can give, rendered as sentences. The server sends a
-	-- CODE, never prose (NFR-5 / T-7), and it never echoes the submitted text back
-	-- -- so an unknown code is reported as unknown without repeating what was
-	-- typed.
 	local REDEEM_MESSAGE: { [string]: string } = {
 		invalid_code = "That code is not recognised.",
 		already_redeemed = "You have already used that code.",
@@ -1671,12 +2228,12 @@ function V7MenuPanel.new(): V7MenuController
 		local raw = codeBox.Text
 		if raw == nil or #raw == 0 then
 			codeStatus.Text = "Type a code first."
-			codeStatus.TextColor3 = UITheme.Colors.TextDim
+			codeStatus.TextColor3 = Color3.fromRGB(140, 130, 120)
 			return
 		end
 		UITheme.setEnabled(redeemBtn, false)
 		codeStatus.Text = "Checking..."
-		codeStatus.TextColor3 = UITheme.Colors.TextDim
+		codeStatus.TextColor3 = Color3.fromRGB(140, 130, 120)
 		task.spawn(function()
 			local result = NetClient.redeemCode(raw)
 			if result.ok then
@@ -1699,50 +2256,39 @@ function V7MenuPanel.new(): V7MenuController
 		end
 	end)
 
-	-- Redraws every switch from the snapshot. This is the ONLY thing that moves a
-	-- knob, which is what makes the panel incapable of showing a value the server
-	-- does not hold.
 	local function refreshSettings(state: any)
 		local settings = if type(state) == "table" then state.settings else nil
 		for key, entry in pairs(settingRows) do
 			local value = SettingsCatalog.read(settings, key)
 			entry.value = value
-			entry.set(value)
 
-			-- A SETTING WHOSE FEATURE DOES NOT EXIST IS SHOWN AS UNAVAILABLE.
-			--
-			-- The preference is still stored and still honoured -- it is the
-			-- CONTROL that is disabled, not the value -- so when the missing
-			-- capability arrives the player's saved choice is already correct and
-			-- the row simply becomes live. Nothing here is a placeholder; it is a
-			-- true statement about the current build.
 			local available = entry.requires == nil
 				or capabilities[entry.requires] == true
-			UITheme.setEnabled(entry.button, available)
+
+			-- AVAILABILITY IS PASSED TO THE ROW'S OWN PAINTER, not applied with
+			-- `UITheme.setEnabled`. That helper is built for `UITheme.toggle`:
+			-- it looks for a `Knob` child, does not find one on this button, and
+			-- falls through to recolouring `TextColor3` -- which overwrote the
+			-- design's ACTIVE colour and left every row reading ACTIVE and
+			-- clickable, including the two gated on audio that does not exist.
+			--
+			-- One painter owning all three states means the state and its
+			-- appearance cannot disagree.
+			entry.set(value, available)
+
 			if available then
 				entry.blurb.Text = entry.baseBlurb
-				entry.blurb.TextColor3 = UITheme.Colors.TextDim
+				entry.blurb.TextColor3 = Color3.fromRGB(245, 239, 230)
+				if entry.stroke then
+					entry.stroke.Color = Color3.fromRGB(212, 175, 55)
+				end
 			else
-				-- AN UNAVAILABLE TOGGLE IS FORCED TO READ "OFF", whatever the
-				-- stored preference says.
-				--
-				-- OPERATOR-REPORTED: "the sound effects is turned on and greyed
-				-- out i cant turn it off". Exactly right, and it was my design
-				-- error. SFX defaults to `true`, so the row rendered a lit track
-				-- with the knob to the right -- the universal picture of "this is
-				-- ON" -- while being unpressable. That reads as a stuck control,
-				-- not an unavailable one, and the natural conclusion is that the
-				-- game is broken.
-				--
-				-- The stored VALUE is deliberately untouched: when audio ships,
-				-- the player's real preference is still there and the row simply
-				-- comes alive showing it. Only the DISPLAY is forced off, because
-				-- a feature that produces no sound is off in every sense the
-				-- player can observe.
-				entry.set(false)
 				entry.blurb.Text = string.format("%s - %s", entry.baseBlurb,
 					SettingsCatalog.missingReason(entry.requires))
-				entry.blurb.TextColor3 = UITheme.Colors.VoidFace
+				entry.blurb.TextColor3 = Color3.fromRGB(140, 130, 120)
+				if entry.stroke then
+					entry.stroke.Color = Color3.fromRGB(70, 58, 48)
+				end
 			end
 		end
 	end
@@ -1916,14 +2462,38 @@ function V7MenuPanel:applyState(state: any)
 		return
 	end
 	self.lastState = state
-	for _, fn in ipairs({ self.shopRefresh, self.shapeRefresh, self.questRefresh,
-		self.vaultRefresh, self.slotsRefresh, self.settingsRefresh,
-		self.ascendRefresh }) do
-		if type(fn) == "function" then
-			local ok, err = pcall(fn, state)
+
+	-- ITERATED BY NAME, NOT BY `ipairs` OVER A LIST THAT MAY HOLD nil.
+	--
+	-- THIS IS THE BUG THAT UNHOOKED THE WHOLE UI. `ipairs` stops at the first
+	-- nil, and `shopRefresh` was both nil -- a scoping mistake, fixed above --
+	-- and FIRST in this list. So the loop terminated on element one and the
+	-- other six refreshers never ran at all: shapes, quests, vault, slots,
+	-- settings and ascend were every bit as dead as the shop, from a single
+	-- missing assignment several hundred lines away.
+	--
+	-- A named list cannot fail that way. A nil entry is skipped and REPORTED
+	-- rather than silently ending the sweep, so the next time a refresher is
+	-- lost the console says which one instead of the UI just going quiet.
+	local refreshers = {
+		{ name = "shop", fn = self.shopRefresh },
+		{ name = "shapes", fn = self.shapeRefresh },
+		{ name = "quests", fn = self.questRefresh },
+		{ name = "vault", fn = self.vaultRefresh },
+		{ name = "slots", fn = self.slotsRefresh },
+		{ name = "settings", fn = self.settingsRefresh },
+		{ name = "ascend", fn = self.ascendRefresh },
+	}
+	for _, entry in ipairs(refreshers) do
+		if type(entry.fn) == "function" then
+			local ok, err = pcall(entry.fn, state)
 			if not ok then
-				warn("[V7MenuPanel] overlay refresh failed: " .. tostring(err))
+				warn(string.format("[V7MenuPanel] %s refresh failed: %s",
+					entry.name, tostring(err)))
 			end
+		else
+			warn(string.format("[V7MenuPanel] %s refresh is missing -- that panel "
+				.. "will never receive a snapshot", entry.name))
 		end
 	end
 end
