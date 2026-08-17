@@ -213,6 +213,21 @@ Within one variant, elements of the same kind must be identical in structure:
   category cannot push the last one off the panel. A literal `0.32` fits three
   tabs and silently breaks on the fourth — that happened.
 - All spacing, radii and type sizes come from one scale.
+- **Actions line up across a row.** Anchor a card's button to the card's own
+  bottom edge, not to the end of the text above it — otherwise a card with more
+  copy pushes its button lower than its neighbour's. Measured on the live shop
+  before this was fixed: a 30px stagger between adjacent cards.
+- **Size a uniform grid for its WORST case.** Every cell shares one height, so
+  the tallest content is what must fit. Sizing for the typical item makes the
+  longest one render straight through whatever sits below it.
+- **Padding is symmetric** unless you state a reason. `PaddingLeft = 0` beside
+  `PaddingRight = 16` is invisible in code and unmistakable on screen; it is
+  exactly what "everything is shifted left" looks like.
+- **Apply an inset in ONE place.** A body offset 14px that also carries 16px of
+  padding insets by 30, and neither declaration says so.
+- **Never mix scale and offset in one space budget.** Cells of
+  `0.485 scale - 8px` with a `0.03 scale` gutter do not sum to the row. Express
+  the whole budget in one system so it totals exactly at any width.
 
 ## TECHNICAL CONSTRAINTS
 
@@ -225,6 +240,15 @@ Within one variant, elements of the same kind must be identical in structure:
 - No `require` cycles. Do not require any `src/Server/**` module.
 - Build the whole preview without needing a server: no remotes, no profile
   reads, no `NetClient`.
+- **A `UIListLayout` owns every child of its frame and overrides `Position`.**
+  Pinning one child to an edge does nothing but change its sort order. To mix
+  flowing rows with a pinned element, put the flowing rows in their own
+  container so the layout governs only them.
+- **`TextFits` is not a containment check.** It reports TRUNCATION, and it is
+  permanently true once `AutomaticSize` is set — the label can always grow, so
+  it never truncates while its text spills over the control beneath it. If you
+  verify layout, test element RECTANGLES against their container and against
+  the siblings they must not overlap.
 
 ## HOW TO SHOW IT TO ME
 
