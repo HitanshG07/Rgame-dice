@@ -377,15 +377,21 @@ function UITheme.panel(size: UDim2, position: UDim2, dark: boolean?): Frame
 end
 
 function UITheme.overlay(title: string): (Frame, Frame, TextButton)
-	-- A REAL SCRIM. At 0.2 transparency in the SAME colour as the panel, the
-	-- backdrop neither dimmed the game nor separated the panel from it -- the
-	-- overlay simply washed everything one shade darker. A near-opaque black
-	-- scrim is what makes a modal read as being in front of something.
+	-- A LIGHT SCRIM. It exists to say "the panel is in front and the board is
+	-- not currently yours to touch", and that reads at a much lower strength
+	-- than it first appears.
+	--
+	-- Tuned DOWN from 0.45, which the operator described as everything having a
+	-- black shade behind it. At that strength the felt and the dice all but
+	-- disappeared, so opening any panel felt like leaving the game rather than
+	-- layering something over it. At 0.72 the board stays legible underneath --
+	-- which is the point, since the numbers on it are what most panels are
+	-- about -- while the panel still clearly sits in front.
 	local fullOverlay = Instance.new("Frame")
 	fullOverlay.Size = UDim2.fromScale(1, 1)
 	fullOverlay.Position = UDim2.fromScale(0, 0)
 	fullOverlay.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-	fullOverlay.BackgroundTransparency = 0.45
+	fullOverlay.BackgroundTransparency = 0.72
 	fullOverlay.Visible = false
 	fullOverlay.ZIndex = UITheme.Layer.Overlay
 

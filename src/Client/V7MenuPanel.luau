@@ -273,21 +273,38 @@ function V7MenuPanel.new(): V7MenuController
 			end)
 		end
 
-		-- Position Scrolling Body below the fixed Category Bar with right padding for scrollbar
-		shopBody.Position = UDim2.new(0, 14, 0, 122)
-		shopBody.Size = UDim2.new(1, -28, 1, -128)
+		-- FULL WIDTH. The horizontal inset belongs to the padding below and to
+		-- nothing else: insetting here as WELL applied it twice, so cards sat
+		-- 30px from the panel edge where SHAPES sits at 16. Only the vertical
+		-- offset is real, and it exists to clear the fixed category bar.
+		shopBody.Position = UDim2.new(0, 0, 0, 122)
+		shopBody.Size = UDim2.new(1, 0, 1, -128)
 
+		-- SYMMETRIC, matching SHAPES. It was `PaddingLeft = 0` against
+		-- `PaddingRight = 20`, so the whole grid sat 20px left of centre inside
+		-- its own body -- the same asymmetry the settings panel had, and the
+		-- reason both read as shifted while SHAPES did not.
 		local shopPadding = Instance.new("UIPadding")
-		shopPadding.PaddingTop = UDim.new(0, 8)
-		shopPadding.PaddingBottom = UDim.new(0, 16)
-		shopPadding.PaddingLeft = UDim.new(0, 0)
-		shopPadding.PaddingRight = UDim.new(0, 20)
+		shopPadding.PaddingTop = UDim.new(0, UITheme.Scale.SM)
+		shopPadding.PaddingBottom = UDim.new(0, UITheme.Scale.LG)
+		shopPadding.PaddingLeft = UDim.new(0, UITheme.Scale.LG)
+		shopPadding.PaddingRight = UDim.new(0, UITheme.Scale.LG)
 		shopPadding.Parent = shopBody
 
-		-- 2-Column Responsive Card Grid inside shopBody
+		-- TWO COLUMNS THAT ACTUALLY SUM TO THE ROW.
+		--
+		-- The cells were `0.485 scale - 8px` with a `0.03 scale` gutter, which
+		-- mixes two coordinate systems in one budget: two cells plus one gutter
+		-- came to 1.0 of the width MINUS 16px, so the pair drifted left of the
+		-- space they were given and the right-hand column never reached the
+		-- right margin.
+		--
+		-- Expressed as one system instead: each cell is half the row less half
+		-- the gutter, so `2 * cell + gutter` is exactly the row, at any width.
+		local shopGutter = UITheme.Scale.LG
 		local gridLayout = Instance.new("UIGridLayout")
-		gridLayout.CellSize = UDim2.new(0.485, -8, 0, 168)
-		gridLayout.CellPadding = UDim2.new(0.03, 0, 0, 16)
+		gridLayout.CellSize = UDim2.new(0.5, -shopGutter / 2, 0, 168)
+		gridLayout.CellPadding = UDim2.new(0, shopGutter, 0, shopGutter)
 		gridLayout.SortOrder = Enum.SortOrder.LayoutOrder
 		gridLayout.Parent = shopBody
 
@@ -1938,15 +1955,28 @@ function V7MenuPanel.new(): V7MenuController
 			end
 		end
 
-		settingsBody.Position = UDim2.new(0, 14, 0, 74)
-		settingsBody.Size = UDim2.new(1, -28, 1, -84)
+		-- Full width for the same reason as the shop body: the horizontal inset
+		-- is the padding's job, and doing it here too applied it twice.
+		settingsBody.Position = UDim2.new(0, 0, 0, 74)
+		settingsBody.Size = UDim2.new(1, 0, 1, -84)
 	end
 
+	-- SYMMETRIC, matching the SHAPES panel the operator holds up as correct.
+	--
+	-- It was `PaddingLeft = 0` against `PaddingRight = 16`, so every row sat
+	-- 16px further left than it should and the scroll bar ate the difference on
+	-- the right. Measured against SHAPES, whose rows inset 16/16: settings came
+	-- out 14/30. Unequal padding is exactly what "too much on the left" looks
+	-- like, and the asymmetry was invisible in the code because the two values
+	-- are written on separate lines.
+	--
+	-- Read from the shared scale rather than typed, so the three panels cannot
+	-- drift apart again the next time one is restyled.
 	local settingsPadding = Instance.new("UIPadding")
-	settingsPadding.PaddingTop = UDim.new(0, 6)
-	settingsPadding.PaddingBottom = UDim.new(0, 16)
-	settingsPadding.PaddingLeft = UDim.new(0, 0)
-	settingsPadding.PaddingRight = UDim.new(0, 16)
+	settingsPadding.PaddingTop = UDim.new(0, UITheme.Scale.SM)
+	settingsPadding.PaddingBottom = UDim.new(0, UITheme.Scale.LG)
+	settingsPadding.PaddingLeft = UDim.new(0, UITheme.Scale.LG)
+	settingsPadding.PaddingRight = UDim.new(0, UITheme.Scale.LG)
 	settingsPadding.Parent = settingsBody
 
 	local settingsList = Instance.new("UIListLayout")
