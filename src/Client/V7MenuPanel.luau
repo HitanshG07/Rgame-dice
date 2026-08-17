@@ -420,17 +420,37 @@ function V7MenuPanel.new(): V7MenuController
 			cardStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
 			cardStroke.Parent = card
 
+			-- Even padding all round. The action row's space is reserved by the
+			-- text stack's own height, not by padding here.
 			local cardPadding = Instance.new("UIPadding")
-			cardPadding.PaddingTop = UDim.new(0, 12)
-			cardPadding.PaddingBottom = UDim.new(0, 12)
-			cardPadding.PaddingLeft = UDim.new(0, 14)
-			cardPadding.PaddingRight = UDim.new(0, 14)
+			cardPadding.PaddingTop = UDim.new(0, UITheme.Scale.MD)
+			cardPadding.PaddingBottom = UDim.new(0, UITheme.Scale.MD)
+			cardPadding.PaddingLeft = UDim.new(0, UITheme.Scale.MD)
+			cardPadding.PaddingRight = UDim.new(0, UITheme.Scale.MD)
 			cardPadding.Parent = card
+
+			-- THE TEXT STACK IS ITS OWN CONTAINER, so the action row can escape it.
+			--
+			-- A `UIListLayout` owns EVERY child of the frame it sits on and
+			-- overrides their `Position` outright -- so pinning the action row to
+			-- the card's bottom edge did nothing except make the layout sort it
+			-- first, which put every button at the TOP of its card. Measured:
+			-- perfectly aligned at 12px from the top, and completely wrong.
+			--
+			-- Giving the flowing content its own frame leaves the card itself
+			-- with exactly two children -- this stack and the pinned action row --
+			-- neither of which is under a layout, so both keep the positions they
+			-- are given.
+			local textStack = Instance.new("Frame")
+			textStack.Name = "TextStack"
+			textStack.Size = UDim2.new(1, 0, 1, -(38 + UITheme.Scale.MD))
+			textStack.BackgroundTransparency = 1
+			textStack.Parent = card
 
 			local cardList = Instance.new("UIListLayout")
 			cardList.Padding = UDim.new(0, 6)
 			cardList.SortOrder = Enum.SortOrder.LayoutOrder
-			cardList.Parent = card
+			cardList.Parent = textStack
 
 			-- Row 1: Tag Badge Frame (Border stroke, no text glow) + Title
 			local tagRow = Instance.new("Frame")
@@ -438,7 +458,7 @@ function V7MenuPanel.new(): V7MenuController
 			tagRow.Size = UDim2.new(1, 0, 0, 24)
 			tagRow.BackgroundTransparency = 1
 			tagRow.LayoutOrder = 1
-			tagRow.Parent = card
+			tagRow.Parent = textStack
 
 			local categoryBadgeFrame = Instance.new("Frame")
 			categoryBadgeFrame.Name = "CategoryBadge"
@@ -493,7 +513,7 @@ function V7MenuPanel.new(): V7MenuController
 			blurbLbl.TextXAlignment = Enum.TextXAlignment.Left
 			blurbLbl.TextYAlignment = Enum.TextYAlignment.Top
 			blurbLbl.LayoutOrder = 2
-			blurbLbl.Parent = card
+			blurbLbl.Parent = textStack
 
 			-- Row 3: Detail (Matte Brass Gold, NO glow)
 			if detail ~= nil then
@@ -510,15 +530,29 @@ function V7MenuPanel.new(): V7MenuController
 				fine.TextXAlignment = Enum.TextXAlignment.Left
 				fine.TextYAlignment = Enum.TextYAlignment.Top
 				fine.LayoutOrder = 3
-				fine.Parent = card
+				fine.Parent = textStack
 			end
 
 			-- Row 4: Action Control
+			-- ANCHORED TO THE CARD'S BOTTOM, NOT PLACED BY THE TEXT ABOVE IT.
+			--
+			-- As `LayoutOrder = 4` in the card's vertical list, the button sat
+			-- wherever the text happened to end -- so a card with tier small
+			-- print pushed it to y=112 while one without left it at y=82.
+			-- Measured across the shop: a 30px difference between neighbours in
+			-- the same row, which is why the buttons did not line up.
+			--
+			-- Every card is a fixed 168 tall, so pinning the action row to the
+			-- bottom edge puts every button on one line regardless of how much
+			-- text sits above it. It leaves the list layout, which is why the
+			-- padding below reserves its height so the text cannot run underneath.
 			local actionRow = Instance.new("Frame")
 			actionRow.Name = "ActionRow"
-			actionRow.Size = UDim2.new(1, 0, 0, 38)
+			actionRow.Size = UDim2.new(1, -UITheme.Scale.MD * 2, 0, 38)
+			actionRow.AnchorPoint = Vector2.new(0.5, 1)
+			actionRow.Position = UDim2.new(0.5, 0, 1, -UITheme.Scale.MD)
 			actionRow.BackgroundTransparency = 1
-			actionRow.LayoutOrder = 4
+			actionRow.ZIndex = 3
 			actionRow.Parent = card
 
 			local ownedPill = Instance.new("TextLabel")

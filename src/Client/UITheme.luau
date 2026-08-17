@@ -387,9 +387,31 @@ function UITheme.overlay(title: string): (Frame, Frame, TextButton)
 	-- layering something over it. At 0.72 the board stays legible underneath --
 	-- which is the point, since the numbers on it are what most panels are
 	-- about -- while the panel still clearly sits in front.
+	-- IT MUST COVER THE WHOLE SCREEN, INCLUDING ABOVE THE INSET.
+	--
+	-- The overlay ScreenGui respects the topbar inset -- that is what centres
+	-- the panel correctly -- so its canvas begins BELOW the topbar. A scrim at
+	-- `fromScale(1, 1)` therefore stopped short of the top and left an
+	-- undimmed strip across it: measured, the scrim spanned y 0..723 of a 780px
+	-- screen while the HUD's currency bar sits at y -42, outside it entirely.
+	-- That bright band above a dimmed page is the "black outline surrounding
+	-- but not covering the top" the operator reported -- the HUD stayed at full
+	-- brightness while everything below it dimmed.
+	--
+	-- Growing the frame upward by the inset and sizing it to match covers the
+	-- real screen. The panel is unaffected: it centres on the CANVAS, which is
+	-- still the visible region, so this dims more without moving anything.
+	-- Grown at BOTH ends. Covering only the top left the scrim 57px short of the
+	-- bottom, because the canvas is already shorter than the screen by the
+	-- inset -- so the frame needs the inset back at the top AND the same amount
+	-- again at the bottom to reach y = screenHeight. Generous on both sides
+	-- rather than exact: over-covering is invisible, under-covering is the
+	-- bright band being fixed here.
+	local INSET_COVER = 80
+
 	local fullOverlay = Instance.new("Frame")
-	fullOverlay.Size = UDim2.fromScale(1, 1)
-	fullOverlay.Position = UDim2.fromScale(0, 0)
+	fullOverlay.Size = UDim2.new(1, 0, 1, INSET_COVER * 2)
+	fullOverlay.Position = UDim2.new(0, 0, 0, -INSET_COVER)
 	fullOverlay.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
 	fullOverlay.BackgroundTransparency = 0.72
 	fullOverlay.Visible = false
@@ -404,7 +426,9 @@ function UITheme.overlay(title: string): (Frame, Frame, TextButton)
 	-- arranged by a layout -- disjoint bands by construction. Declared so the
 	-- overlap rule can tell a deliberate exception from an oversight.
 	container:SetAttribute("LayoutExempt", true)
-	container.Size = UDim2.fromScale(0.86, 0.86)
+	-- Height discounts the extra the scrim gained at both ends, so the panel
+	-- stays the size it was before the scrim was grown.
+	container.Size = UDim2.new(0.86, 0, 0.86, -INSET_COVER * 2 * 0.86)
 	container.AnchorPoint = Vector2.new(0.5, 0.5)
 
 	container.Position = UDim2.fromScale(0.5, 0.5)
