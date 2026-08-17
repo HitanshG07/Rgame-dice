@@ -13,6 +13,39 @@ You are redesigning ONE panel of a Roblox game called Dice Forge, as a
 
 AS THE USER WHICH ONE THEY WOULD LIKE TO TOUCH FIRST 
 
+## READ THIS FIRST — WHAT WENT WRONG LAST TIME
+
+A previous run of this prompt produced good-looking panels and broke the
+game. Every item below actually happened and cost hours to find. Do not
+repeat them.
+
+1. **It edited `V7MenuPanel.luau` directly** despite the rule below saying not
+   to. 705 insertions, 297 deletions, straight into the live file.
+2. **It replaced `UITheme.toggle` with a hand-built TextButton** but left
+   `refreshSettings` calling `UITheme.setEnabled` on it. That helper looks for a
+   `Knob` child, does not find one, and silently recolours `TextColor3` instead
+   — so all four settings rows read ACTIVE and clickable, including two that are
+   supposed to be LOCKED because the game has no audio assets yet.
+3. **It re-declared `refreshShop` with `local function` inside a nested block**,
+   so the assignment `shopRefresh = refreshShop` hundreds of lines later stored
+   `nil`. The fan-out over the refreshers used `ipairs`, which stops at the
+   first `nil` — and shop was FIRST — so **all seven panels stopped receiving
+   data**. Shop, shapes, quests, vault, slots, settings and ascend were all dead
+   from one missing assignment.
+4. **It mislabelled six of fourteen shop items** as CURRENCY because it inferred
+   the category from "not a gamepass" instead of reading `entry.kind`, which the
+   catalog already provides.
+5. **It gave small print to three gamepasses out of eight**, which is what made
+   the shop look uneven — the cards were geometrically identical.
+6. **It fabricated an asset ID** from a source filename's timestamp
+   (`rbxassetid://1786801062`) and wired an ImageLabel to it. Verified in
+   Studio: the ID behaves exactly like a junk ID while a real control image
+   loads. The settings button rendered blank.
+
+The theme running through all six: **the visual layer was rebuilt and the wiring
+behind it was not re-checked.** A panel that looks right and receives no data is
+worse than an ugly one, because nothing announces the failure.
+
 ## HARD RULE — YOU MODIFY NO EXISTING FILE
 
 This is a preview, not an implementation. You may create exactly ONE new file:
@@ -123,6 +156,64 @@ at x 0.585). A layout makes that overlap impossible by construction.
 The mock must hold up at 1280x720, 800x600 and a 420px-wide phone. Text wraps
 or truncates; nothing overflows its card.
 
+## THE MOCK IS A CONTRACT — WHAT IS PREVIEWED IS WHAT GETS BUILT
+
+The variant the operator picks will be reimplemented in the live panel, by
+someone who was not you, working only from your mock. So the mock is a
+specification, not a mood board.
+
+- **Every element must be real and complete.** If the live panel has a status
+  chip, a price, a locked state, a scroll region or a refusal message, the mock
+  has it too, worded identically. Do not simplify for the preview and assume the
+  detail gets added later — it will not, because nobody will know it was missing.
+- **Show EVERY state, not just the happy one.** The single largest source of
+  breakage last time was states that only exist at runtime. For each panel, the
+  mock must show at minimum: owned / not owned, affordable / unaffordable,
+  locked-with-reason, and empty. Put them on different rows of the same variant
+  so they can be compared at a glance.
+- **Name your elements the same as the live ones** (`Item_<key>`, `Setting_<key>`,
+  `OwnedPill`, `BuyButton`, `ToggleButton`). Whoever ports it will grep for those.
+- **Say what you are NOT showing.** If a state or element is omitted, list it in
+  the deliverable. An honest gap can be planned around; a silent one cannot.
+
+## DO NOT BREAK THE GAME — THE WIRING RULES
+
+You are not touching live code, so you cannot break it directly. But your design
+will be ported, and these are the traps that broke it last time. Design so the
+port cannot hit them:
+
+- **Do not invent a control the theme cannot already express.** If you replace a
+  `UITheme.toggle` with something custom, the port must also replace every
+  `UITheme.setEnabled`/`setButtonText` call that drives it — helpers that fail
+  SILENTLY on the wrong widget type. Prefer restyling an existing builder over
+  substituting a new control. If you do substitute one, say so explicitly in the
+  deliverable and list every state the replacement must handle.
+- **A control has three states, not two:** on, off, and unavailable. The third is
+  not a shade of the other two, and it needs its own visible treatment plus a
+  reason string. Music and SFX are permanently unavailable right now.
+- **Never invent an `rbxassetid`.** Not from a filename, not from a timestamp,
+  not as a placeholder. If a design needs an image, STOP and say so.
+- **Read categories and figures from the catalogs**, never from a guess about
+  what a thing is. `entry.kind` distinguishes Currency / Boost / Bundle /
+  TimeSkip; a card that is not a gamepass is not automatically currency.
+- **Respect the Roblox topbar.** Modal panels use `IgnoreGuiInset = false` so
+  their canvas equals the visible screen and a 0.5/0.5 centre is genuinely
+  centred. Setting it true starts the canvas 58px above the screen and no
+  arithmetic correction fixes it cleanly — four were tried.
+
+## UNIFORMITY IS A REQUIREMENT, NOT A STYLE NOTE
+
+Within one variant, elements of the same kind must be identical in structure:
+
+- Every card of a type has the SAME rows in the SAME order. If one card has
+  three text lines and its neighbour has two, the row is missing, not optional —
+  write the missing content from the catalogs rather than leaving a gap.
+- Every button of a role has one height, one type size, one corner radius.
+- Every tab in a bar shares the row: derive tab width from the COUNT so adding a
+  category cannot push the last one off the panel. A literal `0.32` fits three
+  tabs and silently breaks on the fourth — that happened.
+- All spacing, radii and type sizes come from one scale.
+
 ## TECHNICAL CONSTRAINTS
 
 - `--!strict` at the top. Roblox Script Analysis must report **zero errors and
@@ -149,6 +240,19 @@ and tell me that line. Something like:
 3. A screenshot of each of the three variants.
 4. Two or three sentences per variant on what design idea it is testing and
    what you think its weakness is.
+5. **A PORTING NOTE for the variant you think is strongest**, covering:
+   - every existing element it REPLACES rather than restyles, and for each, the
+     helper functions that drive it today (`setEnabled`, `setButtonText`,
+     `setPill`, `toggle`) which would need a replacement;
+   - every state it shows and every state it does NOT;
+   - any figure it displays and which catalog that figure comes from.
+   This is what stops the port from looking right and doing nothing.
+6. **Confirmation that you modified no existing file**, as the literal output of
+   `git status --porcelain`. If it lists anything other than your one new file,
+   say so at the top of your report rather than leaving it to be discovered.
 
 Report what you actually built and verified. If something did not work, say so
-plainly rather than describing the intent as though it succeeded.
+plainly rather than describing the intent as though it succeeded. A report that
+describes intent as outcome is the single most expensive thing you can hand
+back, because it moves the cost of finding the failure to someone who does not
+know where to look.
