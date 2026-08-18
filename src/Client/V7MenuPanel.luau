@@ -48,6 +48,1031 @@ export type V7MenuController = {
 	lastState: any,
 }
 
+local function buildQuestsOverlay(screenGui: ScreenGui, overlays: { [string]: Frame }): (any) -> ()
+	local questsOverlay, oldQuestsBody = UITheme.overlay("Daily Quests")
+	questsOverlay.Parent = screenGui
+	overlays["quests"] = questsOverlay
+
+	local questsPanelContainer = questsOverlay:FindFirstChild("Panel") :: Frame?
+	if not questsPanelContainer then
+		questsPanelContainer = questsOverlay:FindFirstChildOfClass("Frame")
+	end
+
+	local questResetLabel: TextLabel? = nil
+
+	if questsPanelContainer then
+		questsPanelContainer.BackgroundColor3 = Color3.fromRGB(26, 22, 20)
+		questsPanelContainer.BackgroundTransparency = 0
+
+		local panelCorner = questsPanelContainer:FindFirstChildOfClass("UICorner")
+		if not panelCorner then
+			panelCorner = Instance.new("UICorner")
+			panelCorner.CornerRadius = UDim.new(0, 12)
+			panelCorner.Parent = questsPanelContainer
+		else
+			panelCorner.CornerRadius = UDim.new(0, 12)
+		end
+
+		local panelStroke = questsPanelContainer:FindFirstChildOfClass("UIStroke")
+		if not panelStroke then
+			panelStroke = Instance.new("UIStroke")
+			panelStroke.Color = Color3.fromRGB(212, 175, 55)
+			panelStroke.Thickness = 2
+			panelStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+			panelStroke.Parent = questsPanelContainer
+		else
+			panelStroke.Color = Color3.fromRGB(212, 175, 55)
+			panelStroke.Thickness = 2
+			panelStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+		end
+
+		-- Header Bar (Exact 16px margins)
+		local header = questsPanelContainer:FindFirstChild("Header") :: Frame?
+		if header then
+			local hList = header:FindFirstChildOfClass("UIListLayout")
+			if hList then
+				hList:Destroy()
+			end
+
+			header.Size = UDim2.new(1, -32, 0, 48)
+			header.Position = UDim2.new(0, 16, 0, 16)
+			header.BackgroundColor3 = Color3.fromRGB(36, 30, 26)
+			header.BackgroundTransparency = 0
+
+			local hCorner = header:FindFirstChildOfClass("UICorner")
+			if not hCorner then
+				hCorner = Instance.new("UICorner")
+				hCorner.CornerRadius = UDim.new(0, 8)
+				hCorner.Parent = header
+			end
+
+			local hStroke = header:FindFirstChildOfClass("UIStroke")
+			if not hStroke then
+				hStroke = Instance.new("UIStroke")
+				hStroke.Color = Color3.fromRGB(212, 175, 55)
+				hStroke.Thickness = 1
+				hStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+				hStroke.Parent = header
+			end
+
+			local hPad = header:FindFirstChildOfClass("UIPadding")
+			if not hPad then
+				hPad = Instance.new("UIPadding")
+				hPad.PaddingLeft = UDim.new(0, 16)
+				hPad.PaddingRight = UDim.new(0, 16)
+				hPad.Parent = header
+			end
+
+			local titleLbl = header:FindFirstChild("Title") :: TextLabel?
+			if titleLbl then
+				local titleFlex = titleLbl:FindFirstChildOfClass("UIFlexItem")
+				if titleFlex then
+					titleFlex:Destroy()
+				end
+				titleLbl.Text = "QUESTS"
+				titleLbl.TextColor3 = Color3.fromRGB(212, 175, 55)
+				titleLbl.Font = Enum.Font.GothamBold
+				titleLbl.TextSize = 20
+				titleLbl.TextXAlignment = Enum.TextXAlignment.Left
+				titleLbl.Position = UDim2.new(0, 0, 0, 0)
+				titleLbl.Size = UDim2.new(0.5, 0, 1, 0)
+			end
+
+			-- Reset countdown label on the right
+			local resetLbl = header:FindFirstChild("ResetTimer") :: TextLabel?
+			if not resetLbl then
+				resetLbl = Instance.new("TextLabel")
+				resetLbl.Name = "ResetTimer"
+				resetLbl.Size = UDim2.new(0.5, -45, 1, 0)
+				resetLbl.Position = UDim2.new(0.5, 0, 0, 0)
+				resetLbl.BackgroundTransparency = 1
+				resetLbl.Font = Enum.Font.GothamBold
+				resetLbl.Text = "Resets in: --"
+				resetLbl.TextColor3 = Color3.fromRGB(160, 148, 140)
+				resetLbl.TextSize = 13.5
+				resetLbl.TextXAlignment = Enum.TextXAlignment.Right
+				resetLbl.Parent = header
+			end
+			questResetLabel = resetLbl
+
+			local closeBtn = header:FindFirstChild("Close") :: TextButton?
+			if closeBtn then
+				closeBtn.Size = UDim2.new(0, 32, 0, 32)
+				closeBtn.Position = UDim2.new(1, -32, 0.5, -16)
+				closeBtn.BackgroundColor3 = Color3.fromRGB(48, 40, 36)
+				closeBtn.BackgroundTransparency = 0
+				closeBtn.TextColor3 = Color3.fromRGB(212, 175, 55)
+				closeBtn.Font = Enum.Font.GothamBold
+				closeBtn.Text = "\u{00D7}"
+				closeBtn.TextSize = 20
+				closeBtn.TextStrokeTransparency = 1
+
+				local cCorner = closeBtn:FindFirstChildOfClass("UICorner")
+				if not cCorner then
+					cCorner = Instance.new("UICorner")
+					cCorner.CornerRadius = UDim.new(0, 6)
+					cCorner.Parent = closeBtn
+				end
+
+				closeBtn.MouseButton1Click:Connect(function()
+					questsOverlay.Visible = false
+				end)
+			end
+		end
+
+		local divider = questsPanelContainer:FindFirstChild("Divider") :: Frame?
+		if divider then
+			divider.Visible = false
+		end
+
+		if oldQuestsBody then
+			oldQuestsBody.Visible = false
+		end
+	end
+
+	-- Dedicated Non-Clipping Body Container (Exact 16px margins on all 4 sides)
+	local questVaultBody = Instance.new("Frame")
+	questVaultBody.Name = "QuestVaultBody"
+	questVaultBody.Size = UDim2.new(1, -32, 1, -92)
+	questVaultBody.Position = UDim2.new(0, 16, 0, 76)
+	questVaultBody.BackgroundTransparency = 1
+	questVaultBody.ClipsDescendants = false
+	questVaultBody.Parent = questsPanelContainer or questsOverlay
+
+	-- Main 58/42 Dual-Column Row Layout
+	local mainRowLayout = Instance.new("UIListLayout")
+	mainRowLayout.FillDirection = Enum.FillDirection.Horizontal
+	mainRowLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	mainRowLayout.Padding = UDim.new(0, 14)
+	mainRowLayout.Parent = questVaultBody
+
+	-- Quest Definitions Lookup
+	local QUEST_INFO: { [string]: { title: string, desc: string, rewardText: string, rewardColor: Color3 } } = {
+		roll25 = {
+			title = "MASS REVOLUTION I",
+			desc = "Perform 25 physical dice rolls in the arena.",
+			rewardText = "+$500 CASH",
+			rewardColor = Color3.fromRGB(74, 222, 128),
+		},
+		roll100 = {
+			title = "HIGH-FREQUENCY CALIBRATION",
+			desc = "Perform 100 physical dice rolls in the arena.",
+			rewardText = "+$2,500 CASH",
+			rewardColor = Color3.fromRGB(74, 222, 128),
+		},
+		roll500 = {
+			title = "OVERCLOCK HARVEST",
+			desc = "Perform 500 physical dice rolls in the arena.",
+			rewardText = "+40 GEMS",
+			rewardColor = Color3.fromRGB(56, 189, 248),
+		},
+		streak5 = {
+			title = "MOMENTUM VECTOR",
+			desc = "Attain an unbroken consecutive roll streak of 5.",
+			rewardText = "+$750 CASH",
+			rewardColor = Color3.fromRGB(74, 222, 128),
+		},
+		streak15 = {
+			title = "CRITICAL ALIGNMENT RUN",
+			desc = "Attain an unbroken consecutive roll streak of 15.",
+			rewardText = "+30 GEMS",
+			rewardColor = Color3.fromRGB(56, 189, 248),
+		},
+		forge3 = {
+			title = "CORE WEIGHTING",
+			desc = "Modify and forge 3 die face mass distributions.",
+			rewardText = "+$600 CASH",
+			rewardColor = Color3.fromRGB(74, 222, 128),
+		},
+		forge10 = {
+			title = "MASS EQUILIBRIUM SHIFT",
+			desc = "Modify and forge 10 die face mass distributions.",
+			rewardText = "+25 GEMS",
+			rewardColor = Color3.fromRGB(56, 189, 248),
+		},
+	}
+
+	-- Left Column (58%): 3 Heavy Quest Directives
+	local leftCol = Instance.new("Frame")
+	leftCol.Name = "LeftQuestsCol"
+	leftCol.Size = UDim2.new(0.58, -7, 1, 0)
+	leftCol.BackgroundTransparency = 1
+	leftCol.LayoutOrder = 1
+	leftCol.Parent = questVaultBody
+
+	local lList = Instance.new("UIListLayout")
+	lList.Padding = UDim.new(0, 10)
+	lList.SortOrder = Enum.SortOrder.LayoutOrder
+	lList.Parent = leftCol
+
+	local questRows: { any } = {}
+
+	for i = 1, 3 do
+		local card = Instance.new("Frame")
+		card.Name = "QuestCard_" .. i
+		card.Size = UDim2.new(1, 0, 0.333, -7)
+		card.BackgroundColor3 = Color3.fromRGB(36, 30, 26)
+		card.BorderSizePixel = 0
+		card.LayoutOrder = i
+		card.Parent = leftCol
+
+		local cCorner = Instance.new("UICorner")
+		cCorner.CornerRadius = UDim.new(0, 8)
+		cCorner.Parent = card
+
+		local cStroke = Instance.new("UIStroke")
+		cStroke.Color = Color3.fromRGB(70, 58, 48)
+		cStroke.Thickness = 1
+		cStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+		cStroke.Parent = card
+
+		local cPad = Instance.new("UIPadding")
+		cPad.PaddingTop = UDim.new(0, 8)
+		cPad.PaddingBottom = UDim.new(0, 8)
+		cPad.PaddingLeft = UDim.new(0, 14)
+		cPad.PaddingRight = UDim.new(0, 14)
+		cPad.Parent = card
+
+		-- Top row: Tag & Reward
+		local topRow = Instance.new("Frame")
+		topRow.Size = UDim2.new(1, 0, 0, 20)
+		topRow.BackgroundTransparency = 1
+		topRow.Parent = card
+
+		local tagLbl = Instance.new("TextLabel")
+		tagLbl.Size = UDim2.new(0.5, 0, 1, 0)
+		tagLbl.BackgroundTransparency = 1
+		tagLbl.Font = Enum.Font.Code
+		tagLbl.Text = string.format("[ QUEST 0%d ]", i)
+		tagLbl.TextColor3 = Color3.fromRGB(212, 175, 55)
+		tagLbl.TextSize = 12
+		tagLbl.TextXAlignment = Enum.TextXAlignment.Left
+		tagLbl.Parent = topRow
+
+		local rewBadge = Instance.new("TextLabel")
+		rewBadge.Size = UDim2.new(0.5, 0, 1, 0)
+		rewBadge.Position = UDim2.new(0.5, 0, 0, 0)
+		rewBadge.BackgroundTransparency = 1
+		rewBadge.Font = Enum.Font.GothamBold
+		rewBadge.Text = "REWARD: +$2,500 CASH"
+		rewBadge.TextColor3 = Color3.fromRGB(74, 222, 128)
+		rewBadge.TextSize = 13.5
+		rewBadge.TextXAlignment = Enum.TextXAlignment.Right
+		rewBadge.Parent = topRow
+
+		-- Title
+		local titleLbl = Instance.new("TextLabel")
+		titleLbl.Size = UDim2.new(1, 0, 0, 22)
+		titleLbl.Position = UDim2.new(0, 0, 0, 20)
+		titleLbl.BackgroundTransparency = 1
+		titleLbl.Font = Enum.Font.GothamBold
+		titleLbl.Text = "HIGH-FREQUENCY CALIBRATION"
+		titleLbl.TextColor3 = Color3.fromRGB(245, 239, 230)
+		titleLbl.TextSize = 15
+		titleLbl.TextXAlignment = Enum.TextXAlignment.Left
+		titleLbl.Parent = card
+
+		-- Description
+		local descLbl = Instance.new("TextLabel")
+		descLbl.Size = UDim2.new(1, 0, 0, 20)
+		descLbl.Position = UDim2.new(0, 0, 0, 42)
+		descLbl.BackgroundTransparency = 1
+		descLbl.Font = Enum.Font.GothamMedium
+		descLbl.Text = "Perform 100 physical dice rolls in the arena."
+		descLbl.TextColor3 = Color3.fromRGB(170, 160, 150)
+		descLbl.TextSize = 13
+		descLbl.TextXAlignment = Enum.TextXAlignment.Left
+		descLbl.Parent = card
+
+		-- Bottom row: Progress Track & Action Button
+		local botRow = Instance.new("Frame")
+		botRow.Size = UDim2.new(1, 0, 0, 36)
+		botRow.Position = UDim2.new(0, 0, 1, -36)
+		botRow.BackgroundTransparency = 1
+		botRow.Parent = card
+
+		local trackBack = Instance.new("Frame")
+		trackBack.Size = UDim2.new(0.63, -10, 0, 14)
+		trackBack.Position = UDim2.new(0, 0, 0.5, -7)
+		trackBack.BackgroundColor3 = Color3.fromRGB(20, 16, 14)
+		trackBack.BorderSizePixel = 0
+		trackBack.Parent = botRow
+
+		local trCorner = Instance.new("UICorner")
+		trCorner.CornerRadius = UDim.new(0, 7)
+		trCorner.Parent = trackBack
+
+		local trFill = Instance.new("Frame")
+		trFill.Size = UDim2.fromScale(0, 1)
+		trFill.BackgroundColor3 = Color3.fromRGB(212, 175, 55)
+		trFill.BorderSizePixel = 0
+		trFill.Parent = trackBack
+
+		local tfCorner = Instance.new("UICorner")
+		tfCorner.CornerRadius = UDim.new(0, 7)
+		tfCorner.Parent = trFill
+
+		local countLbl = Instance.new("TextLabel")
+		countLbl.Size = UDim2.new(0.63, -10, 0, 18)
+		countLbl.Position = UDim2.new(0, 0, 0, -16)
+		countLbl.BackgroundTransparency = 1
+		countLbl.Font = Enum.Font.Code
+		countLbl.Text = "COMPLETION: 0 / 100"
+		countLbl.TextColor3 = Color3.fromRGB(180, 170, 160)
+		countLbl.TextSize = 11
+		countLbl.TextXAlignment = Enum.TextXAlignment.Left
+		countLbl.Parent = botRow
+
+		local actionBtn = Instance.new("TextButton")
+		actionBtn.Size = UDim2.new(0.37, 0, 1, 0)
+		actionBtn.Position = UDim2.new(0.63, 0, 0, 0)
+		actionBtn.BackgroundColor3 = Color3.fromRGB(48, 40, 36)
+		actionBtn.BorderSizePixel = 0
+		actionBtn.Font = Enum.Font.GothamBold
+		actionBtn.Text = "IN PROGRESS"
+		actionBtn.TextColor3 = Color3.fromRGB(160, 148, 140)
+		actionBtn.TextSize = 13
+		actionBtn.Parent = botRow
+
+		local abCorner = Instance.new("UICorner")
+		abCorner.CornerRadius = UDim.new(0, 6)
+		abCorner.Parent = actionBtn
+
+		local rowState = { id = nil :: string?, isReady = false, isClaimed = false }
+
+		actionBtn.MouseButton1Click:Connect(function()
+			local id = rowState.id
+			if id == nil or not rowState.isReady or rowState.isClaimed then
+				return
+			end
+			actionBtn.Text = "CLAIMING..."
+			task.spawn(function()
+				local result = NetClient.claimQuest(id)
+				if result.ok then
+					actionBtn.Text = "CLAIMED \u{2713}"
+					actionBtn.BackgroundColor3 = Color3.fromRGB(36, 30, 26)
+					actionBtn.TextColor3 = Color3.fromRGB(160, 148, 140)
+					rowState.isClaimed = true
+					rowState.isReady = false
+				else
+					actionBtn.Text = "CLAIM REWARD"
+					actionBtn.BackgroundColor3 = Color3.fromRGB(74, 222, 128)
+					actionBtn.TextColor3 = Color3.fromRGB(20, 16, 14)
+				end
+			end)
+		end)
+
+		table.insert(questRows, {
+			card = card,
+			stroke = cStroke,
+			tag = tagLbl,
+			rew = rewBadge,
+			title = titleLbl,
+			desc = descLbl,
+			count = countLbl,
+			fill = trFill,
+			button = actionBtn,
+			state = rowState,
+		})
+	end
+
+	-- Right Column (42%): Stacked Playtime Rewards & Daily Login
+	local rightCol = Instance.new("Frame")
+	rightCol.Name = "RightProgressionCol"
+	rightCol.Size = UDim2.new(0.42, -7, 1, 0)
+	rightCol.BackgroundTransparency = 1
+	rightCol.LayoutOrder = 2
+	rightCol.Parent = questVaultBody
+
+	local rList = Instance.new("UIListLayout")
+	rList.Padding = UDim.new(0, 10)
+	rList.SortOrder = Enum.SortOrder.LayoutOrder
+	rList.Parent = rightCol
+
+	-- Top Pod: Playtime Rewards (60% height)
+	local chestPod = Instance.new("Frame")
+	chestPod.Name = "PlaytimeRewardsPod"
+	chestPod.Size = UDim2.new(1, 0, 0.60, -5)
+	chestPod.BackgroundColor3 = Color3.fromRGB(36, 30, 26)
+	chestPod.BorderSizePixel = 0
+	chestPod.LayoutOrder = 1
+	chestPod.Parent = rightCol
+
+	local cpCorner = Instance.new("UICorner")
+	cpCorner.CornerRadius = UDim.new(0, 8)
+	cpCorner.Parent = chestPod
+
+	local cpStroke = Instance.new("UIStroke")
+	cpStroke.Color = Color3.fromRGB(70, 58, 48)
+	cpStroke.Thickness = 1
+	cpStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+	cpStroke.Parent = chestPod
+
+	local cpPad = Instance.new("UIPadding")
+	cpPad.PaddingTop = UDim.new(0, 8)
+	cpPad.PaddingBottom = UDim.new(0, 8)
+	cpPad.PaddingLeft = UDim.new(0, 14)
+	cpPad.PaddingRight = UDim.new(0, 14)
+	cpPad.Parent = chestPod
+
+	local cpHeader = Instance.new("TextLabel")
+	cpHeader.Size = UDim2.new(1, 0, 0, 18)
+	cpHeader.Position = UDim2.new(0, 0, 0, 0)
+	cpHeader.BackgroundTransparency = 1
+	cpHeader.Font = Enum.Font.GothamBold
+	cpHeader.Text = "\u{25B6} PLAYTIME REWARDS"
+	cpHeader.TextColor3 = Color3.fromRGB(212, 175, 55)
+	cpHeader.TextSize = 13.5
+	cpHeader.TextXAlignment = Enum.TextXAlignment.Left
+	cpHeader.Parent = chestPod
+
+	local chestScroll = Instance.new("ScrollingFrame")
+	chestScroll.Name = "ChestScroll"
+	chestScroll.Size = UDim2.new(1, 0, 1, -24)
+	chestScroll.Position = UDim2.new(0, 0, 0, 22)
+	chestScroll.BackgroundTransparency = 1
+	chestScroll.BorderSizePixel = 0
+	chestScroll.ScrollBarThickness = 3
+	chestScroll.ScrollBarImageColor3 = Color3.fromRGB(212, 175, 55)
+	chestScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+	chestScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+	chestScroll.Parent = chestPod
+
+	local cpList = Instance.new("UIListLayout")
+	cpList.Padding = UDim.new(0, 8)
+	cpList.SortOrder = Enum.SortOrder.LayoutOrder
+	cpList.Parent = chestScroll
+
+	local PLAYTIME_CONFIG = {
+		{ id = "Tier1", name = "Tier 1", timeSec = 5 * 60, timeStr = "5 Mins", rewardText = "+$500 CASH", rewardColor = Color3.fromRGB(74, 222, 128) },
+		{ id = "Tier2", name = "Tier 2", timeSec = 15 * 60, timeStr = "15 Mins", rewardText = "+$1,500 CASH", rewardColor = Color3.fromRGB(74, 222, 128) },
+		{ id = "Tier3", name = "Tier 3", timeSec = 30 * 60, timeStr = "30 Mins", rewardText = "+25 GEMS", rewardColor = Color3.fromRGB(56, 189, 248) },
+		{ id = "Tier4", name = "Tier 4", timeSec = 45 * 60, timeStr = "45 Mins", rewardText = "+50 GEMS", rewardColor = Color3.fromRGB(56, 189, 248) },
+		{ id = "Tier5", name = "Tier 5", timeSec = 60 * 60, timeStr = "60 Mins", rewardText = "+$10,000 CASH", rewardColor = Color3.fromRGB(74, 222, 128) },
+		{ id = "Tier6", name = "Tier 6", timeSec = 90 * 60, timeStr = "90 Mins", rewardText = "+3 DIAMONDS", rewardColor = Color3.fromRGB(244, 114, 182) },
+	}
+
+	local sessionStartTime = os.clock()
+	local playtimeRows: { any } = {}
+
+	for i, tier in ipairs(PLAYTIME_CONFIG) do
+		local tRow = Instance.new("Frame")
+		tRow.Size = UDim2.new(1, -6, 0, 68)
+		tRow.BackgroundColor3 = Color3.fromRGB(20, 16, 14)
+		tRow.BorderSizePixel = 0
+		tRow.LayoutOrder = i
+		tRow.Parent = chestScroll
+
+		local trCorner2 = Instance.new("UICorner")
+		trCorner2.CornerRadius = UDim.new(0, 8)
+		trCorner2.Parent = tRow
+
+		local tStroke = Instance.new("UIStroke")
+		tStroke.Color = Color3.fromRGB(70, 58, 48)
+		tStroke.Thickness = 1
+		tStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+		tStroke.Parent = tRow
+
+		local tPad = Instance.new("UIPadding")
+		tPad.PaddingLeft = UDim.new(0, 14)
+		tPad.PaddingRight = UDim.new(0, 12)
+		tPad.Parent = tRow
+
+		local tTitle = Instance.new("TextLabel")
+		tTitle.Size = UDim2.new(0.60, 0, 0, 20)
+		tTitle.Position = UDim2.new(0, 0, 0, 6)
+		tTitle.BackgroundTransparency = 1
+		tTitle.Font = Enum.Font.GothamBold
+		tTitle.Text = string.format("%s (%s)", tier.name, tier.timeStr)
+		tTitle.TextColor3 = Color3.fromRGB(245, 239, 230)
+		tTitle.TextSize = 14
+		tTitle.TextXAlignment = Enum.TextXAlignment.Left
+		tTitle.Parent = tRow
+
+		local tReward = Instance.new("TextLabel")
+		tReward.Size = UDim2.new(0.60, 0, 0, 18)
+		tReward.Position = UDim2.new(0, 0, 0, 26)
+		tReward.BackgroundTransparency = 1
+		tReward.Font = Enum.Font.GothamBold
+		tReward.Text = "REWARD: " .. tier.rewardText
+		tReward.TextColor3 = tier.rewardColor
+		tReward.TextSize = 13
+		tReward.TextXAlignment = Enum.TextXAlignment.Left
+		tReward.Parent = tRow
+
+		local subProgress = Instance.new("TextLabel")
+		subProgress.Size = UDim2.new(0.60, 0, 0, 16)
+		subProgress.Position = UDim2.new(0, 0, 0, 46)
+		subProgress.BackgroundTransparency = 1
+		subProgress.Font = Enum.Font.Code
+		subProgress.Text = "STATUS: IN PROGRESS"
+		subProgress.TextColor3 = Color3.fromRGB(212, 175, 55)
+		subProgress.TextSize = 11.5
+		subProgress.TextXAlignment = Enum.TextXAlignment.Left
+		subProgress.Parent = tRow
+
+		local cBtn = Instance.new("TextButton")
+		cBtn.Size = UDim2.new(0.35, 0, 0, 44)
+		cBtn.Position = UDim2.new(0.65, 0, 0.5, -22)
+		cBtn.BackgroundColor3 = Color3.fromRGB(48, 40, 36)
+		cBtn.BorderSizePixel = 0
+		cBtn.Font = Enum.Font.GothamBold
+		cBtn.Text = "LOCKED"
+		cBtn.TextColor3 = Color3.fromRGB(160, 148, 140)
+		cBtn.TextSize = 13.5
+		cBtn.Parent = tRow
+
+		local cbCorner = Instance.new("UICorner")
+		cbCorner.CornerRadius = UDim.new(0, 6)
+		cbCorner.Parent = cBtn
+
+		local tState = { id = tier.id, claimed = false, ready = false }
+
+		cBtn.MouseButton1Click:Connect(function()
+			if not tState.ready or tState.claimed then
+				return
+			end
+			cBtn.Text = "CLAIMING..."
+			task.spawn(function()
+				local res = NetClient.claimChest(tier.id)
+				if res.ok then
+					tState.claimed = true
+					tState.ready = false
+					cBtn.Text = "CLAIMED \u{2713}"
+					cBtn.BackgroundColor3 = Color3.fromRGB(36, 30, 26)
+					cBtn.TextColor3 = Color3.fromRGB(160, 148, 140)
+					subProgress.Text = "STATUS: CLAIMED"
+					subProgress.TextColor3 = Color3.fromRGB(160, 148, 140)
+				else
+					cBtn.Text = "CLAIM"
+					cBtn.BackgroundColor3 = Color3.fromRGB(74, 222, 128)
+					cBtn.TextColor3 = Color3.fromRGB(20, 16, 14)
+				end
+			end)
+		end)
+
+		table.insert(playtimeRows, {
+			config = tier,
+			title = tTitle,
+			reward = tReward,
+			status = subProgress,
+			button = cBtn,
+			state = tState,
+		})
+	end
+
+	-- Bottom Pod: Daily Login Streak (40% height with 3x2 + Day 7 layout)
+	local loginPod = Instance.new("Frame")
+	loginPod.Name = "DailyLoginPod"
+	loginPod.Size = UDim2.new(1, 0, 0.40, -5)
+	loginPod.BackgroundColor3 = Color3.fromRGB(36, 30, 26)
+	loginPod.BorderSizePixel = 0
+	loginPod.LayoutOrder = 2
+	loginPod.Parent = rightCol
+
+	local lpCorner = Instance.new("UICorner")
+	lpCorner.CornerRadius = UDim.new(0, 8)
+	lpCorner.Parent = loginPod
+
+	local lpStroke = Instance.new("UIStroke")
+	lpStroke.Color = Color3.fromRGB(70, 58, 48)
+	lpStroke.Thickness = 1
+	lpStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+	lpStroke.Parent = loginPod
+
+	local lpPad = Instance.new("UIPadding")
+	lpPad.PaddingTop = UDim.new(0, 6)
+	lpPad.PaddingBottom = UDim.new(0, 6)
+	lpPad.PaddingLeft = UDim.new(0, 14)
+	lpPad.PaddingRight = UDim.new(0, 14)
+	lpPad.Parent = loginPod
+
+	local lpHeader = Instance.new("TextLabel")
+	lpHeader.Size = UDim2.new(1, 0, 0, 16)
+	lpHeader.Position = UDim2.new(0, 0, 0, 0)
+	lpHeader.BackgroundTransparency = 1
+	lpHeader.Font = Enum.Font.GothamBold
+	lpHeader.Text = "\u{25C8} DAILY LOGIN (DAY 1 / 7)"
+	lpHeader.TextColor3 = Color3.fromRGB(212, 175, 55)
+	lpHeader.TextSize = 13
+	lpHeader.TextXAlignment = Enum.TextXAlignment.Left
+	lpHeader.Parent = loginPod
+
+	-- Main Layout Container (Left 3x2 + Right Day 7)
+	local gridContainer = Instance.new("Frame")
+	gridContainer.Name = "GridContainer"
+	gridContainer.Size = UDim2.new(1, 0, 1, -20)
+	gridContainer.Position = UDim2.new(0, 0, 0, 18)
+	gridContainer.BackgroundTransparency = 1
+	gridContainer.Parent = loginPod
+
+	local gcList = Instance.new("UIListLayout")
+	gcList.FillDirection = Enum.FillDirection.Horizontal
+	gcList.Padding = UDim.new(0, 8)
+	gcList.SortOrder = Enum.SortOrder.LayoutOrder
+	gcList.Parent = gridContainer
+
+	-- Left Column: 2 Rows of 3 Cards (Days 1-3 on top, Days 4-6 on bottom)
+	local leftDaysCol = Instance.new("Frame")
+	leftDaysCol.Name = "LeftDaysCol"
+	leftDaysCol.Size = UDim2.new(0.72, -4, 1, 0)
+	leftDaysCol.BackgroundTransparency = 1
+	leftDaysCol.LayoutOrder = 1
+	leftDaysCol.Parent = gridContainer
+
+	local ldcList = Instance.new("UIListLayout")
+	ldcList.Padding = UDim.new(0, 4)
+	ldcList.SortOrder = Enum.SortOrder.LayoutOrder
+	ldcList.Parent = leftDaysCol
+
+	local dayCardUIs: { any } = {}
+
+	local LOGIN_LADDER = {
+		{ day = 1, amount = "$300", currency = "CASH", kind = "Cash", currColor = Color3.fromRGB(74, 222, 128) },
+		{ day = 2, amount = "$700", currency = "CASH", kind = "Cash", currColor = Color3.fromRGB(74, 222, 128) },
+		{ day = 3, amount = "+20", currency = "GEMS", kind = "Gems", currColor = Color3.fromRGB(56, 189, 248) },
+		{ day = 4, amount = "$2.0K", currency = "CASH", kind = "Cash", currColor = Color3.fromRGB(74, 222, 128) },
+		{ day = 5, amount = "+45", currency = "GEMS", kind = "Gems", currColor = Color3.fromRGB(56, 189, 248) },
+		{ day = 6, amount = "$5.0K", currency = "CASH", kind = "Cash", currColor = Color3.fromRGB(74, 222, 128) },
+		{ day = 7, amount = "+5", currency = "DIAMONDS", kind = "Diamonds", jackpot = true, currColor = Color3.fromRGB(244, 114, 182) },
+	}
+
+	local function createDayCard(d: any, parentRow: Frame)
+		local card = Instance.new("Frame")
+		card.Size = UDim2.new(0.333, -4, 1, 0)
+		card.BackgroundColor3 = Color3.fromRGB(28, 24, 20)
+		card.BorderSizePixel = 0
+		card.LayoutOrder = d.day
+		card.Parent = parentRow
+
+		local cCorn = Instance.new("UICorner")
+		cCorn.CornerRadius = UDim.new(0, 6)
+		cCorn.Parent = card
+
+		local cStk = Instance.new("UIStroke")
+		cStk.Color = Color3.fromRGB(70, 58, 48)
+		cStk.Thickness = 1
+		cStk.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+		cStk.Parent = card
+
+		local dTitle = Instance.new("TextLabel")
+		dTitle.Size = UDim2.new(1, 0, 0, 13)
+		dTitle.Position = UDim2.new(0, 0, 0, 2)
+		dTitle.BackgroundTransparency = 1
+		dTitle.Font = Enum.Font.GothamBold
+		dTitle.Text = "DAY " .. d.day
+		dTitle.TextColor3 = Color3.fromRGB(160, 148, 140)
+		dTitle.TextSize = 9.5
+		dTitle.Parent = card
+
+		local dVal = Instance.new("TextLabel")
+		dVal.Size = UDim2.new(1, 0, 0, 16)
+		dVal.Position = UDim2.new(0, 0, 0, 15)
+		dVal.BackgroundTransparency = 1
+		dVal.Font = Enum.Font.GothamBold
+		dVal.Text = d.amount
+		dVal.TextColor3 = Color3.fromRGB(245, 239, 230)
+		dVal.TextSize = 12.5
+		dVal.Parent = card
+
+		local dCurr = Instance.new("TextLabel")
+		dCurr.Size = UDim2.new(1, 0, 0, 12)
+		dCurr.Position = UDim2.new(0, 0, 0, 31)
+		dCurr.BackgroundTransparency = 1
+		dCurr.Font = Enum.Font.GothamBold
+		dCurr.Text = d.currency
+		dCurr.TextColor3 = d.currColor
+		dCurr.TextSize = 8.5
+		dCurr.Parent = card
+
+		local dStat = Instance.new("TextLabel")
+		dStat.Size = UDim2.new(1, 0, 0, 13)
+		dStat.Position = UDim2.new(0, 0, 1, -15)
+		dStat.BackgroundTransparency = 1
+		dStat.Font = Enum.Font.GothamBold
+		dStat.Text = "LOCKED"
+		dStat.TextColor3 = Color3.fromRGB(140, 130, 120)
+		dStat.TextSize = 8.5
+		dStat.Parent = card
+
+		table.insert(dayCardUIs, {
+			day = d.day,
+			card = card,
+			stroke = cStk,
+			title = dTitle,
+			val = dVal,
+			curr = dCurr,
+			currColor = d.currColor,
+			stat = dStat,
+		})
+	end
+
+	-- Row 1: Days 1, 2, 3
+	local row1 = Instance.new("Frame")
+	row1.Name = "Row_Days123"
+	row1.Size = UDim2.new(1, 0, 0.5, -2)
+	row1.BackgroundTransparency = 1
+	row1.LayoutOrder = 1
+	row1.Parent = leftDaysCol
+
+	local r1List = Instance.new("UIListLayout")
+	r1List.FillDirection = Enum.FillDirection.Horizontal
+	r1List.Padding = UDim.new(0, 6)
+	r1List.SortOrder = Enum.SortOrder.LayoutOrder
+	r1List.Parent = row1
+
+	createDayCard(LOGIN_LADDER[1], row1)
+	createDayCard(LOGIN_LADDER[2], row1)
+	createDayCard(LOGIN_LADDER[3], row1)
+
+	-- Row 2: Days 4, 5, 6
+	local row2 = Instance.new("Frame")
+	row2.Name = "Row_Days456"
+	row2.Size = UDim2.new(1, 0, 0.5, -2)
+	row2.BackgroundTransparency = 1
+	row2.LayoutOrder = 2
+	row2.Parent = leftDaysCol
+
+	local r2List = Instance.new("UIListLayout")
+	r2List.FillDirection = Enum.FillDirection.Horizontal
+	r2List.Padding = UDim.new(0, 6)
+	r2List.SortOrder = Enum.SortOrder.LayoutOrder
+	r2List.Parent = row2
+
+	createDayCard(LOGIN_LADDER[4], row2)
+	createDayCard(LOGIN_LADDER[5], row2)
+	createDayCard(LOGIN_LADDER[6], row2)
+
+	-- Right Column: Big Day 7 Grand Finale Card (Full height spanning both rows)
+	local day7Card = Instance.new("Frame")
+	day7Card.Name = "Day7GrandCard"
+	day7Card.Size = UDim2.new(0.28, -4, 1, 0)
+	day7Card.BackgroundColor3 = Color3.fromRGB(28, 22, 24)
+	day7Card.BorderSizePixel = 0
+	day7Card.LayoutOrder = 2
+	day7Card.Parent = gridContainer
+
+	local d7Corner = Instance.new("UICorner")
+	d7Corner.CornerRadius = UDim.new(0, 8)
+	d7Corner.Parent = day7Card
+
+	local d7Stroke = Instance.new("UIStroke")
+	d7Stroke.Color = Color3.fromRGB(244, 114, 182)
+	d7Stroke.Thickness = 1.5
+	d7Stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+	d7Stroke.Parent = day7Card
+
+	local d7Pad = Instance.new("UIPadding")
+	d7Pad.PaddingTop = UDim.new(0, 6)
+	d7Pad.PaddingBottom = UDim.new(0, 6)
+	d7Pad.PaddingLeft = UDim.new(0, 6)
+	d7Pad.PaddingRight = UDim.new(0, 6)
+	d7Pad.Parent = day7Card
+
+	local d7Badge = Instance.new("TextLabel")
+	d7Badge.Size = UDim2.new(1, 0, 0, 12)
+	d7Badge.Position = UDim2.new(0, 0, 0, 2)
+	d7Badge.BackgroundTransparency = 1
+	d7Badge.Font = Enum.Font.Code
+	d7Badge.Text = "[ FINAL DAY ]"
+	d7Badge.TextColor3 = Color3.fromRGB(244, 114, 182)
+	d7Badge.TextSize = 9
+	d7Badge.Parent = day7Card
+
+	local d7Title = Instance.new("TextLabel")
+	d7Title.Size = UDim2.new(1, 0, 0, 16)
+	d7Title.Position = UDim2.new(0, 0, 0, 14)
+	d7Title.BackgroundTransparency = 1
+	d7Title.Font = Enum.Font.GothamBold
+	d7Title.Text = "DAY 7"
+	d7Title.TextColor3 = Color3.fromRGB(245, 239, 230)
+	d7Title.TextSize = 12
+	d7Title.Parent = day7Card
+
+	local d7Amount = Instance.new("TextLabel")
+	d7Amount.Size = UDim2.new(1, 0, 0, 26)
+	d7Amount.Position = UDim2.new(0, 0, 0, 30)
+	d7Amount.BackgroundTransparency = 1
+	d7Amount.Font = Enum.Font.GothamBlack
+	d7Amount.Text = "+5"
+	d7Amount.TextColor3 = Color3.fromRGB(244, 114, 182)
+	d7Amount.TextSize = 20
+	d7Amount.Parent = day7Card
+
+	local d7Sub = Instance.new("TextLabel")
+	d7Sub.Size = UDim2.new(1, 0, 0, 14)
+	d7Sub.Position = UDim2.new(0, 0, 0, 56)
+	d7Sub.BackgroundTransparency = 1
+	d7Sub.Font = Enum.Font.GothamBold
+	d7Sub.Text = "DIAMONDS"
+	d7Sub.TextColor3 = Color3.fromRGB(212, 175, 55)
+	d7Sub.TextSize = 10
+	d7Sub.Parent = day7Card
+
+	local d7Btn = Instance.new("Frame")
+	d7Btn.Size = UDim2.new(1, -4, 0, 20)
+	d7Btn.Position = UDim2.new(0, 2, 1, -22)
+	d7Btn.BackgroundColor3 = Color3.fromRGB(36, 28, 32)
+	d7Btn.BorderSizePixel = 0
+	d7Btn.Parent = day7Card
+
+	local d7bCorner = Instance.new("UICorner")
+	d7bCorner.CornerRadius = UDim.new(0, 4)
+	d7bCorner.Parent = d7Btn
+
+	local d7bText = Instance.new("TextLabel")
+	d7bText.Size = UDim2.fromScale(1, 1)
+	d7bText.BackgroundTransparency = 1
+	d7bText.Font = Enum.Font.GothamBold
+	d7bText.Text = "LOCKED"
+	d7bText.TextColor3 = Color3.fromRGB(160, 148, 140)
+	d7bText.TextSize = 9
+	d7bText.Parent = d7Btn
+
+	table.insert(dayCardUIs, {
+		day = 7,
+		card = day7Card,
+		stroke = d7Stroke,
+		title = d7Title,
+		val = d7Amount,
+		stat = d7bText,
+		isGrand = true,
+	})
+
+	-- Live Periodic Timer
+	task.spawn(function()
+		while true do
+			task.wait(1)
+			if questsOverlay.Visible then
+				local now = os.time()
+				local secToday = now % 86400
+				local secLeft = 86400 - secToday
+				local hrs = math.floor(secLeft / 3600)
+				local mins = math.floor((secLeft % 3600) / 60)
+				if questResetLabel then
+					questResetLabel.Text = string.format("Resets in: %dh %dm", hrs, mins)
+				end
+
+				-- Update playtime tiers
+				local sessionSec = os.clock() - sessionStartTime
+				for _, row in ipairs(playtimeRows) do
+					if not row.state.claimed then
+						if sessionSec >= row.config.timeSec then
+							row.state.ready = true
+							row.button.Text = "CLAIM"
+							row.button.BackgroundColor3 = Color3.fromRGB(74, 222, 128)
+							row.button.TextColor3 = Color3.fromRGB(20, 16, 14)
+							row.status.Text = "STATUS: UNLOCKED"
+							row.status.TextColor3 = Color3.fromRGB(74, 222, 128)
+						else
+							row.state.ready = false
+							local rem = row.config.timeSec - sessionSec
+							local rMin = math.ceil(rem / 60)
+							row.button.Text = "LOCKED"
+							row.button.BackgroundColor3 = Color3.fromRGB(48, 40, 36)
+							row.button.TextColor3 = Color3.fromRGB(160, 148, 140)
+							row.status.Text = string.format("STATUS: %dm left", rMin)
+							row.status.TextColor3 = Color3.fromRGB(212, 175, 55)
+						end
+					end
+				end
+			end
+		end
+	end)
+
+	local function refreshQuests(state: any)
+		local quests = if type(state) == "table" then state.quests else nil
+		if type(quests) == "table" then
+			for i, ui in ipairs(questRows) do
+				local q = quests[i]
+				if q == nil then
+					ui.card.Visible = false
+				else
+					ui.card.Visible = true
+					ui.state.id = q.id
+					ui.state.isClaimed = q.claimed == true
+					ui.state.isReady = q.ready == true
+
+					local qInfo = QUEST_INFO[q.id]
+					if qInfo then
+						ui.title.Text = qInfo.title
+						ui.desc.Text = qInfo.desc
+						ui.rew.Text = "REWARD: " .. qInfo.rewardText
+						ui.rew.TextColor3 = qInfo.rewardColor
+					else
+						local verb, target = string.match(tostring(q.id), "^(%a+)(%d+)$")
+						ui.title.Text = if verb ~= nil then string.format("%s %s", string.upper(verb), target) else tostring(q.id)
+						ui.desc.Text = "Complete the objective in the arena."
+						ui.rew.Text = "REWARD: +$1,000 CASH"
+						ui.rew.TextColor3 = Color3.fromRGB(74, 222, 128)
+					end
+
+					local prog = tonumber(q.progress) or 0
+					local goal = tonumber(q.target) or 1
+					ui.count.Text = string.format("COMPLETION: %d / %d", math.floor(prog), math.floor(goal))
+					ui.fill.Size = UDim2.fromScale(math.clamp(prog / math.max(goal, 1), 0, 1), 1)
+
+					if q.claimed then
+						ui.fill.BackgroundColor3 = Color3.fromRGB(74, 222, 128)
+						ui.stroke.Color = Color3.fromRGB(70, 58, 48)
+						ui.stroke.Thickness = 1
+						ui.button.Text = "CLAIMED \u{2713}"
+						ui.button.BackgroundColor3 = Color3.fromRGB(36, 30, 26)
+						ui.button.TextColor3 = Color3.fromRGB(160, 148, 140)
+					elseif q.ready then
+						ui.fill.BackgroundColor3 = Color3.fromRGB(74, 222, 128)
+						ui.stroke.Color = Color3.fromRGB(74, 222, 128)
+						ui.stroke.Thickness = 1.5
+						ui.button.Text = "CLAIM REWARD"
+						ui.button.BackgroundColor3 = Color3.fromRGB(74, 222, 128)
+						ui.button.TextColor3 = Color3.fromRGB(20, 16, 14)
+					else
+						ui.fill.BackgroundColor3 = Color3.fromRGB(212, 175, 55)
+						ui.stroke.Color = Color3.fromRGB(70, 58, 48)
+						ui.stroke.Thickness = 1
+						ui.button.Text = "IN PROGRESS"
+						ui.button.BackgroundColor3 = Color3.fromRGB(48, 40, 36)
+						ui.button.TextColor3 = Color3.fromRGB(160, 148, 140)
+					end
+				end
+			end
+		end
+
+		-- Refresh Daily Login Matrix
+		local streakData = if type(state) == "table" then state.loginStreak else nil
+		local currentDay = 1
+		local claimedToday = false
+		if type(streakData) == "table" then
+			currentDay = math.clamp(((tonumber(streakData.count) or 1) - 1) % 7 + 1, 1, 7)
+			claimedToday = streakData.claimedToday == true
+		end
+
+		lpHeader.Text = string.format("\u{25C8} DAILY LOGIN (DAY %d / 7)", currentDay)
+
+		for _, item in ipairs(dayCardUIs) do
+			if item.day < currentDay or (item.day == currentDay and claimedToday) then
+				-- Claimed
+				if item.isGrand then
+					item.stat.Text = "CLAIMED \u{2713}"
+					item.stat.TextColor3 = Color3.fromRGB(160, 148, 140)
+					item.stroke.Color = Color3.fromRGB(70, 58, 48)
+				else
+					item.card.BackgroundColor3 = Color3.fromRGB(20, 16, 14)
+					item.stroke.Color = Color3.fromRGB(70, 58, 48)
+					item.stroke.Thickness = 1
+					item.title.TextColor3 = Color3.fromRGB(160, 148, 140)
+					item.val.TextColor3 = Color3.fromRGB(160, 148, 140)
+					if item.curr then
+						item.curr.TextColor3 = Color3.fromRGB(120, 110, 100)
+					end
+					item.stat.Text = "\u{2713} DONE"
+					item.stat.TextColor3 = Color3.fromRGB(140, 130, 120)
+				end
+			elseif item.day == currentDay and not claimedToday then
+				-- Active / Ready
+				if item.isGrand then
+					item.stat.Text = "READY"
+					item.stat.TextColor3 = Color3.fromRGB(244, 114, 182)
+					item.stroke.Color = Color3.fromRGB(244, 114, 182)
+					item.stroke.Thickness = 1.5
+				else
+					item.card.BackgroundColor3 = Color3.fromRGB(212, 175, 55)
+					item.stroke.Color = Color3.fromRGB(245, 239, 230)
+					item.stroke.Thickness = 1.5
+					item.title.TextColor3 = Color3.fromRGB(20, 16, 14)
+					item.val.TextColor3 = Color3.fromRGB(20, 16, 14)
+					if item.curr then
+						item.curr.TextColor3 = Color3.fromRGB(30, 24, 20)
+					end
+					item.stat.Text = "READY"
+					item.stat.TextColor3 = Color3.fromRGB(20, 16, 14)
+				end
+			else
+				-- Locked future days
+				if item.isGrand then
+					item.stat.Text = "LOCKED"
+					item.stat.TextColor3 = Color3.fromRGB(160, 148, 140)
+					item.stroke.Color = Color3.fromRGB(244, 114, 182)
+					item.stroke.Thickness = 1.5
+				else
+					item.card.BackgroundColor3 = Color3.fromRGB(28, 24, 20)
+					item.stroke.Color = Color3.fromRGB(70, 58, 48)
+					item.stroke.Thickness = 1
+					item.title.TextColor3 = Color3.fromRGB(160, 148, 140)
+					item.val.TextColor3 = Color3.fromRGB(245, 239, 230)
+					if item.curr then
+						item.curr.TextColor3 = item.currColor
+					end
+					item.stat.Text = "LOCKED"
+					item.stat.TextColor3 = Color3.fromRGB(140, 130, 120)
+				end
+			end
+		end
+	end
+
+	return refreshQuests
+end
+
 function V7MenuPanel.new(): V7MenuController
 	local player = Players.LocalPlayer
 	assert(player ~= nil, "[V7MenuPanel] LocalPlayer must exist")
@@ -1373,89 +2398,585 @@ function V7MenuPanel.new(): V7MenuController
 		end)
 	end
 
-	-- 4. ASCENSION OVERLAY
-	local ascendOverlay, ascendBody = UITheme.overlay("Ascension")
+	-- 4. ASCENSION OVERLAY (The Sovereign Ascension Vault - Master Responsive Edition)
+	local ascendOverlay, ascendBody = UITheme.overlay("The Sovereign Ascension Vault")
 	ascendOverlay.Parent = screenGui
 	overlays["ascend"] = ascendOverlay
 
-	-- THIS PANEL LIED ABOUT THE MOST DESTRUCTIVE ACTION IN THE GAME.
-	--
-	-- It was a single static label reading "Current Gain: +450 Diamonds"
-	-- regardless of the player's actual lifetime cash, with NO button, NO
-	-- confirmation, and no statement of what ascending destroys. FR-9.4 is
-	-- explicit: "The ascension screen states, before confirming, exactly what is
-	-- lost and exactly what is gained." None of that existed.
-	--
-	-- The reward is now projected from the shared formula against the player's
-	-- real LifetimeCash, and the reset is spelled out item by item behind a
-	-- two-step confirm.
-	local ascendReward = UITheme.label("--", UDim2.fromScale(0.94, 0.14), UDim2.fromScale(0.03, 0.03),
-		UITheme.Colors.PurpleAscend)
+	local ascendPanelContainer = ascendOverlay:FindFirstChild("Panel") :: Frame?
+	if ascendPanelContainer then
+		-- Style panel container with dark mocha fill & gold border
+		ascendPanelContainer.BackgroundColor3 = Color3.fromRGB(26, 22, 20)
+		
+		local panelCorner = ascendPanelContainer:FindFirstChildOfClass("UICorner")
+		if panelCorner then
+			panelCorner.CornerRadius = UDim.new(0, 14)
+		end
+
+		local existingStroke = ascendPanelContainer:FindFirstChildOfClass("UIStroke")
+		if existingStroke then
+			existingStroke.Color = Color3.fromRGB(212, 175, 55)
+			existingStroke.Thickness = 2
+			existingStroke.Transparency = 0
+		else
+			local stroke = Instance.new("UIStroke")
+			stroke.Color = Color3.fromRGB(212, 175, 55)
+			stroke.Thickness = 2
+			stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+			stroke.Parent = ascendPanelContainer
+		end
+
+		-- Style Header (~ The Sovereign Ascension Vault ~)
+		local header = ascendPanelContainer:FindFirstChild("Header") :: Frame?
+		if header then
+			header.Size = UDim2.new(1, -24, 0, 52)
+			header.Position = UDim2.new(0, 12, 0, 10)
+			header.BackgroundColor3 = Color3.fromRGB(36, 30, 26)
+			header.BackgroundTransparency = 0
+
+			local hCorner = header:FindFirstChildOfClass("UICorner")
+			if not hCorner then
+				hCorner = Instance.new("UICorner")
+				hCorner.CornerRadius = UDim.new(0, 8)
+				hCorner.Parent = header
+			end
+
+			local hStroke = header:FindFirstChildOfClass("UIStroke")
+			if not hStroke then
+				hStroke = Instance.new("UIStroke")
+				hStroke.Color = Color3.fromRGB(212, 175, 55)
+				hStroke.Thickness = 1
+				hStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+				hStroke.Parent = header
+			end
+
+			local hPad = header:FindFirstChildOfClass("UIPadding")
+			if not hPad then
+				hPad = Instance.new("UIPadding")
+				hPad.PaddingLeft = UDim.new(0, 16)
+				hPad.PaddingRight = UDim.new(0, 16)
+				hPad.Parent = header
+			end
+
+			local titleLbl = header:FindFirstChild("Title") :: TextLabel?
+			if titleLbl then
+				titleLbl.Text = "~ The Sovereign Ascension Vault ~"
+				titleLbl.TextColor3 = Color3.fromRGB(212, 175, 55)
+				titleLbl.Font = Enum.Font.GothamBold
+				titleLbl.TextSize = 21
+				titleLbl.TextStrokeTransparency = 1
+			end
+
+			local closeBtn = header:FindFirstChild("Close") :: TextButton?
+			if closeBtn then
+				closeBtn.Size = UDim2.new(0, 38, 0, 38)
+				closeBtn.BackgroundColor3 = Color3.fromRGB(48, 40, 36)
+				closeBtn.BackgroundTransparency = 0
+				closeBtn.TextColor3 = Color3.fromRGB(212, 175, 55)
+				closeBtn.Font = Enum.Font.GothamBold
+				closeBtn.Text = "\u{00D7}"
+				closeBtn.TextSize = 24
+				closeBtn.TextStrokeTransparency = 1
+
+				local cCorner = closeBtn:FindFirstChildOfClass("UICorner")
+				if not cCorner then
+					cCorner = Instance.new("UICorner")
+					cCorner.CornerRadius = UDim.new(0, 6)
+					cCorner.Parent = closeBtn
+				end
+
+				local cStroke = closeBtn:FindFirstChildOfClass("UIStroke")
+				if not cStroke then
+					cStroke = Instance.new("UIStroke")
+					cStroke.Color = Color3.fromRGB(212, 175, 55)
+					cStroke.Thickness = 1
+					cStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+					cStroke.Parent = closeBtn
+				end
+			end
+		end
+
+		local divider = ascendPanelContainer:FindFirstChild("Divider") :: Frame?
+		if divider then
+			divider.Visible = false
+		end
+
+		ascendBody.Visible = false
+	end
+
+	-- Dedicated Non-Clipping Body Container (Eliminates all edge stroke clipping)
+	local vaultBody = Instance.new("Frame")
+	vaultBody.Name = "VaultBody"
+	vaultBody.Size = UDim2.new(1, -32, 1, -88)
+	vaultBody.Position = UDim2.new(0, 16, 0, 70)
+	vaultBody.BackgroundTransparency = 1
+	vaultBody.ClipsDescendants = false
+	vaultBody.Parent = ascendPanelContainer or ascendOverlay
+
+	-- Main 48/52 Two-Column Row Container (Fills 100% height)
+	local bodyRow = Instance.new("Frame")
+	bodyRow.Name = "BodyRow"
+	bodyRow.Size = UDim2.fromScale(1, 1)
+	bodyRow.BackgroundTransparency = 1
+	bodyRow.ClipsDescendants = false
+	bodyRow.Parent = vaultBody
+
+	local bodyLayout = Instance.new("UIListLayout")
+	bodyLayout.FillDirection = Enum.FillDirection.Horizontal
+	bodyLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	bodyLayout.Padding = UDim.new(0, 14)
+	bodyLayout.Parent = bodyRow
+
+	-- =========================================================================
+	-- LEFT COLUMN (48%): Expanded Prestige Extraction Command Pod
+	-- =========================================================================
+	local leftCol = Instance.new("Frame")
+	leftCol.Name = "LeftCommandCol"
+	leftCol.Size = UDim2.new(0.48, -7, 1, 0)
+	leftCol.BackgroundColor3 = Color3.fromRGB(36, 30, 26)
+	leftCol.BorderSizePixel = 0
+	leftCol.LayoutOrder = 1
+	leftCol.Parent = bodyRow
+
+	local lCorner = Instance.new("UICorner")
+	lCorner.CornerRadius = UDim.new(0, 10)
+	lCorner.Parent = leftCol
+
+	local lStroke = Instance.new("UIStroke")
+	lStroke.Color = Color3.fromRGB(212, 175, 55)
+	lStroke.Thickness = 1
+	lStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+	lStroke.Parent = leftCol
+
+	local lPad = Instance.new("UIPadding")
+	lPad.PaddingTop = UDim.new(0, 14)
+	lPad.PaddingBottom = UDim.new(0, 14)
+	lPad.PaddingLeft = UDim.new(0, 16)
+	lPad.PaddingRight = UDim.new(0, 16)
+	lPad.Parent = leftCol
+
+	local leftList = Instance.new("UIListLayout")
+	leftList.Padding = UDim.new(0, 9)
+	leftList.HorizontalAlignment = Enum.HorizontalAlignment.Center
+	leftList.SortOrder = Enum.SortOrder.LayoutOrder
+	leftList.Parent = leftCol
+
+	-- Section Badge
+	local leftTagFrame = Instance.new("Frame")
+	leftTagFrame.Name = "TagFrame"
+	leftTagFrame.Size = UDim2.new(1, 0, 0, 28)
+	leftTagFrame.BackgroundColor3 = Color3.fromRGB(20, 16, 14)
+	leftTagFrame.BorderSizePixel = 0
+	leftTagFrame.LayoutOrder = 1
+	leftTagFrame.Parent = leftCol
+
+	local tCorner = Instance.new("UICorner")
+	tCorner.CornerRadius = UDim.new(0, 4)
+	tCorner.Parent = leftTagFrame
+
+	local tStroke = Instance.new("UIStroke")
+	tStroke.Color = Color3.fromRGB(70, 58, 48)
+	tStroke.Thickness = 1
+	tStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+	tStroke.Parent = leftTagFrame
+
+	local leftTag = Instance.new("TextLabel")
+	leftTag.Size = UDim2.fromScale(1, 1)
+	leftTag.BackgroundTransparency = 1
+	leftTag.Font = Enum.Font.Code
+	leftTag.Text = "[ 01 // PRESTIGE EXTRACTION ]"
+	leftTag.TextColor3 = Color3.fromRGB(212, 175, 55)
+	leftTag.TextSize = 11
+	leftTag.TextStrokeTransparency = 1
+	leftTag.Parent = leftTagFrame
+
+	-- Primary Yield Readout
+	local ascendReward = Instance.new("TextLabel")
 	ascendReward.Name = "AscendReward"
-	ascendReward.Font = UITheme.FontHeading
-	ascendReward.TextScaled = true
-	ascendReward.Parent = ascendBody
+	ascendReward.Size = UDim2.new(1, 0, 0, 52)
+	ascendReward.BackgroundTransparency = 1
+	ascendReward.Font = Enum.Font.GothamBlack
+	ascendReward.Text = "+0 \u{2666} DIAMONDS"
+	ascendReward.TextColor3 = Color3.fromRGB(244, 114, 182)
+	ascendReward.TextSize = 36
+	ascendReward.TextStrokeTransparency = 1
+	ascendReward.LayoutOrder = 2
+	ascendReward.Parent = leftCol
 
-	local ascendProgress = UITheme.label("", UDim2.fromScale(0.94, 0.06), UDim2.fromScale(0.03, 0.18),
-		UITheme.Colors.TextDim)
+	local rewardSub = Instance.new("TextLabel")
+	rewardSub.Name = "RewardSub"
+	rewardSub.Size = UDim2.new(1, 0, 0, 20)
+	rewardSub.BackgroundTransparency = 1
+	rewardSub.Font = Enum.Font.GothamMedium
+	rewardSub.Text = "Guaranteed Permanent Vault Asset"
+	rewardSub.TextColor3 = Color3.fromRGB(160, 148, 140)
+	rewardSub.TextSize = 13
+	rewardSub.TextStrokeTransparency = 1
+	rewardSub.LayoutOrder = 3
+	rewardSub.Parent = leftCol
+
+	-- Progress Bar Meter
+	local meterTrack = Instance.new("Frame")
+	meterTrack.Name = "MeterTrack"
+	meterTrack.Size = UDim2.new(1, 0, 0, 14)
+	meterTrack.BackgroundColor3 = Color3.fromRGB(20, 16, 14)
+	meterTrack.BorderSizePixel = 0
+	meterTrack.LayoutOrder = 4
+	meterTrack.Parent = leftCol
+
+	local mtCorner = Instance.new("UICorner")
+	mtCorner.CornerRadius = UDim.new(0, 7)
+	mtCorner.Parent = meterTrack
+
+	local mtStroke = Instance.new("UIStroke")
+	mtStroke.Color = Color3.fromRGB(70, 58, 48)
+	mtStroke.Thickness = 1
+	mtStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+	mtStroke.Parent = meterTrack
+
+	local meterFill = Instance.new("Frame")
+	meterFill.Name = "MeterFill"
+	meterFill.Size = UDim2.fromScale(0, 1)
+	meterFill.BackgroundColor3 = Color3.fromRGB(212, 175, 55)
+	meterFill.BorderSizePixel = 0
+	meterFill.Parent = meterTrack
+
+	local mfCorner = Instance.new("UICorner")
+	mfCorner.CornerRadius = UDim.new(0, 7)
+	mfCorner.Parent = meterFill
+
+	-- Basis & Progress Text
+	local ascendProgress = Instance.new("TextLabel")
 	ascendProgress.Name = "AscendProgress"
-	ascendProgress.TextScaled = true
-	ascendProgress.Parent = ascendBody
+	ascendProgress.Size = UDim2.new(1, 0, 0, 24)
+	ascendProgress.BackgroundTransparency = 1
+	ascendProgress.Font = Enum.Font.GothamBold
+	ascendProgress.Text = "Run Basis: $0 / $1.00M"
+	ascendProgress.TextColor3 = Color3.fromRGB(245, 239, 230)
+	ascendProgress.TextSize = 14
+	ascendProgress.TextStrokeTransparency = 1
+	ascendProgress.LayoutOrder = 5
+	ascendProgress.Parent = leftCol
 
-	-- FR-9.4: EXACTLY what is lost and EXACTLY what is gained, both stated before
-	-- the player can confirm. Two columns so neither can be missed.
-	local lostCard = UITheme.panel(UDim2.fromScale(0.46, 0.34), UDim2.fromScale(0.03, 0.26))
-	lostCard.Name = "LostCard"
-	lostCard.Parent = ascendBody
+	-- Lifetime Metrics Pod (176px - High-Density Sovereign Readout)
+	local metricsCard = Instance.new("Frame")
+	metricsCard.Name = "LifetimeMetricsPod"
+	metricsCard.Size = UDim2.new(1, 0, 0, 176)
+	metricsCard.BackgroundColor3 = Color3.fromRGB(20, 16, 14)
+	metricsCard.BorderSizePixel = 0
+	metricsCard.LayoutOrder = 6
+	metricsCard.Parent = leftCol
 
-	local lostTitle = UITheme.label("YOU LOSE", UDim2.fromScale(0.9, 0.18), UDim2.fromScale(0.05, 0.05),
-		UITheme.Colors.Negative)
-	lostTitle.TextScaled = true
-	lostTitle.Parent = lostCard
+	local mcCorner = Instance.new("UICorner")
+	mcCorner.CornerRadius = UDim.new(0, 8)
+	mcCorner.Parent = metricsCard
 
-	local lostBody = UITheme.label("", UDim2.fromScale(0.9, 0.68), UDim2.fromScale(0.05, 0.26),
-		UITheme.Colors.TextPrimary)
-	lostBody.Name = "LostBody"
-	lostBody.TextScaled = true
-	lostBody.TextWrapped = true
-	lostBody.TextYAlignment = Enum.TextYAlignment.Top
-	lostBody.Parent = lostCard
+	local mcStroke = Instance.new("UIStroke")
+	mcStroke.Color = Color3.fromRGB(70, 58, 48)
+	mcStroke.Thickness = 1
+	mcStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+	mcStroke.Parent = metricsCard
 
-	local keptCard = UITheme.panel(UDim2.fromScale(0.46, 0.34), UDim2.fromScale(0.51, 0.26))
+	local mcPad = Instance.new("UIPadding")
+	mcPad.PaddingTop = UDim.new(0, 10)
+	mcPad.PaddingBottom = UDim.new(0, 10)
+	mcPad.PaddingLeft = UDim.new(0, 14)
+	mcPad.PaddingRight = UDim.new(0, 14)
+	mcPad.Parent = metricsCard
+
+	local mcList = Instance.new("UIListLayout")
+	mcList.Padding = UDim.new(0, 8)
+	mcList.SortOrder = Enum.SortOrder.LayoutOrder
+	mcList.Parent = metricsCard
+
+	local mHeader = Instance.new("TextLabel")
+	mHeader.Size = UDim2.new(1, 0, 0, 22)
+	mHeader.BackgroundTransparency = 1
+	mHeader.Font = Enum.Font.GothamBold
+	mHeader.Text = "VAULT YIELD & PROJECTIONS"
+	mHeader.TextColor3 = Color3.fromRGB(212, 175, 55)
+	mHeader.TextSize = 12
+	mHeader.TextStrokeTransparency = 1
+	mHeader.TextXAlignment = Enum.TextXAlignment.Left
+	mHeader.LayoutOrder = 1
+	mHeader.Parent = metricsCard
+
+	-- Row 1: Post-Reset Vault Total
+	local row1 = Instance.new("Frame")
+	row1.Size = UDim2.new(1, 0, 0, 32)
+	row1.BackgroundTransparency = 1
+	row1.LayoutOrder = 2
+	row1.Parent = metricsCard
+
+	local r1Label = Instance.new("TextLabel")
+	r1Label.Size = UDim2.new(0.6, 0, 1, 0)
+	r1Label.BackgroundTransparency = 1
+	r1Label.Font = Enum.Font.GothamMedium
+	r1Label.Text = "Post-Reset Vault Total:"
+	r1Label.TextColor3 = Color3.fromRGB(160, 148, 140)
+	r1Label.TextSize = 13
+	r1Label.TextStrokeTransparency = 1
+	r1Label.TextXAlignment = Enum.TextXAlignment.Left
+	r1Label.Parent = row1
+
+	local postVaultVal = Instance.new("TextLabel")
+	postVaultVal.Name = "PostVaultVal"
+	postVaultVal.Size = UDim2.new(0.4, 0, 1, 0)
+	postVaultVal.Position = UDim2.new(0.6, 0, 0, 0)
+	postVaultVal.BackgroundTransparency = 1
+	postVaultVal.Font = Enum.Font.GothamBold
+	postVaultVal.Text = "0 \u{2666} (+0)"
+	postVaultVal.TextColor3 = Color3.fromRGB(244, 114, 182)
+	postVaultVal.TextSize = 14
+	postVaultVal.TextStrokeTransparency = 1
+	postVaultVal.TextXAlignment = Enum.TextXAlignment.Right
+	postVaultVal.Parent = row1
+
+	-- Row 2: Next Yield Milestone
+	local row2 = Instance.new("Frame")
+	row2.Size = UDim2.new(1, 0, 0, 32)
+	row2.BackgroundTransparency = 1
+	row2.LayoutOrder = 3
+	row2.Parent = metricsCard
+
+	local r2Label = Instance.new("TextLabel")
+	r2Label.Size = UDim2.new(0.55, 0, 1, 0)
+	r2Label.BackgroundTransparency = 1
+	r2Label.Font = Enum.Font.GothamMedium
+	r2Label.Text = "Next Diamond Tier:"
+	r2Label.TextColor3 = Color3.fromRGB(160, 148, 140)
+	r2Label.TextSize = 13
+	r2Label.TextStrokeTransparency = 1
+	r2Label.TextXAlignment = Enum.TextXAlignment.Left
+	r2Label.Parent = row2
+
+	local nextTierVal = Instance.new("TextLabel")
+	nextTierVal.Name = "NextTierVal"
+	nextTierVal.Size = UDim2.new(0.45, 0, 1, 0)
+	nextTierVal.Position = UDim2.new(0.55, 0, 0, 0)
+	nextTierVal.BackgroundTransparency = 1
+	nextTierVal.Font = Enum.Font.GothamBold
+	nextTierVal.Text = "at $1.00M"
+	nextTierVal.TextColor3 = Color3.fromRGB(212, 175, 55)
+	nextTierVal.TextSize = 14
+	nextTierVal.TextStrokeTransparency = 1
+	nextTierVal.TextXAlignment = Enum.TextXAlignment.Right
+	nextTierVal.Parent = row2
+
+	-- Row 3: Career Resets
+	local row3 = Instance.new("Frame")
+	row3.Size = UDim2.new(1, 0, 0, 32)
+	row3.BackgroundTransparency = 1
+	row3.LayoutOrder = 4
+	row3.Parent = metricsCard
+
+	local r3Label = Instance.new("TextLabel")
+	r3Label.Size = UDim2.new(0.6, 0, 1, 0)
+	r3Label.BackgroundTransparency = 1
+	r3Label.Font = Enum.Font.GothamMedium
+	r3Label.Text = "Career Ascensions:"
+	r3Label.TextColor3 = Color3.fromRGB(160, 148, 140)
+	r3Label.TextSize = 13
+	r3Label.TextStrokeTransparency = 1
+	r3Label.TextXAlignment = Enum.TextXAlignment.Left
+	r3Label.Parent = row3
+
+	local careerAscendVal = Instance.new("TextLabel")
+	careerAscendVal.Name = "CareerAscendVal"
+	careerAscendVal.Size = UDim2.new(0.4, 0, 1, 0)
+	careerAscendVal.Position = UDim2.new(0.6, 0, 0, 0)
+	careerAscendVal.BackgroundTransparency = 1
+	careerAscendVal.Font = Enum.Font.GothamBold
+	careerAscendVal.Text = "0 Completed"
+	careerAscendVal.TextColor3 = Color3.fromRGB(74, 222, 128)
+	careerAscendVal.TextSize = 14
+	careerAscendVal.TextStrokeTransparency = 1
+	careerAscendVal.TextXAlignment = Enum.TextXAlignment.Right
+	careerAscendVal.Parent = row3
+
+	-- Large Action Button (56px)
+	local ascendBtn = Instance.new("TextButton")
+	ascendBtn.Name = "AscendButton"
+	ascendBtn.Size = UDim2.new(1, 0, 0, 56)
+	ascendBtn.BackgroundColor3 = Color3.fromRGB(212, 175, 55)
+	ascendBtn.BorderSizePixel = 0
+	ascendBtn.Font = Enum.Font.GothamBold
+	ascendBtn.Text = "SEAL THE VAULT & ASCEND"
+	ascendBtn.TextColor3 = Color3.fromRGB(26, 22, 20)
+	ascendBtn.TextSize = 16
+	ascendBtn.TextStrokeTransparency = 1
+	ascendBtn.LayoutOrder = 7
+	ascendBtn.Parent = leftCol
+
+	local bCorner = Instance.new("UICorner")
+	bCorner.CornerRadius = UDim.new(0, 8)
+	bCorner.Parent = ascendBtn
+
+	local bStroke = Instance.new("UIStroke")
+	bStroke.Color = Color3.fromRGB(212, 175, 55)
+	bStroke.Thickness = 1
+	bStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+	bStroke.Parent = ascendBtn
+
+	local ascendStatus = Instance.new("TextLabel")
+	ascendStatus.Name = "AscendStatus"
+	ascendStatus.Size = UDim2.new(1, 0, 0, 40)
+	ascendStatus.BackgroundTransparency = 1
+	ascendStatus.Font = Enum.Font.GothamMedium
+	ascendStatus.Text = "Ready to ascend. Press button to begin two-step confirmation."
+	ascendStatus.TextColor3 = Color3.fromRGB(212, 175, 55)
+	ascendStatus.TextSize = 12
+	ascendStatus.TextStrokeTransparency = 1
+	ascendStatus.TextWrapped = true
+	ascendStatus.LayoutOrder = 8
+	ascendStatus.Parent = leftCol
+
+	-- =========================================================================
+	-- RIGHT COLUMN (52%): Stacked Retention Ledger (Fills 100% height)
+	-- =========================================================================
+	local rightCol = Instance.new("Frame")
+	rightCol.Name = "RightLedgerCol"
+	rightCol.Size = UDim2.new(0.52, -7, 1, 0)
+	rightCol.BackgroundTransparency = 1
+	rightCol.LayoutOrder = 2
+	rightCol.Parent = bodyRow
+
+	local rightLayout = Instance.new("UIListLayout")
+	rightLayout.Padding = UDim.new(0, 12)
+	rightLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	rightLayout.Parent = rightCol
+
+	-- TOP CARD: Preserved Wealth (50% minus half gap)
+	local keptCard = Instance.new("Frame")
 	keptCard.Name = "KeptCard"
-	keptCard.Parent = ascendBody
+	keptCard.Size = UDim2.new(1, 0, 0.5, -6)
+	keptCard.BackgroundColor3 = Color3.fromRGB(36, 30, 26)
+	keptCard.BorderSizePixel = 0
+	keptCard.LayoutOrder = 1
+	keptCard.Parent = rightCol
 
-	local keptTitle = UITheme.label("YOU KEEP", UDim2.fromScale(0.9, 0.18), UDim2.fromScale(0.05, 0.05),
-		UITheme.Colors.Positive)
-	keptTitle.TextScaled = true
+	local kCorner = Instance.new("UICorner")
+	kCorner.CornerRadius = UDim.new(0, 10)
+	kCorner.Parent = keptCard
+
+	local kStroke = Instance.new("UIStroke")
+	kStroke.Color = Color3.fromRGB(65, 160, 90)
+	kStroke.Thickness = 1
+	kStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+	kStroke.Parent = keptCard
+
+	local kPad = Instance.new("UIPadding")
+	kPad.PaddingTop = UDim.new(0, 12)
+	kPad.PaddingBottom = UDim.new(0, 12)
+	kPad.PaddingLeft = UDim.new(0, 16)
+	kPad.PaddingRight = UDim.new(0, 16)
+	kPad.Parent = keptCard
+
+	local kList = Instance.new("UIListLayout")
+	kList.Padding = UDim.new(0, 6)
+	kList.SortOrder = Enum.SortOrder.LayoutOrder
+	kList.Parent = keptCard
+
+	local keptTitle = Instance.new("TextLabel")
+	keptTitle.Name = "KeptTitle"
+	keptTitle.Size = UDim2.new(1, 0, 0, 28)
+	keptTitle.BackgroundTransparency = 1
+	keptTitle.Font = Enum.Font.GothamBold
+	keptTitle.Text = "\u{25B2} IMMUTABLE ASSETS (YOU KEEP)"
+	keptTitle.TextColor3 = Color3.fromRGB(74, 222, 128)
+	keptTitle.TextSize = 15
+	keptTitle.TextStrokeTransparency = 1
+	keptTitle.TextXAlignment = Enum.TextXAlignment.Left
+	keptTitle.LayoutOrder = 1
 	keptTitle.Parent = keptCard
 
-	local keptBody = UITheme.label("", UDim2.fromScale(0.9, 0.68), UDim2.fromScale(0.05, 0.26),
-		UITheme.Colors.TextPrimary)
-	keptBody.Name = "KeptBody"
-	keptBody.TextScaled = true
-	keptBody.TextWrapped = true
-	keptBody.TextYAlignment = Enum.TextYAlignment.Top
-	keptBody.Parent = keptCard
+	local keptItems = {
+		"+ Every Diamond, plus newly extracted yield",
+		"+ Unlocked Dice Shapes & Elemental Masteries",
+		"+ Diamond Tree Progression Perks & Multipliers",
+		"+ All Purchased Gamepass Privileges",
+		"+ Redeemed Promo Codes & Daily Login Streak",
+	}
+	for i, itemText in ipairs(keptItems) do
+		local row = Instance.new("TextLabel")
+		row.Name = "Credit_" .. i
+		row.Size = UDim2.new(1, 0, 0, 32)
+		row.BackgroundTransparency = 1
+		row.Font = Enum.Font.GothamMedium
+		row.Text = itemText
+		row.TextColor3 = Color3.fromRGB(245, 239, 230)
+		row.TextSize = 13
+		row.TextStrokeTransparency = 1
+		row.TextXAlignment = Enum.TextXAlignment.Left
+		row.LayoutOrder = i + 1
+		row.Parent = keptCard
+	end
 
-	-- Written from what AscensionService.ascend ACTUALLY does, not from memory.
-	-- FR-9.1's list plus the three things the reset was corrected to preserve.
-	lostBody.Text = "\u{2022} All Cash\n\u{2022} All Gems\n\u{2022} Cash upgrades\n"
-		.. "\u{2022} Your dice, reset to one starting D2\n\u{2022} Extra die slots"
-	keptBody.Text = "\u{2022} Every Diamond, plus the new ones\n\u{2022} Unlocked shapes and elements\n"
-		.. "\u{2022} Diamond tree levels\n\u{2022} Gamepasses\n\u{2022} Promo codes and login streak"
+	-- BOTTOM CARD: Forfeit on Reset (50% minus half gap)
+	local lostCard = Instance.new("Frame")
+	lostCard.Name = "LostCard"
+	lostCard.Size = UDim2.new(1, 0, 0.5, -6)
+	lostCard.BackgroundColor3 = Color3.fromRGB(36, 30, 26)
+	lostCard.BorderSizePixel = 0
+	lostCard.LayoutOrder = 2
+	lostCard.Parent = rightCol
 
-	local ascendC, ascendBtn = UITheme.neumorphicButton("ASCEND", UITheme.Colors.PurpleAscend,
-		UDim2.fromScale(0.44, 0.12), UDim2.fromScale(0.03, 0.64))
-	ascendC.Name = "AscendButton"
-	ascendC.Parent = ascendBody
+	local lostC = Instance.new("UICorner")
+	lostC.CornerRadius = UDim.new(0, 10)
+	lostC.Parent = lostCard
 
-	local ascendStatus = UITheme.label("", UDim2.fromScale(0.94, 0.08), UDim2.fromScale(0.03, 0.79),
-		UITheme.Colors.TextDim)
-	ascendStatus.Name = "AscendStatus"
-	ascendStatus.TextScaled = true
-	ascendStatus.TextWrapped = true
-	ascendStatus.Parent = ascendBody
+	local lostS = Instance.new("UIStroke")
+	lostS.Color = Color3.fromRGB(160, 65, 65)
+	lostS.Thickness = 1
+	lostS.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+	lostS.Parent = lostCard
+
+	local lostP = Instance.new("UIPadding")
+	lostP.PaddingTop = UDim.new(0, 12)
+	lostP.PaddingBottom = UDim.new(0, 12)
+	lostP.PaddingLeft = UDim.new(0, 16)
+	lostP.PaddingRight = UDim.new(0, 16)
+	lostP.Parent = lostCard
+
+	local lostL = Instance.new("UIListLayout")
+	lostL.Padding = UDim.new(0, 6)
+	lostL.SortOrder = Enum.SortOrder.LayoutOrder
+	lostL.Parent = lostCard
+
+	local lostTitle = Instance.new("TextLabel")
+	lostTitle.Name = "LostTitle"
+	lostTitle.Size = UDim2.new(1, 0, 0, 28)
+	lostTitle.BackgroundTransparency = 1
+	lostTitle.Font = Enum.Font.GothamBold
+	lostTitle.Text = "\u{25BC} FORFEIT ON RESET (YOU LOSE)"
+	lostTitle.TextColor3 = Color3.fromRGB(248, 113, 113)
+	lostTitle.TextSize = 15
+	lostTitle.TextStrokeTransparency = 1
+	lostTitle.TextXAlignment = Enum.TextXAlignment.Left
+	lostTitle.LayoutOrder = 1
+	lostTitle.Parent = lostCard
+
+	local lostItems = {
+		"\u{2014} All Current Cash Balance (Reset to $0)",
+		"\u{2014} All Gem Holdings (Expended on Reset)",
+		"\u{2014} All Purchased Cash Multiplier Upgrades",
+		"\u{2014} Active Dice Collection (Reset to 1x D2)",
+		"\u{2014} Unlocked Extra Die Slots",
+	}
+	for i, itemText in ipairs(lostItems) do
+		local row = Instance.new("TextLabel")
+		row.Name = "Debit_" .. i
+		row.Size = UDim2.new(1, 0, 0, 32)
+		row.BackgroundTransparency = 1
+		row.Font = Enum.Font.GothamMedium
+		row.Text = itemText
+		row.TextColor3 = Color3.fromRGB(245, 239, 230)
+		row.TextSize = 13
+		row.TextStrokeTransparency = 1
+		row.TextXAlignment = Enum.TextXAlignment.Left
+		row.LayoutOrder = i + 1
+		row.Parent = lostCard
+	end
 
 	local ASCEND_REFUSAL: { [string]: string } = {
 		insufficient_lifetime_cash = "You have not earned enough this run yet.",
@@ -1465,24 +2986,19 @@ function V7MenuPanel.new(): V7MenuController
 		throttled = "Slow down a moment, then try again.",
 	}
 
-	-- TWO-STEP CONFIRM. Ascending wipes a run and cannot be undone, so a single
-	-- press must not do it -- the first press arms, the second commits, and the
-	-- armed state times out on its own so a stray click cannot leave the button
-	-- primed for later.
-	-- Forward-declared: the press handler below is built BEFORE `refreshAscend`
-	-- exists and captures it as an upvalue. A `local function` declared after
-	-- this point would be a DIFFERENT local and the closure would see nil.
+	-- TWO-STEP CONFIRM. Ascending wipes a run and cannot be undone.
 	local refreshAscend: (any) -> ()
-	-- Last ascension count seen in a snapshot, so the post-ascend repaint can
-	-- state the new total without waiting for the server to tell it.
 	local lastAscensions = 0
-
 	local ascendArmed = false
 	local ascendArmToken = 0
 
 	local function disarmAscend()
 		ascendArmed = false
-		UITheme.setButtonText(ascendBtn, "ASCEND")
+		ascendBtn.BackgroundColor3 = Color3.fromRGB(212, 175, 55)
+		ascendBtn.TextColor3 = Color3.fromRGB(26, 22, 20)
+		ascendBtn.Text = "SEAL THE VAULT & ASCEND"
+		bStroke.Color = Color3.fromRGB(212, 175, 55)
+		bStroke.Thickness = 1
 	end
 
 	UITheme.onPressed(ascendBtn, function()
@@ -1490,13 +3006,18 @@ function V7MenuPanel.new(): V7MenuController
 			ascendArmed = true
 			ascendArmToken += 1
 			local token = ascendArmToken
-			UITheme.setButtonText(ascendBtn, "CONFIRM?")
-			ascendStatus.Text = "Press again to confirm. This cannot be undone."
-			ascendStatus.TextColor3 = UITheme.Colors.Negative
+			ascendBtn.BackgroundColor3 = Color3.fromRGB(220, 38, 38)
+			ascendBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+			ascendBtn.Text = "CONFIRM SETTLEMENT? (NO UNDO)"
+			bStroke.Color = Color3.fromRGB(255, 215, 0)
+			bStroke.Thickness = 2
+			ascendStatus.Text = "WARNING: Press again to confirm. Cash, dice & slots will be wiped permanently."
+			ascendStatus.TextColor3 = Color3.fromRGB(248, 113, 113)
 			task.delay(4, function()
 				if ascendArmed and ascendArmToken == token then
 					disarmAscend()
-					ascendStatus.Text = ""
+					ascendStatus.Text = "Ready to ascend. Press button to begin two-step confirmation."
+					ascendStatus.TextColor3 = Color3.fromRGB(212, 175, 55)
 				end
 			end)
 			return
@@ -1504,29 +3025,14 @@ function V7MenuPanel.new(): V7MenuController
 
 		disarmAscend()
 		UITheme.setEnabled(ascendBtn, false)
-		ascendStatus.Text = "Ascending..."
-		ascendStatus.TextColor3 = UITheme.Colors.TextDim
+		ascendStatus.Text = "Ascending and settling ledger..."
+		ascendStatus.TextColor3 = Color3.fromRGB(160, 148, 140)
 		task.spawn(function()
 			local result = NetClient.ascend()
 			if result.ok then
 				ascendStatus.Text = "Ascended. Your Diamonds have been granted."
-				ascendStatus.TextColor3 = UITheme.Colors.Positive
+				ascendStatus.TextColor3 = Color3.fromRGB(74, 222, 128)
 
-				-- REPAINT IMMEDIATELY FROM THE CONFIRMED RESET.
-				--
-				-- OPERATOR-REPORTED: "the assencion worked but it didnt not update
-				-- with real time". The server DOES push a snapshot (the handler is
-				-- wrapped in `announcing`), but this panel kept showing the
-				-- pre-reset projection -- "+1, earned $525K, 1 ascension" -- while
-				-- the HUD already read $0. Between the profile write, the push, and
-				-- an auto-roll snapshot arriving in the same window, the panel could
-				-- repaint from a snapshot built before the mutation committed.
-				--
-				-- Rather than race it, the panel states what is now certainly true:
-				-- the reset HAPPENED, so lifetime cash for the new run is zero and
-				-- nothing is projected. The next genuine snapshot overwrites this
-				-- with the authoritative figures; this only removes the window in
-				-- which the screen contradicts itself.
 				local ok, err = pcall(refreshAscend, {
 					cash = 0,
 					ascensions = (tonumber(lastAscensions) or 0) + 1,
@@ -1537,187 +3043,73 @@ function V7MenuPanel.new(): V7MenuController
 			else
 				local reason = tostring(result.reason or "ascension_failed")
 				ascendStatus.Text = ASCEND_REFUSAL[reason] or "Could not ascend right now."
-				ascendStatus.TextColor3 = UITheme.Colors.Negative
+				ascendStatus.TextColor3 = Color3.fromRGB(248, 113, 113)
 			end
 			UITheme.setEnabled(ascendBtn, true)
 		end)
 	end)
 
 	refreshAscend = function(state: any)
-		-- CASH ON HAND -- the same figure the HUD's cash readout shows.
-		--
-		-- This read `lifetimeCash` first, which never resets, so the panel told a
-		-- player "Earned $1.09M this run" when they had earned nothing of the sort
-		-- and the projected reward only ever grew. It then read `runCash`, a
-		-- separate per-run counter, which was correct but produced two internally
-		-- valid figures a player could not reconcile: the HUD said $558K while this
-		-- panel said $40K (operator-reported 2026-08-13).
-		--
-		-- Reading `cash` means the panel and the HUD are the SAME number by
-		-- construction. Ascension sets cash to zero, so this reads $0 immediately
-		-- afterwards, which is what the operator wanted and what makes the two
-		-- impossible to contradict.
 		local lifetime = if type(state) == "table" then tonumber(state.cash) or 0 else 0
 		local ascensions = if type(state) == "table" then tonumber(state.ascensions) or 0 else 0
+		local diamonds = if type(state) == "table" then tonumber(state.diamonds) or 0 else 0
 		lastAscensions = ascensions
 		local projected = DiceCatalog.ascensionDiamonds(lifetime)
 		local threshold = DiceCatalog.ASCEND_MIN_LIFETIME_CASH
+		local nextMilestone = if projected > 0 then (projected + 1) * 10000000 else threshold
 
 		if projected > 0 then
-			ascendReward.Text = string.format("+%s \u{2666}", Format.formatNumber(projected))
-			ascendReward.TextColor3 = UITheme.Colors.PurpleAscend
-			-- EARNED / TARGET (operator-requested). Showing the target even once it
-			-- is met keeps the two numbers comparable across the whole run rather
-			-- than the label changing shape at the threshold.
-			ascendProgress.Text = string.format(
-				"$%s / $%s this run  \u{00B7}  %d ascension%s so far",
-				Format.formatNumber(lifetime), Format.formatNumber(threshold),
-				ascensions, if ascensions == 1 then "" else "s")
+			ascendReward.Text = string.format("+%s \u{2666} DIAMONDS", Format.formatNumber(projected))
+			ascendReward.TextColor3 = Color3.fromRGB(244, 114, 182)
+			ascendProgress.Text = string.format("Run Basis: $%s / $%s", Format.formatNumber(lifetime), Format.formatNumber(threshold))
+			
+			meterFill.Size = UDim2.fromScale(math.min(1, lifetime / threshold), 1)
+			meterFill.BackgroundColor3 = Color3.fromRGB(212, 175, 55)
+
+			postVaultVal.Text = string.format("%d \u{2666} (+%d)", diamonds + projected, projected)
+			nextTierVal.Text = string.format("at $%s", Format.formatNumber(nextMilestone))
+			careerAscendVal.Text = string.format("%d Completed", ascensions)
+
 			UITheme.setEnabled(ascendBtn, true)
+			if not ascendArmed then
+				ascendBtn.BackgroundColor3 = Color3.fromRGB(212, 175, 55)
+				ascendBtn.TextColor3 = Color3.fromRGB(26, 22, 20)
+				ascendBtn.Text = "SEAL THE VAULT & ASCEND"
+				bStroke.Color = Color3.fromRGB(212, 175, 55)
+				bStroke.Thickness = 1
+				ascendStatus.Text = "Ready to ascend. Press button to begin two-step confirmation."
+				ascendStatus.TextColor3 = Color3.fromRGB(212, 175, 55)
+			end
 		else
-			-- Below the threshold: say how far off, rather than showing a reward
-			-- that is not available or a button that silently refuses.
-			ascendReward.Text = "+0 \u{2666}"
-			ascendReward.TextColor3 = UITheme.Colors.TextDim
-			-- Same earned / target shape as above, so the numbers do not move
-			-- around when the threshold is crossed.
-			ascendProgress.Text = string.format(
-				"$%s / $%s this run  \u{00B7}  keep rolling to ascend",
-				Format.formatNumber(lifetime), Format.formatNumber(threshold))
+			ascendReward.Text = "+0 \u{2666} DIAMONDS"
+			ascendReward.TextColor3 = Color3.fromRGB(140, 130, 120)
+			ascendProgress.Text = string.format("Run Basis: $%s / $%s", Format.formatNumber(lifetime), Format.formatNumber(threshold))
+			
+			meterFill.Size = UDim2.fromScale(math.min(1, lifetime / threshold), 1)
+			meterFill.BackgroundColor3 = Color3.fromRGB(220, 38, 38)
+
+			postVaultVal.Text = string.format("%d \u{2666} (+0)", diamonds)
+			nextTierVal.Text = string.format("at $%s", Format.formatNumber(threshold))
+			careerAscendVal.Text = string.format("%d Completed", ascensions)
+
 			UITheme.setEnabled(ascendBtn, false)
-			-- Arming state must not survive the reward going away.
+			ascendBtn.BackgroundColor3 = Color3.fromRGB(48, 40, 36)
+			ascendBtn.TextColor3 = Color3.fromRGB(140, 130, 120)
+			ascendBtn.Text = "UNAVAILABLE // INSUFFICIENT CASH"
+			bStroke.Color = Color3.fromRGB(70, 58, 48)
+			bStroke.Thickness = 1
+
+			ascendStatus.Text = string.format("Threshold not met: Earn $%s more cash this run to unlock.", Format.formatNumber(math.max(0, threshold - lifetime)))
+			ascendStatus.TextColor3 = Color3.fromRGB(248, 113, 113)
+
 			if ascendArmed then
 				disarmAscend()
 			end
 		end
 	end
 
-	-- 5. QUESTS OVERLAY
-	local questsOverlay, questsBody = UITheme.overlay("Daily Quests")
-	questsOverlay.Parent = screenGui
-	overlays["quests"] = questsOverlay
-
-	-- THIS OVERLAY WAS COMPLETELY EMPTY -- zero children. It opened onto nothing.
-	local questsList = Instance.new("UIListLayout")
-	questsList.Padding = UDim.new(0, 10)
-	questsList.SortOrder = Enum.SortOrder.LayoutOrder
-	questsList.Parent = questsBody
-
-	local questRows: { any } = {}
-
-	-- Three rows, matching the three quests the server rolls per UTC day. Built
-	-- once and refilled on each snapshot rather than rebuilt, so opening the
-	-- panel never rebuilds Instances mid-session.
-	for i = 1, 3 do
-		local row = UITheme.panel(UDim2.fromScale(1, 0), UDim2.fromScale(0, 0))
-		-- Named by SLOT, not by quest id: the id changes daily but the row is a
-		-- fixed position in the list, and a path that changes every UTC midnight
-		-- is not an addressable path (L-037).
-		row.Name = "QuestRow" .. tostring(i)
-		row.Size = UDim2.new(1, 0, 0, 78)
-		row.LayoutOrder = i
-		row.Visible = false
-		row.Parent = questsBody
-
-		local name = UITheme.label("", UDim2.fromScale(0.5, 0.4), UDim2.fromScale(0.03, 0.1),
-			UITheme.Colors.TextGold)
-		name.TextScaled = true
-		name.Parent = row
-
-		local barBack = Instance.new("Frame")
-		barBack.Size = UDim2.fromScale(0.5, 0.16)
-		barBack.Position = UDim2.fromScale(0.03, 0.58)
-		barBack.BackgroundColor3 = UITheme.Colors.ShadowDark
-		barBack.BorderSizePixel = 0
-		barBack.Parent = row
-		local barCorner = Instance.new("UICorner")
-		barCorner.CornerRadius = UDim.new(1, 0)
-		barCorner.Parent = barBack
-
-		local barFill = Instance.new("Frame")
-		barFill.Size = UDim2.fromScale(0, 1)
-		barFill.BackgroundColor3 = UITheme.Colors.Cash
-		barFill.BorderSizePixel = 0
-		barFill.Parent = barBack
-		local fillCorner = Instance.new("UICorner")
-		fillCorner.CornerRadius = UDim.new(1, 0)
-		fillCorner.Parent = barFill
-
-		local counter = UITheme.label("", UDim2.fromScale(0.14, 0.36), UDim2.fromScale(0.55, 0.32),
-			UITheme.Colors.TextDim)
-		counter.TextScaled = true
-		counter.Parent = row
-
-		local claimContainer, claimBtn = UITheme.neumorphicButton("CLAIM", UITheme.Colors.Positive,
-			UDim2.fromScale(0.24, 0.5), UDim2.fromScale(0.72, 0.25))
-		claimContainer.Name = "ClaimButton"
-		claimContainer.Parent = row
-
-		local rowState = { id = nil :: string? }
-		UITheme.onPressed(claimBtn, function()
-			local id = rowState.id
-			if id == nil then
-				return
-			end
-			UITheme.setEnabled(claimBtn, false)
-			task.spawn(function()
-				local result = NetClient.claimQuest(id)
-				if result.ok then
-					-- The snapshot that follows repaints this row as DONE, so the
-					-- button text here is only the acknowledgement in between.
-					UITheme.setButtonText(claimBtn, "PAID")
-				else
-					-- A refusal used to be completely silent: the reward is credited
-					-- server-side and the button simply never changed, so a failed
-					-- claim and a successful one looked identical.
-					UITheme.setButtonText(claimBtn, "FAILED")
-					task.wait(1.2)
-					UITheme.setButtonText(claimBtn, "CLAIM")
-					UITheme.setEnabled(claimBtn, true)
-				end
-			end)
-		end)
-
-		table.insert(questRows, {
-			row = row, name = name, fill = barFill, counter = counter,
-			button = claimBtn, state = rowState,
-		})
-	end
-
-	local function refreshQuests(state: any)
-		local quests = if type(state) == "table" then state.quests else nil
-		for i, ui in ipairs(questRows) do
-			local q = if type(quests) == "table" then quests[i] else nil
-			if q == nil then
-				ui.row.Visible = false
-			else
-				ui.row.Visible = true
-				ui.state.id = q.id
-				-- Human-readable from the id, so the client never carries a second
-				-- copy of the quest table.
-				local verb, target = string.match(tostring(q.id), "^(%a+)(%d+)$")
-				ui.name.Text = if verb ~= nil
-					then string.format("%s %s", string.upper(verb), target)
-					else tostring(q.id)
-
-				local prog = tonumber(q.progress) or 0
-				local goal = tonumber(q.target) or 1
-				ui.counter.Text = string.format("%d / %d", math.floor(prog), math.floor(goal))
-				ui.fill.Size = UDim2.fromScale(math.clamp(prog / math.max(goal, 1), 0, 1), 1)
-
-				if q.claimed then
-					UITheme.setButtonText(ui.button, "DONE")
-					UITheme.setEnabled(ui.button, false)
-				elseif q.ready then
-					UITheme.setButtonText(ui.button, "CLAIM")
-					UITheme.setEnabled(ui.button, true)
-				else
-					UITheme.setButtonText(ui.button, "LOCKED")
-					UITheme.setEnabled(ui.button, false)
-				end
-			end
-		end
-	end
+	-- 5. QUESTS OVERLAY (Approved Master Design: Dual-Column Quests & Progression)
+	local refreshQuests = buildQuestsOverlay(screenGui, overlays)
 
 	local vaultOverlay, vaultBody = UITheme.overlay("Offline Vault")
 	vaultOverlay.Parent = screenGui

@@ -27,7 +27,10 @@ local PROMO_CODES: { [string]: { type: "Cash" | "Gems" | "Diamonds", amount: num
 local CHEST_TIMES_SEC = {
 	Tier1 = 5 * 60,   -- 5 mins
 	Tier2 = 15 * 60,  -- 15 mins
-	Tier3 = 45 * 60,  -- 45 mins
+	Tier3 = 30 * 60,  -- 30 mins
+	Tier4 = 45 * 60,  -- 45 mins
+	Tier5 = 60 * 60,  -- 60 mins
+	Tier6 = 90 * 60,  -- 90 mins
 }
 
 --------------------------------------------------------------------------------
@@ -343,9 +346,12 @@ end
 --------------------------------------------------------------------------------
 
 local CHEST_REWARDS: { [string]: { kind: string, amount: number } } = {
-	Tier1 = { kind = "Cash", amount = 400 },
+	Tier1 = { kind = "Cash", amount = 500 },
 	Tier2 = { kind = "Cash", amount = 1500 },
-	Tier3 = { kind = "Gems", amount = 35 },
+	Tier3 = { kind = "Gems", amount = 25 },
+	Tier4 = { kind = "Gems", amount = 50 },
+	Tier5 = { kind = "Cash", amount = 10000 },
+	Tier6 = { kind = "Diamonds", amount = 3 },
 }
 
 -- Session start and which tiers this session has already paid.

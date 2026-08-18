@@ -32,9 +32,13 @@ Rejections are appended to the active task's line AT REJECTION TIME (circuit-bre
 - [2026-08-09] dice-forge-block5b2-timed-boosts | PRODUCTION | lane: full | rejections: none | none | **DELIVERED.** BoostService timed boost system, 14/14 products sellable.
 - [2026-08-09] dice-forge-block5c-progression-and-ascension | PRODUCTION | lane: full | rejections: none | none | **DELIVERED.** ProgressionService (daily spin, promo codes, group rewards), AscensionService (diamonds calculation, run reset, diamond tree preservation), 100% of 16 RemoteFunctions registered in ServerBootstrap.
 - [2026-08-09] dice-forge-block5d-verification | PRODUCTION | lane: full | rejections: none | none | **DELIVERED.** 13 test suites, 3,393 assertions passing live in Studio VM, zero warnings. Static greps: 1 ProcessReceipt assignment, 0 InvokeClient, 0 SetAsync.
+- [2026-08-17] shop-exchange-ui-redesign | PRODUCTION | lane: full | rejections: none | none | **DELIVERED.** Shop & Exchange 4-tab UI redesign in `src/Client/V7MenuPanel.luau`, Option 4 Cozy Mocha/Gold palette, catalog-backed product cards, real Robux asset IDs, 100% Studio verified.
+- [2026-08-17] settings-options-ui-redesign | PRODUCTION | lane: full | rejections: none | none | **DELIVERED.** Settings & Options UI redesign in `src/Client/V7MenuPanel.luau`, Casino Ledger aesthetics, custom toggle switches, symmetric 16px margins, audio/perf options wired.
+- [2026-08-18] sovereign-vault-ascension-redesign | PRODUCTION | lane: full | rejections: none | none | **DELIVERED.** Sovereign Ascension Vault Master UI in `src/Client/V7MenuPanel.luau`, 48/52 two-column density, recessed projections pod (176px), non-clipping frame architecture (L-060), 100% live Studio verified.
+- [2026-08-19] quests-progression-ui-redesign | PRODUCTION | lane: full | rejections: none | none | **DELIVERED.** Dual-Column Quests & Progression UI in `src/Client/V7MenuPanel.luau`, 58% Quests / 42% Progression Stack (60% Playtime Rewards with 6 tiers + 40% Daily Login 3x2 matrix & Day 7 Grand Finale), 16px symmetrical perimeter margins, top-level helper encapsulation (L-061: Luau 200 register limit), responsive shell parity (L-062), 100% live Studio verified.
 
 ## RUNNING TALLIES
-- Total pipeline runs: 12 (one superseded, one disputed, one breaker-halted then reset and delivered)
+- Total pipeline runs: 16 (one superseded, one disputed, one breaker-halted then reset and delivered)
 - Rejections by gate: G2: 3 | G3: 6 | G4: 1 | G5: 0 | G6 vetoes: 0
 - **Breaker trips: 1** (dice-forge-block3-services, 2026-08-07 — and it was BREACHED before being noticed, because the scoreboard line that arms it was never written. The persistence rule failed exactly where it was designed to hold: across a context compaction.)
 - Most recurrent defect classes, measured:
