@@ -1,0 +1,71 @@
+{
+  "//": "Preventive indexing/watcher limits. The 2026-08-19 out-of-memory crash was traced to the Roblox Studio MCP proxy (unbounded logging of base64 screenshots, ignored stdin backpressure, orphaned child processes), NOT to workspace indexing -- this project is 266 files and 64MB. These exclusions exist so the tree stays cheap to index as .rbxl place files, build output and vendored packages appear later.",
+
+  "files.exclude": {
+    "**/.git": true,
+    "**/.history": true,
+    "**/node_modules": true
+  },
+
+  "search.exclude": {
+    "**/*.rbxl": true,
+    "**/*.rbxlx": true,
+    "**/*.rbxm": true,
+    "**/*.rbxmx": true,
+    "**/build/**": true,
+    "**/dist/**": true,
+    "**/out/**": true,
+    "**/.git/**": true,
+    "**/.history/**": true,
+    "**/node_modules/**": true,
+    "**/*.exe": true,
+    "**/*.mp4": true,
+    "**/*.log": true,
+    "**/*.log.*": true,
+    "**/qa_runs/*/screenshots/**": true,
+    "**/qa_runs/*/logs/**": true,
+    "**/gp_images/**": true,
+    "**/screenshots/**": true
+  },
+
+  "files.watcherExclude": {
+    "**/.git/objects/**": true,
+    "**/.git/subtree-cache/**": true,
+    "**/.history/**": true,
+    "**/node_modules/**": true,
+    "**/build/**": true,
+    "**/dist/**": true,
+    "**/out/**": true,
+    "**/*.rbxl": true,
+    "**/*.rbxlx": true,
+    "**/*.rbxm": true,
+    "**/*.rbxmx": true,
+    "**/*.log": true,
+    "**/*.log.*": true,
+    "**/screenshots/**": true,
+    "**/gp_images/**": true,
+    "**/qa_runs/**": true,
+    "**/deliveries/**": true
+  },
+
+  "//luau": "Luau LSP is scoped to the Rojo-managed source tree. src/ and tests/ are the only directories holding .luau modules; tools/ is Node scripts and .brain/ is markdown governance.",
+  "luau-lsp.sourcemap.enabled": true,
+  "luau-lsp.sourcemap.rojoProjectFile": "default.project.json",
+  "luau-lsp.ignoreGlobs": [
+    "**/node_modules/**",
+    "**/build/**",
+    "**/dist/**",
+    "**/out/**",
+    "**/.history/**",
+    "**/gp_images/**",
+    "**/screenshots/**"
+  ],
+
+  "//size": "Files above this size are not tokenized for editor features. Guards against a large generated or vendored file being parsed on every keystroke.",
+  "editor.largeFileOptimizations": true,
+
+  "//encoding": "The repo is committed with LF (see .gitattributes); keep the editor from reintroducing CRLF churn.",
+  "files.eol": "\n",
+  "files.trimTrailingWhitespace": true,
+  "files.insertFinalNewline": true
+}
