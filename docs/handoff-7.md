@@ -9,8 +9,15 @@ list is now complete.
 
 ## 1. STATE
 
-**21 suites, 0 failed, 3,565 assertions. Zero Script Analysis warnings.**
+**21 suites, 0 failed, 3,565 assertions.**
 Everything below was verified in a running Studio session, not by reading code.
+
+**SCRIPT ANALYSIS IS NOT CLEAN — 158 WARNINGS. Earlier handoffs and commit
+messages in this project claim zero; that claim is FALSE.** The operator
+confirmed zero on 2026-08-16 for the code as it stood, and I repeated that
+result for two days without re-reading the panel. A verification someone else
+performed once is not a standing guarantee. Six were fixed at `73b1b82`
+(163 -> 158); the rest are open and are the first task of the next session.
 
 ---
 
@@ -54,6 +61,33 @@ than terminating, and warns which refresher is missing.
 
 ## 3. WHAT IS STILL OPEN
 
+### Script Analysis: 158 warnings, spread over 20 files
+
+Fixed at `73b1b82`, each confirmed by reading the code rather than trusting the
+report:
+- `ProgressionService:92` — `string.upper(string.gsub(...))` passes TWO
+  arguments, because `gsub` returns the string AND a replacement count. A real
+  defect, not a type nit.
+- `ProgressionService:146` — `IsInGroup` deprecated, now `IsInGroupAsync`. It
+  yields, which is why the surrounding `pcall` matters.
+- Three currency mismatches — quest, chest and login reward kinds were typed
+  `string` and passed to a function wanting the union. `EconomyService.Currency`
+  is now **exported** and used at those declarations, fixing the class at source
+  rather than casting per call site. A `:: any` at `ProgressionService:79` was
+  masking the same thing.
+- `PurchaseService` — `entry` re-bound to a non-optional local, because the nil
+  check's narrowing did not survive to the `string.format` calls below it.
+
+**Still open, and the first decision is yours:**
+- **`Vendor.ProfileStore` is 2,242 lines of THIRD-PARTY code by loleris.** Do
+  not edit it — an upstream upgrade would clobber the changes. It needs a policy
+  instead: `--!nonstrict` at its head, or exclusion from analysis. Likely a large
+  share of the 158, so decide this before counting anything else.
+- The remainder spread across the client modules and the test suite. Work them
+  file by file; several are the same classes fixed above (lost narrowing,
+  loosely typed catalog fields), so exporting a type usually clears a group at
+  once.
+
 ### Blocked on you — cannot be done in code
 - **23 audio asset IDs** (`DUMMY_ID_*` in `AudioDirector.luau`). The game is
   silent, and Music/SFX correctly render **LOCKED** until these exist.
@@ -90,6 +124,7 @@ than terminating, and warns which refresher is missing.
 
 ## 5. BEFORE SHIP
 
-Nothing outstanding. `ASCEND_MIN_LIFETIME_CASH` is at `1e6` and
+**Script Analysis must reach zero first (NFR-8) -- see §3.** Otherwise the
+constants are ready: `ASCEND_MIN_LIFETIME_CASH` is at `1e6` and
 `PLAYTEST_DIE_COUNT` at `0` — both already restored to shipping values.
 `MAX_DIE_SLOTS` is 12, ladder 3 → 12 across nine ascensions.
