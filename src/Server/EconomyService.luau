@@ -60,7 +60,11 @@ local function cashMultiplierFor(player: Player): number
 	return value
 end
 
-type Currency = "Cash" | "Gems" | "Diamonds"
+-- EXPORTED so callers can declare their reward fields with the real union
+-- rather than a plain `string`. Every "Expected 'Cash'|'Diamonds'|'Gems', got
+-- 'string'" warning in ProgressionService and ServerBootstrap came from a
+-- catalog field typed loosely and then passed straight in.
+export type Currency = "Cash" | "Gems" | "Diamonds"
 
 -- Currency access is EXPLICIT, one branch per field, rather than a computed
 -- `data[currency]` index.

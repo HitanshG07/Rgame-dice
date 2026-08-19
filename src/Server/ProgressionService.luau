@@ -89,7 +89,11 @@ function ProgressionService.redeemCode(player: Player, submittedCode: string): (
 		return false, "invalid_code"
 	end
 
-	local cleanCode = string.upper(string.gsub(submittedCode, "%s+", ""))
+	-- `gsub` returns TWO values -- the string and a replacement count -- so
+	-- nesting it inside `string.upper` passes both and the analyser reports an
+	-- argument-count mismatch. Parenthesising truncates to the first value.
+	local stripped = (string.gsub(submittedCode, "%s+", ""))
+	local cleanCode = string.upper(stripped)
 	local codeData = PROMO_CODES[cleanCode]
 	if not codeData then
 		return false, "invalid_code" -- generic response, never echo input
@@ -142,8 +146,13 @@ function ProgressionService.isInGroup(player: Player): boolean
 		return false
 	end
 	-- A failed lookup is NOT membership. A network blip must never mint a reward.
+	--
+	-- `IsInGroupAsync`, not the deprecated `IsInGroup`. It YIELDS on a web call,
+	-- which is why the existing pcall matters: an unguarded network failure here
+	-- would propagate out of a reward path. Callers are already on a remote
+	-- handler thread, so yielding is safe.
 	local ok, result = pcall(function()
-		return player:IsInGroup(groupId)
+		return player:IsInGroupAsync(groupId)
 	end)
 	return ok and result == true
 end
@@ -192,7 +201,7 @@ export type QuestDef = {
 	id: string,
 	metric: string,   -- which counter advances it
 	target: number,
-	rewardKind: string,
+	rewardKind: EconomyService.Currency,
 	rewardAmount: number,
 }
 
@@ -345,7 +354,7 @@ end
 -- actually spent in this session and cannot be accumulated across rejoins.
 --------------------------------------------------------------------------------
 
-local CHEST_REWARDS: { [string]: { kind: string, amount: number } } = {
+local CHEST_REWARDS: { [string]: { kind: EconomyService.Currency, amount: number } } = {
 	Tier1 = { kind = "Cash", amount = 500 },
 	Tier2 = { kind = "Cash", amount = 1500 },
 	Tier3 = { kind = "Gems", amount = 25 },
@@ -415,7 +424,7 @@ end
 -- beginning and nothing ever wrote it.
 --------------------------------------------------------------------------------
 
-local LOGIN_REWARDS: { { kind: string, amount: number } } = {
+local LOGIN_REWARDS: { { kind: EconomyService.Currency, amount: number } } = {
 	{ kind = "Cash", amount = 300 },
 	{ kind = "Cash", amount = 700 },
 	{ kind = "Gems", amount = 20 },

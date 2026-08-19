@@ -237,8 +237,8 @@ local function processReceipt(info: any): Enum.ProductPurchaseDecision
 		return GRANTED
 	end
 
-	local entry = Catalog.productById(productId)
-	if entry == nil then
+	local maybeEntry = Catalog.productById(productId)
+	if maybeEntry == nil then
 		-- FR-12.6. Unknown id: grant nothing, let the platform retry. Most likely
 		-- a product created on the dashboard that this build does not know about
 		-- yet, in which case wiring the id makes the pending retry succeed.
@@ -248,6 +248,12 @@ local function processReceipt(info: any): Enum.ProductPurchaseDecision
 			productId, userId))
 		return NOT_YET
 	end
+
+	-- BOUND TO A NON-OPTIONAL LOCAL. The nil check above narrows `maybeEntry`,
+	-- but that narrowing does not survive into the `string.format` calls further
+	-- down this function, which reported `entry.key` as `unknown`. Re-binding
+	-- once gives every later use a value that is already narrowed.
+	local entry: Catalog.Entry = maybeEntry
 
 	-- Record the receipt IN THE SAME profile state as the grant, before the save,
 	-- so the ledger entry and the goods are made durable by one write. Recording
