@@ -48,6 +48,1363 @@ export type V7MenuController = {
 	lastState: any,
 }
 
+local function buildShapesOverlay(screenGui: ScreenGui, overlays: { [string]: Frame }, getController: () -> any): (any) -> ()
+	local shapesOverlay, shapesBody = UITheme.overlay("Dice Shapes")
+	shapesOverlay.Parent = screenGui
+	overlays["shapes"] = shapesOverlay
+
+	local mainShell = shapesOverlay:FindFirstChild("Panel") :: Frame?
+	if not mainShell then
+		mainShell = shapesOverlay:FindFirstChildOfClass("Frame")
+	end
+
+	if mainShell then
+		mainShell.BackgroundColor3 = Color3.fromRGB(26, 22, 20)
+		mainShell.BackgroundTransparency = 0
+
+		local panelCorner = mainShell:FindFirstChildOfClass("UICorner")
+		if not panelCorner then
+			panelCorner = Instance.new("UICorner")
+			panelCorner.CornerRadius = UDim.new(0, 12)
+			panelCorner.Parent = mainShell
+		else
+			panelCorner.CornerRadius = UDim.new(0, 12)
+		end
+
+		local panelStroke = mainShell:FindFirstChildOfClass("UIStroke")
+		if not panelStroke then
+			panelStroke = Instance.new("UIStroke")
+			panelStroke.Color = Color3.fromRGB(212, 175, 55)
+			panelStroke.Thickness = 2
+			panelStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+			panelStroke.Parent = mainShell
+		else
+			panelStroke.Color = Color3.fromRGB(212, 175, 55)
+			panelStroke.Thickness = 2
+			panelStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+		end
+
+		-- Standard Header Bar (Matching Shop/Settings/Ascend exact 56px height & 14px margins)
+		local header = mainShell:FindFirstChild("Header") :: Frame?
+		if header then
+			local hList = header:FindFirstChildOfClass("UIListLayout")
+			if hList then
+				hList:Destroy()
+			end
+
+			header.Size = UDim2.new(1, -28, 0, 56)
+			header.Position = UDim2.new(0, 14, 0, 10)
+			header.BackgroundColor3 = Color3.fromRGB(36, 30, 26)
+			header.BackgroundTransparency = 0
+
+			local hCorner = header:FindFirstChildOfClass("UICorner")
+			if not hCorner then
+				hCorner = Instance.new("UICorner")
+				hCorner.CornerRadius = UDim.new(0, 8)
+				hCorner.Parent = header
+			end
+
+			local hStroke = header:FindFirstChildOfClass("UIStroke")
+			if not hStroke then
+				hStroke = Instance.new("UIStroke")
+				hStroke.Color = Color3.fromRGB(212, 175, 55)
+				hStroke.Thickness = 1
+				hStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+				hStroke.Parent = header
+			end
+
+			local hPad = header:FindFirstChildOfClass("UIPadding")
+			if not hPad then
+				hPad = Instance.new("UIPadding")
+				hPad.PaddingLeft = UDim.new(0, 16)
+				hPad.PaddingRight = UDim.new(0, 16)
+				hPad.Parent = header
+			end
+
+			local titleLbl = header:FindFirstChild("Title") :: TextLabel?
+			if titleLbl then
+				local titleFlex = titleLbl:FindFirstChildOfClass("UIFlexItem")
+				if titleFlex then
+					titleFlex:Destroy()
+				end
+				titleLbl.Text = "~ Dice Shapes & Master Catalog ~"
+				titleLbl.TextColor3 = Color3.fromRGB(212, 175, 55)
+				titleLbl.Font = Enum.Font.GothamBold
+				titleLbl.TextSize = 22
+				titleLbl.TextXAlignment = Enum.TextXAlignment.Left
+				titleLbl.Position = UDim2.new(0, 0, 0, 0)
+				titleLbl.Size = UDim2.new(0.7, 0, 1, 0)
+			end
+
+			local closeBtn = header:FindFirstChild("Close") :: TextButton?
+			if closeBtn then
+				closeBtn.Size = UDim2.new(0, 42, 0, 42)
+				closeBtn.Position = UDim2.new(1, -42, 0.5, -21)
+				closeBtn.BackgroundColor3 = Color3.fromRGB(48, 40, 36)
+				closeBtn.BackgroundTransparency = 0
+				closeBtn.TextColor3 = Color3.fromRGB(212, 175, 55)
+				closeBtn.Font = Enum.Font.GothamBold
+				closeBtn.Text = "×"
+				closeBtn.TextSize = 26
+				closeBtn.TextStrokeTransparency = 1
+
+				local cCorner = closeBtn:FindFirstChildOfClass("UICorner")
+				if not cCorner then
+					cCorner = Instance.new("UICorner")
+					cCorner.CornerRadius = UDim.new(0, 6)
+					cCorner.Parent = closeBtn
+				end
+
+				closeBtn.MouseButton1Click:Connect(function()
+					local ctrl = getController()
+					if ctrl then
+						ctrl:closeAll()
+					else
+						shapesOverlay.Visible = false
+					end
+				end)
+			end
+		end
+
+		local divider = mainShell:FindFirstChild("Divider") :: Frame?
+		if divider then
+			divider.Visible = false
+		end
+
+		if shapesBody then
+			shapesBody.Visible = false
+		end
+	end
+
+	-- Content Area (Standardized body canvas: Size = 1, -28, 1, -80; Position = 0, 14, 0, 72)
+	local contentArea = Instance.new("Frame")
+	contentArea.Name = "ShapesContentBody"
+	contentArea.Size = UDim2.new(1, -28, 1, -86)
+	contentArea.Position = UDim2.new(0, 14, 0, 70)
+	contentArea.BackgroundTransparency = 1
+	contentArea.Parent = mainShell or shapesOverlay
+
+	local colLayout = Instance.new("UIListLayout")
+	colLayout.FillDirection = Enum.FillDirection.Horizontal
+	colLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	colLayout.Padding = UDim.new(0, 12)
+	colLayout.Parent = contentArea
+
+	-- =========================================================================
+	-- LEFT COLUMN: Dual-Stage (Orbit Chamber + Specimen Telemetry Stage) (42%)
+	-- =========================================================================
+	local leftCol = Instance.new("Frame")
+	leftCol.Name = "DualStageColumn"
+	leftCol.Size = UDim2.new(0.42, -6, 1, 0)
+	leftCol.BackgroundTransparency = 1
+	leftCol.LayoutOrder = 1
+	leftCol.Parent = contentArea
+
+	local leftList = Instance.new("UIListLayout")
+	leftList.FillDirection = Enum.FillDirection.Vertical
+	leftList.SortOrder = Enum.SortOrder.LayoutOrder
+	leftList.Padding = UDim.new(0, 8)
+	leftList.Parent = leftCol
+
+	-- Top Stage: Equipped Orbit Chamber (Strictly Equipped Dice Only) (48% height)
+	local loadoutChamber = Instance.new("Frame")
+	loadoutChamber.Name = "EquippedFloatingChamber"
+	loadoutChamber.Size = UDim2.new(1, 0, 0.48, -4)
+	loadoutChamber.BackgroundColor3 = Color3.fromRGB(24, 20, 18)
+	loadoutChamber.BorderSizePixel = 0
+	loadoutChamber.LayoutOrder = 1
+	loadoutChamber.Parent = leftCol
+
+	local lcCorner = Instance.new("UICorner")
+	lcCorner.CornerRadius = UDim.new(0, 8)
+	lcCorner.Parent = loadoutChamber
+
+	local lcStroke = Instance.new("UIStroke")
+	lcStroke.Color = Color3.fromRGB(58, 50, 42)
+	lcStroke.Thickness = 1
+	lcStroke.Parent = loadoutChamber
+
+	local lcPad = Instance.new("UIPadding")
+	lcPad.PaddingLeft = UDim.new(0, 10)
+	lcPad.PaddingRight = UDim.new(0, 10)
+	lcPad.PaddingTop = UDim.new(0, 8)
+	lcPad.PaddingBottom = UDim.new(0, 10)
+	lcPad.Parent = loadoutChamber
+
+	local lcList = Instance.new("UIListLayout")
+	lcList.FillDirection = Enum.FillDirection.Vertical
+	lcList.SortOrder = Enum.SortOrder.LayoutOrder
+	lcList.Padding = UDim.new(0, 6)
+	lcList.Parent = loadoutChamber
+
+	local chamberTitle = Instance.new("TextLabel")
+	chamberTitle.Name = "ChamberTitle"
+	chamberTitle.Size = UDim2.new(1, 0, 0, 16)
+	chamberTitle.BackgroundTransparency = 1
+	chamberTitle.Text = "EQUIPPED LOADOUT"
+	chamberTitle.TextColor3 = Color3.fromRGB(245, 205, 100)
+	chamberTitle.TextSize = 11
+	chamberTitle.Font = Enum.Font.GothamBold
+	chamberTitle.TextXAlignment = Enum.TextXAlignment.Left
+	chamberTitle.LayoutOrder = 1
+	chamberTitle.Parent = loadoutChamber
+
+	local floatingContainer = Instance.new("Frame")
+	floatingContainer.Name = "FloatingViewportBox"
+	floatingContainer.Size = UDim2.new(1, 0, 1, -22)
+	floatingContainer.BackgroundColor3 = Color3.fromRGB(13, 11, 9)
+	floatingContainer.BorderSizePixel = 0
+	floatingContainer.LayoutOrder = 2
+	floatingContainer.Parent = loadoutChamber
+
+	local fcCorner = Instance.new("UICorner")
+	fcCorner.CornerRadius = UDim.new(0, 6)
+	fcCorner.Parent = floatingContainer
+
+	local fcStroke = Instance.new("UIStroke")
+	fcStroke.Color = Color3.fromRGB(80, 68, 56)
+	fcStroke.Thickness = 1.5
+	fcStroke.Parent = floatingContainer
+
+	-- Equipped-Only Orbit Viewport
+	local chamberVp = Instance.new("ViewportFrame")
+	chamberVp.Name = "OrbitViewport"
+	chamberVp.Size = UDim2.fromScale(1, 1)
+	chamberVp.BackgroundColor3 = Color3.fromRGB(13, 11, 9)
+	chamberVp.BackgroundTransparency = 0
+	chamberVp.BorderSizePixel = 0
+	chamberVp.Parent = floatingContainer
+
+	local chamberCam = Instance.new("Camera")
+	chamberCam.FieldOfView = 45
+	chamberCam.Parent = chamberVp
+	chamberVp.CurrentCamera = chamberCam
+
+	local folder = ReplicatedStorage:FindFirstChild(DICE_SOURCE)
+	local unlockOrder = DiceCatalog.getUnlockOrder()
+
+	type OrbitItemData = {
+		model: Model,
+		isHeroSingle: boolean,
+		baseAngle: number,
+		radiusX: number,
+		orbitSpeed: number,
+		spinX: number,
+		spinY: number,
+		spinZ: number,
+		bobAmp1: number,
+		bobAmp2: number,
+		bobFreq1: number,
+		bobFreq2: number,
+		phase1: number,
+		phase2: number,
+		baseHeight: number,
+		phaseX: number,
+		phaseY: number,
+		phaseZ: number,
+	}
+
+	local orbitItems: { OrbitItemData } = {}
+	local lastEquippedKey = ""
+
+	local function rebuildOrbitChamber(equippedDiceList: { string })
+		for _, item in ipairs(orbitItems) do
+			if item.model and item.model.Parent ~= nil then
+				item.model:Destroy()
+			end
+		end
+		table.clear(orbitItems)
+
+		local count = #equippedDiceList
+		if count == 0 then
+			equippedDiceList = { "D6" }
+			count = 1
+		end
+
+		if count == 1 then
+			chamberTitle.Text = "EQUIPPED DIE (1 DIE)"
+			local shapeId = equippedDiceList[1]
+			local source = if folder then folder:FindFirstChild(shapeId) else nil
+			if source and source:IsA("Model") then
+				local model = source:Clone()
+				if model.PrimaryPart == nil then
+					local pivot = model:FindFirstChild("Pivot")
+					if pivot and pivot:IsA("BasePart") then
+						model.PrimaryPart = pivot
+					end
+				end
+				local _, bbSize = model:GetBoundingBox()
+				local maxDim = math.max(bbSize.X, bbSize.Y, bbSize.Z)
+				if maxDim > 0 then
+					model:ScaleTo(1.75 / maxDim)
+				end
+				model:PivotTo(CFrame.new(0, 0, 0))
+				model.Parent = chamberVp
+
+				chamberCam.CFrame = CFrame.new(Vector3.new(2.8, 2.2, 3.4), Vector3.new(0, 0, 0))
+				chamberCam.FieldOfView = 36
+
+				table.insert(orbitItems, {
+					model = model,
+					isHeroSingle = true,
+					baseAngle = 0,
+					radiusX = 0,
+					orbitSpeed = 0,
+					spinX = 0.35,
+					spinY = 0.70,
+					spinZ = 0.25,
+					bobAmp1 = 0.18,
+					bobAmp2 = 0,
+					bobFreq1 = 1.3,
+					bobFreq2 = 0,
+					phase1 = 0,
+					phase2 = 0,
+					baseHeight = 0,
+					phaseX = 0,
+					phaseY = 0,
+					phaseZ = 0,
+				})
+			end
+		else
+			chamberTitle.Text = string.format("EQUIPPED LOADOUT (%d DICE)", count)
+			local orbitRadius = math.clamp(3.0 + count * 0.22, 3.4, 5.0)
+			local modelScale = math.clamp(1.4 / math.sqrt(count), 0.46, 0.70)
+
+			chamberCam.CFrame = CFrame.new(Vector3.new(0, 4.4 + count * 0.15, 9.6 + count * 0.35), Vector3.new(0, -0.2, 0))
+			chamberCam.FieldOfView = 45
+
+			for idx, shapeId in ipairs(equippedDiceList) do
+				local source = if folder then folder:FindFirstChild(shapeId) else nil
+				if source and source:IsA("Model") then
+					local model = source:Clone()
+					if model.PrimaryPart == nil then
+						local pivot = model:FindFirstChild("Pivot")
+						if pivot and pivot:IsA("BasePart") then
+							model.PrimaryPart = pivot
+						end
+					end
+
+					model:ScaleTo(modelScale)
+
+					local baseAngle = (idx - 1) * ((2 * math.pi) / count)
+					local p1 = math.sin(idx * 2.718)
+					local p2 = math.cos(idx * 3.141)
+					local p3 = math.sin(idx * 1.618)
+
+					local initialX = orbitRadius * math.cos(baseAngle)
+					local initialZ = orbitRadius * math.sin(baseAngle)
+					local initialY = 0.4 * p2
+					model:PivotTo(CFrame.new(initialX, initialY, initialZ))
+					model.Parent = chamberVp
+
+					table.insert(orbitItems, {
+						model = model,
+						isHeroSingle = false,
+						baseAngle = baseAngle,
+						radiusX = orbitRadius,
+						orbitSpeed = 0.42,
+						spinX = 0.50 + 0.30 * p1,
+						spinY = 0.85 + 0.45 * p2,
+						spinZ = 0.40 + 0.25 * p3,
+						bobAmp1 = 0.38 + 0.12 * math.abs(p1),
+						bobAmp2 = 0.20 + 0.08 * math.abs(p2),
+						bobFreq1 = 1.0 + 0.25 * p2,
+						bobFreq2 = 1.6 + 0.30 * p3,
+						phase1 = idx * 1.35,
+						phase2 = idx * 2.75,
+						baseHeight = 0.15 * p2,
+						phaseX = idx * 0.85,
+						phaseY = idx * 1.45,
+						phaseZ = idx * 2.15,
+					})
+				end
+			end
+		end
+	end
+
+	rebuildOrbitChamber({ "D6" })
+
+	-- Bottom Stage: Specimen Telemetry Stage (Perfected 3D Camera & Non-Colliding Caliper Metrics)
+	local specimenStage = Instance.new("Frame")
+	specimenStage.Name = "SpecimenTelemetryStage"
+	specimenStage.Size = UDim2.new(1, 0, 0.54, -4)
+	specimenStage.BackgroundColor3 = Color3.fromRGB(24, 20, 18)
+	specimenStage.BorderSizePixel = 0
+	specimenStage.LayoutOrder = 2
+	specimenStage.Parent = leftCol
+
+	local ssCorner = Instance.new("UICorner")
+	ssCorner.CornerRadius = UDim.new(0, 8)
+	ssCorner.Parent = specimenStage
+
+	local ssStroke = Instance.new("UIStroke")
+	ssStroke.Color = Color3.fromRGB(58, 50, 42)
+	ssStroke.Thickness = 1
+	ssStroke.Parent = specimenStage
+
+	local ssPad = Instance.new("UIPadding")
+	ssPad.PaddingLeft = UDim.new(0, 10)
+	ssPad.PaddingRight = UDim.new(0, 10)
+	ssPad.PaddingTop = UDim.new(0, 8)
+	ssPad.PaddingBottom = UDim.new(0, 8)
+	ssPad.Parent = specimenStage
+
+	local ssList = Instance.new("UIListLayout")
+	ssList.FillDirection = Enum.FillDirection.Vertical
+	ssList.SortOrder = Enum.SortOrder.LayoutOrder
+	ssList.Padding = UDim.new(0, 6)
+	ssList.Parent = specimenStage
+
+	-- Stage Title Header
+	local ssTitle = Instance.new("TextLabel")
+	ssTitle.Name = "SpecimenTitle"
+	ssTitle.Size = UDim2.new(1, 0, 0, 14)
+	ssTitle.BackgroundTransparency = 1
+	ssTitle.Text = "STATS & SPECIMEN"
+	ssTitle.TextColor3 = Color3.fromRGB(250, 215, 90)
+	ssTitle.TextSize = 11.5
+	ssTitle.Font = Enum.Font.GothamBold
+	ssTitle.TextXAlignment = Enum.TextXAlignment.Left
+	ssTitle.LayoutOrder = 1
+	ssTitle.Parent = specimenStage
+
+	-- Middle Split Row (Display | Stats)
+	local splitRow = Instance.new("Frame")
+	splitRow.Name = "SplitDisplayStatsRow"
+	splitRow.Size = UDim2.new(1, 0, 1, -86)
+	splitRow.BackgroundTransparency = 1
+	splitRow.LayoutOrder = 2
+	splitRow.Parent = specimenStage
+
+	local splitList = Instance.new("UIListLayout")
+	splitList.FillDirection = Enum.FillDirection.Horizontal
+	splitList.SortOrder = Enum.SortOrder.LayoutOrder
+	splitList.Padding = UDim.new(0, 8)
+	splitList.Parent = splitRow
+
+	-- Left: Perfectly Framed 3D Die Display Stage (40% width)
+	local singleVpContainer = Instance.new("Frame")
+	singleVpContainer.Name = "SingleViewportContainer"
+	singleVpContainer.Size = UDim2.new(0.40, -4, 1, 0)
+	singleVpContainer.BackgroundColor3 = Color3.fromRGB(13, 11, 9)
+	singleVpContainer.BorderSizePixel = 0
+	singleVpContainer.LayoutOrder = 1
+	singleVpContainer.Parent = splitRow
+
+	local svpCorner = Instance.new("UICorner")
+	svpCorner.CornerRadius = UDim.new(0, 6)
+	svpCorner.Parent = singleVpContainer
+
+	local svpStroke = Instance.new("UIStroke")
+	svpStroke.Color = Color3.fromRGB(58, 48, 40)
+	svpStroke.Thickness = 1
+	svpStroke.Parent = singleVpContainer
+
+	local inspectedHeroModel: Model? = nil
+
+	local SPECIMEN_SCALE_MAP: { [string]: number } = {
+		D2  = 0.46,
+		D3  = 0.43,
+		D4  = 0.42,
+		D5  = 0.43,
+		D6  = 0.48,
+		D7  = 0.43,
+		D8  = 0.45,
+		D10 = 0.43,
+		D12 = 0.44,
+		D14 = 0.43,
+		D16 = 0.43,
+		D20 = 0.43,
+	}
+
+	local RACK_CARD_SCALE_MAP: { [string]: number } = {
+		D2  = 0.40,
+		D3  = 0.38,
+		D4  = 0.36,
+		D5  = 0.38,
+		D6  = 0.42,
+		D7  = 0.38,
+		D8  = 0.39,
+		D10 = 0.38,
+		D12 = 0.38,
+		D14 = 0.38,
+		D16 = 0.38,
+		D20 = 0.38,
+	}
+
+	local function createInspectionTurntable(shapeId: string): ViewportFrame
+		local vp = Instance.new("ViewportFrame")
+		vp.Name = "SpecimenTurntable_" .. shapeId
+		vp.Size = UDim2.fromScale(1, 1)
+		vp.BackgroundColor3 = Color3.fromRGB(13, 11, 9)
+		vp.BackgroundTransparency = 1
+		vp.BorderSizePixel = 0
+		vp.Parent = singleVpContainer
+
+		local sSource = if folder then folder:FindFirstChild(shapeId) else nil
+		if sSource and sSource:IsA("Model") then
+			local model = sSource:Clone()
+			if model.PrimaryPart == nil then
+				local pivot = model:FindFirstChild("Pivot")
+				if pivot and pivot:IsA("BasePart") then
+					model.PrimaryPart = pivot
+				end
+			end
+			local scaleFactor = SPECIMEN_SCALE_MAP[shapeId] or 0.44
+			model:ScaleTo(scaleFactor)
+			model:PivotTo(CFrame.new(0, 0, 0))
+			model.Parent = vp
+			inspectedHeroModel = model
+
+			local cam = Instance.new("Camera")
+			cam.CFrame = CFrame.new(Vector3.new(2.8, 2.2, 3.4), Vector3.new(0, 0, 0))
+			cam.FieldOfView = 36
+			cam.Parent = vp
+			vp.CurrentCamera = cam
+		end
+		return vp
+	end
+
+	local currentInspectedVp: ViewportFrame? = createInspectionTurntable("D6")
+
+	-- Right: Detailed Stats Telemetry Stack (60% width)
+	local statsCol = Instance.new("Frame")
+	statsCol.Name = "StatsTelemetryCol"
+	statsCol.Size = UDim2.new(0.60, -4, 1, 0)
+	statsCol.BackgroundTransparency = 1
+	statsCol.LayoutOrder = 2
+	statsCol.Parent = splitRow
+
+	local scList = Instance.new("UIListLayout")
+	scList.FillDirection = Enum.FillDirection.Vertical
+	scList.SortOrder = Enum.SortOrder.LayoutOrder
+	scList.Padding = UDim.new(0, 3)
+	scList.Parent = statsCol
+
+	-- Die Name Title
+	local inspectedNameLabel = Instance.new("TextLabel")
+	inspectedNameLabel.Name = "InspectedNameLabel"
+	inspectedNameLabel.Size = UDim2.new(1, 0, 0, 16)
+	inspectedNameLabel.BackgroundTransparency = 1
+	inspectedNameLabel.Text = "D6 FOUNDRY OBSIDIAN"
+	inspectedNameLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+	inspectedNameLabel.TextSize = 12.5
+	inspectedNameLabel.Font = Enum.Font.GothamBold
+	inspectedNameLabel.TextXAlignment = Enum.TextXAlignment.Left
+	inspectedNameLabel.LayoutOrder = 1
+	inspectedNameLabel.Parent = statsCol
+
+	-- Archetype Subtitle
+	local inspectedArchLabel = Instance.new("TextLabel")
+	inspectedArchLabel.Name = "InspectedArchetypeLabel"
+	inspectedArchLabel.Size = UDim2.new(1, 0, 0, 14)
+	inspectedArchLabel.BackgroundTransparency = 1
+	inspectedArchLabel.Text = "6 SIDES • CLASSIC BALANCED"
+	inspectedArchLabel.TextColor3 = Color3.fromRGB(245, 205, 100)
+	inspectedArchLabel.TextSize = 10.5
+	inspectedArchLabel.Font = Enum.Font.GothamBold
+	inspectedArchLabel.TextXAlignment = Enum.TextXAlignment.Left
+	inspectedArchLabel.LayoutOrder = 2
+	inspectedArchLabel.Parent = statsCol
+
+	-- 4 Two-Tier Caliper Telemetry Rows (Top: Name + Value, Bottom: Progress Bar)
+	local specRows: { [string]: { valLabel: TextLabel, barFill: Frame? } } = {}
+
+	local function createCaliperRow(order: number, specId: string, labelText: string, defaultVal: string, ratio: number)
+		local row = Instance.new("Frame")
+		row.Name = "CaliperRow_" .. specId
+		row.Size = UDim2.new(1, 0, 0, 26)
+		row.BackgroundTransparency = 1
+		row.LayoutOrder = 2 + order
+		row.Parent = statsCol
+
+		local topTextRow = Instance.new("Frame")
+		topTextRow.Size = UDim2.new(1, 0, 0, 14)
+		topTextRow.BackgroundTransparency = 1
+		topTextRow.Parent = row
+
+		local lLabel = Instance.new("TextLabel")
+		lLabel.Size = UDim2.new(0.5, 0, 1, 0)
+		lLabel.BackgroundTransparency = 1
+		lLabel.Text = labelText
+		lLabel.TextColor3 = Color3.fromRGB(180, 175, 170)
+		lLabel.TextSize = 10
+		lLabel.Font = Enum.Font.GothamBold
+		lLabel.TextXAlignment = Enum.TextXAlignment.Left
+		lLabel.Parent = topTextRow
+
+		local vLabel = Instance.new("TextLabel")
+		vLabel.Size = UDim2.new(0.5, 0, 1, 0)
+		vLabel.Position = UDim2.new(0.5, 0, 0, 0)
+		vLabel.BackgroundTransparency = 1
+		vLabel.Text = defaultVal
+		vLabel.TextColor3 = Color3.fromRGB(255, 225, 100)
+		vLabel.TextSize = 10
+		vLabel.Font = Enum.Font.GothamBold
+		vLabel.TextXAlignment = Enum.TextXAlignment.Right
+		vLabel.Parent = topTextRow
+
+		local barTrack = Instance.new("Frame")
+		barTrack.Name = "BarTrack"
+		barTrack.Size = UDim2.new(1, 0, 0, 4)
+		barTrack.Position = UDim2.new(0, 0, 0, 18)
+		barTrack.BackgroundColor3 = Color3.fromRGB(36, 30, 26)
+		barTrack.BorderSizePixel = 0
+		barTrack.Parent = row
+
+		local btCorner = Instance.new("UICorner")
+		btCorner.CornerRadius = UDim.new(0, 2)
+		btCorner.Parent = barTrack
+
+		local barFill = Instance.new("Frame")
+		barFill.Name = "BarFill"
+		barFill.Size = UDim2.fromScale(math.clamp(ratio, 0.05, 1), 1)
+		barFill.BackgroundColor3 = Color3.fromRGB(245, 205, 100)
+		barFill.BorderSizePixel = 0
+		barFill.Parent = barTrack
+
+		local bfCorner = Instance.new("UICorner")
+		bfCorner.CornerRadius = UDim.new(0, 2)
+		bfCorner.Parent = barFill
+
+		specRows[specId] = { valLabel = vLabel, barFill = barFill }
+	end
+
+	createCaliperRow(1, "face", "SIDES", "6 SIDES", 6 / 20)
+	createCaliperRow(2, "mass", "DICE WEIGHT", "60 / 300", 60 / 300)
+	createCaliperRow(3, "volatility", "WIN RATE", "83.3% WIN", 0.833)
+	createCaliperRow(4, "payout", "MAX PAYOUT", "18.0x MULT", 0.36)
+
+	-- Bottom Action Buttons (Stacked at Bottom)
+	local equipStateBtn = Instance.new("TextButton")
+	equipStateBtn.Name = "EquipStateBtn"
+	equipStateBtn.Size = UDim2.new(1, 0, 0, 30)
+	equipStateBtn.BackgroundColor3 = Color3.fromRGB(48, 38, 28)
+	equipStateBtn.BorderSizePixel = 0
+	equipStateBtn.Text = "[ EQUIPPED SOLID ]"
+	equipStateBtn.TextColor3 = Color3.fromRGB(245, 240, 235)
+	equipStateBtn.TextSize = 12.5
+	equipStateBtn.Font = Enum.Font.GothamBold
+	equipStateBtn.AutoButtonColor = false
+	equipStateBtn.LayoutOrder = 3
+	equipStateBtn.Parent = specimenStage
+
+	local esCorner = Instance.new("UICorner")
+	esCorner.CornerRadius = UDim.new(0, 5)
+	esCorner.Parent = equipStateBtn
+
+	local addInstanceBtn = Instance.new("TextButton")
+	addInstanceBtn.Name = "AddInstanceBtn"
+	addInstanceBtn.Size = UDim2.new(1, 0, 0, 30)
+	addInstanceBtn.BackgroundColor3 = Color3.fromRGB(36, 76, 48)
+	addInstanceBtn.BorderSizePixel = 0
+	addInstanceBtn.Text = "+1 DIE INSTANCE $8,000"
+	addInstanceBtn.TextColor3 = Color3.fromRGB(74, 222, 128)
+	addInstanceBtn.TextSize = 12.5
+	addInstanceBtn.Font = Enum.Font.GothamBold
+	addInstanceBtn.LayoutOrder = 4
+	addInstanceBtn.Parent = specimenStage
+
+	local aiCorner = Instance.new("UICorner")
+	aiCorner.CornerRadius = UDim.new(0, 5)
+	aiCorner.Parent = addInstanceBtn
+
+	-- =========================================================================
+	-- RIGHT COLUMN: Milled Toolroom Grid / Ladder (58% width)
+	-- =========================================================================
+	local rightContainer = Instance.new("Frame")
+	rightContainer.Name = "RightToolroomContainer"
+	rightContainer.Size = UDim2.new(0.58, -6, 1, 0)
+	rightContainer.BackgroundColor3 = Color3.fromRGB(18, 15, 13)
+	rightContainer.BorderSizePixel = 0
+	rightContainer.LayoutOrder = 2
+	rightContainer.Parent = contentArea
+
+	local rightList = Instance.new("UIListLayout")
+	rightList.FillDirection = Enum.FillDirection.Vertical
+	rightList.SortOrder = Enum.SortOrder.LayoutOrder
+	rightList.Padding = UDim.new(0, 6)
+	rightList.Parent = rightContainer
+
+	-- 4-Tab Filter Bar (ALL, HIGH RISK, BALANCED, SAFE)
+	local filterBar = Instance.new("Frame")
+	filterBar.Name = "FilterTabBar"
+	filterBar.Size = UDim2.new(1, 0, 0, 34)
+	filterBar.BackgroundColor3 = Color3.fromRGB(24, 20, 18)
+	filterBar.BorderSizePixel = 0
+	filterBar.LayoutOrder = 1
+	filterBar.Parent = rightContainer
+
+	local fbCorner = Instance.new("UICorner")
+	fbCorner.CornerRadius = UDim.new(0, 6)
+	fbCorner.Parent = filterBar
+
+	local fbList = Instance.new("UIListLayout")
+	fbList.FillDirection = Enum.FillDirection.Horizontal
+	fbList.SortOrder = Enum.SortOrder.LayoutOrder
+	fbList.Padding = UDim.new(0, 6)
+	fbList.Parent = filterBar
+
+	local filterTabs = {
+		{ id = "all", label = "ALL (12)" },
+		{ id = "sniper", label = "HIGH RISK (3)" },
+		{ id = "balanced", label = "BALANCED (3)" },
+		{ id = "grinder", label = "SAFE (6)" },
+	}
+
+	local currentActiveTab = "all"
+	local tabButtons: { [string]: TextButton } = {}
+	local cardFrames: { [string]: Frame } = {}
+	local cardStrokes: { [string]: UIStroke } = {}
+	local cardActionBtns: { [string]: TextButton } = {}
+
+	local shapeMeta: { [string]: {
+		id: string,
+		name: string,
+		faceCount: number,
+		archetype: string,
+		category: string,
+		voidChance: string,
+		payoutMultiplier: string,
+		voidRatio: number,
+		payoutRatio: number,
+	} } = {
+		D2 = { id = "D2", name = "Quantum Monad", faceCount = 2, archetype = "High Risk", category = "sniper", voidChance = "50.0%", payoutMultiplier = "50x", voidRatio = 0.50, payoutRatio = 1.0 },
+		D3 = { id = "D3", name = "Trinity Prism", faceCount = 3, archetype = "High Risk", category = "sniper", voidChance = "49.2%", payoutMultiplier = "45x", voidRatio = 0.492, payoutRatio = 0.90 },
+		D4 = { id = "D4", name = "Pyramid Shard", faceCount = 4, archetype = "High Risk", category = "sniper", voidChance = "33.3%", payoutMultiplier = "32x", voidRatio = 0.333, payoutRatio = 0.64 },
+		D5 = { id = "D5", name = "Nexus Pentagon", faceCount = 5, archetype = "Balanced", category = "balanced", voidChance = "25.0%", payoutMultiplier = "24x", voidRatio = 0.25, payoutRatio = 0.48 },
+		D6 = { id = "D6", name = "Foundry Obsidian", faceCount = 6, archetype = "Classic Balanced", category = "balanced", voidChance = "16.7%", payoutMultiplier = "18x", voidRatio = 0.167, payoutRatio = 0.36 },
+		D7 = { id = "D7", name = "Mystic Heptad", faceCount = 7, archetype = "Balanced", category = "balanced", voidChance = "14.3%", payoutMultiplier = "14x", voidRatio = 0.143, payoutRatio = 0.28 },
+		D8 = { id = "D8", name = "Astral Octahedron", faceCount = 8, archetype = "Safe", category = "grinder", voidChance = "12.5%", payoutMultiplier = "11x", voidRatio = 0.125, payoutRatio = 0.22 },
+		D10 = { id = "D10", name = "Titan Decagon", faceCount = 10, archetype = "Safe", category = "grinder", voidChance = "10.0%", payoutMultiplier = "8.5x", voidRatio = 0.10, payoutRatio = 0.17 },
+		D12 = { id = "D12", name = "Apex Dodecahedron", faceCount = 12, archetype = "Safe", category = "grinder", voidChance = "8.3%", payoutMultiplier = "6.5x", voidRatio = 0.083, payoutRatio = 0.13 },
+		D14 = { id = "D14", name = "Solar Tetradeca", faceCount = 14, archetype = "Safe", category = "grinder", voidChance = "7.1%", payoutMultiplier = "5.0x", voidRatio = 0.071, payoutRatio = 0.10 },
+		D16 = { id = "D16", name = "Crown Hexadeca", faceCount = 16, archetype = "Safe", category = "grinder", voidChance = "6.2%", payoutMultiplier = "4.2x", voidRatio = 0.062, payoutRatio = 0.084 },
+		D20 = { id = "D20", name = "Cosmic Icosahedron", faceCount = 20, archetype = "Safe", category = "grinder", voidChance = "5.0%", payoutMultiplier = "3.2x", voidRatio = 0.05, payoutRatio = 0.064 },
+	}
+
+	local function applyFilter(catId: string)
+		currentActiveTab = catId
+		for _, tab in ipairs(filterTabs) do
+			local btn = tabButtons[tab.id]
+			if btn then
+				btn.BackgroundColor3 = if tab.id == currentActiveTab then Color3.fromRGB(50, 42, 34) else Color3.fromRGB(22, 19, 17)
+				btn.TextColor3 = if tab.id == currentActiveTab then Color3.fromRGB(245, 240, 235) else Color3.fromRGB(150, 145, 140)
+			end
+		end
+
+		for shapeId, meta in pairs(shapeMeta) do
+			local card = cardFrames[shapeId]
+			if card then
+				if currentActiveTab == "all" or meta.category == currentActiveTab then
+					card.Visible = true
+				else
+					card.Visible = false
+				end
+			end
+		end
+	end
+
+	for tIdx, tab in ipairs(filterTabs) do
+		local tBtn = Instance.new("TextButton")
+		tBtn.Name = "Tab_" .. tab.id
+		tBtn.Size = UDim2.new(0.25, -5, 1, 0)
+		tBtn.BackgroundColor3 = if tab.id == "all" then Color3.fromRGB(50, 42, 34) else Color3.fromRGB(22, 19, 17)
+		tBtn.BorderSizePixel = 0
+		tBtn.Text = tab.label
+		tBtn.TextColor3 = if tab.id == "all" then Color3.fromRGB(245, 240, 235) else Color3.fromRGB(150, 145, 140)
+		tBtn.TextSize = 11
+		tBtn.Font = Enum.Font.GothamBold
+		tBtn.LayoutOrder = tIdx
+		tBtn.Parent = filterBar
+
+		local tbC = Instance.new("UICorner")
+		tbC.CornerRadius = UDim.new(0, 4)
+		tbC.Parent = tBtn
+
+		tabButtons[tab.id] = tBtn
+
+		tBtn.MouseButton1Click:Connect(function()
+			applyFilter(tab.id)
+		end)
+	end
+
+	-- Scrollable Grid Rack (Exact 6-Card Viewport with Perfect Non-Cropping Margins)
+	local rightCol = Instance.new("ScrollingFrame")
+	rightCol.Name = "ToolroomRackScroll"
+	rightCol.Size = UDim2.new(1, 0, 1, -40)
+	rightCol.BackgroundTransparency = 1
+	rightCol.BorderSizePixel = 0
+	rightCol.ScrollBarThickness = 5
+	rightCol.ScrollBarImageColor3 = Color3.fromRGB(245, 205, 100)
+	rightCol.CanvasSize = UDim2.new(0, 0, 0, 0)
+	rightCol.AutomaticCanvasSize = Enum.AutomaticSize.Y
+	rightCol.ClipsDescendants = true
+	rightCol.LayoutOrder = 2
+	rightCol.Parent = rightContainer
+
+	local scPad = Instance.new("UIPadding")
+	scPad.PaddingLeft = UDim.new(0, 4)
+	scPad.PaddingRight = UDim.new(0, 8)
+	scPad.PaddingTop = UDim.new(0, 4)
+	scPad.PaddingBottom = UDim.new(0, 6)
+	scPad.Parent = rightCol
+
+	local rGrid = Instance.new("UIGridLayout")
+	rGrid.CellPadding = UDim2.new(0, 6, 0, 6)
+	rGrid.SortOrder = Enum.SortOrder.LayoutOrder
+	rGrid.Parent = rightCol
+
+	local function updateGridCellSize()
+		local totalW = rightCol.AbsoluteSize.X
+		local totalH = rightCol.AbsoluteSize.Y
+		local availableW = totalW - 12 -- minus 4px left + 8px right padding
+		local availableH = totalH - 10 -- minus 4px top + 6px bottom padding
+
+		if availableW > 100 and availableH > 60 then
+			local colW = math.floor((availableW - 6) / 2)
+			local rowH = math.floor((availableH - 12) / 3)
+			rGrid.CellSize = UDim2.fromOffset(colW, math.max(rowH, 130))
+		end
+	end
+	rightCol:GetPropertyChangedSignal("AbsoluteSize"):Connect(updateGridCellSize)
+	task.defer(updateGridCellSize)
+
+	local inspectedShapeId = "D6"
+	local cardModels: { Model } = {}
+
+	local function inspectShape(shapeId: string)
+		inspectedShapeId = shapeId
+		local meta = shapeMeta[shapeId]
+		if not meta then return end
+
+		if currentInspectedVp then
+			currentInspectedVp:Destroy()
+			currentInspectedVp = nil
+		end
+		currentInspectedVp = createInspectionTurntable(shapeId)
+
+		inspectedNameLabel.Text = string.format("%s %s", meta.id, string.upper(meta.name))
+		if inspectedArchLabel then inspectedArchLabel.Text = string.upper(meta.faceCount .. " SIDES • " .. meta.archetype) end
+
+		if specRows["face"] then
+			specRows["face"].valLabel.Text = tostring(meta.faceCount) .. " SIDES"
+			if specRows["face"].barFill then
+				specRows["face"].barFill.Size = UDim2.fromScale(math.clamp(meta.faceCount / 20, 0.1, 1), 1)
+			end
+		end
+		if specRows["mass"] then
+			specRows["mass"].valLabel.Text = "60 / 300"
+			if specRows["mass"].barFill then
+				specRows["mass"].barFill.Size = UDim2.fromScale(60 / 300, 1)
+			end
+		end
+		if specRows["volatility"] then
+			local safePct = string.format("%.1f%% WIN", (1 - meta.voidRatio) * 100)
+			specRows["volatility"].valLabel.Text = safePct
+			if specRows["volatility"].barFill then
+				specRows["volatility"].barFill.Size = UDim2.fromScale(math.clamp(1 - meta.voidRatio, 0.1, 1), 1)
+			end
+		end
+		if specRows["payout"] then
+			specRows["payout"].valLabel.Text = meta.payoutMultiplier .. " MULT"
+			if specRows["payout"].barFill then
+				specRows["payout"].barFill.Size = UDim2.fromScale(math.clamp(meta.payoutRatio, 0.1, 1), 1)
+			end
+		end
+
+		for sId, strk in pairs(cardStrokes) do
+			if sId == shapeId then
+				strk.Color = Color3.fromRGB(212, 175, 55)
+				strk.Thickness = 2
+			else
+				strk.Color = Color3.fromRGB(58, 50, 42)
+				strk.Thickness = 1
+			end
+		end
+	end
+
+	-- Card Factory for all 12 Polyhedra (Spacious Full-Width Title + Big Hero 3D Die + High Legibility Fonts)
+	for idx, shapeId in ipairs(unlockOrder) do
+		local meta = shapeMeta[shapeId]
+		if meta then
+			local card = Instance.new("Frame")
+			card.Name = "RackCard_" .. shapeId
+			card.BackgroundColor3 = Color3.fromRGB(30, 26, 22)
+			card.BorderSizePixel = 0
+			card.LayoutOrder = idx
+			card.Parent = rightCol
+			cardFrames[shapeId] = card
+
+			local cCorner = Instance.new("UICorner")
+			cCorner.CornerRadius = UDim.new(0, 8)
+			cCorner.Parent = card
+
+			local cStroke = Instance.new("UIStroke")
+			cStroke.Color = Color3.fromRGB(58, 50, 42)
+			cStroke.Thickness = 1
+			cStroke.Parent = card
+			cardStrokes[shapeId] = cStroke
+
+			local cardPad = Instance.new("UIPadding")
+			cardPad.PaddingLeft = UDim.new(0, 8)
+			cardPad.PaddingRight = UDim.new(0, 8)
+			cardPad.PaddingTop = UDim.new(0, 8)
+			cardPad.PaddingBottom = UDim.new(0, 8)
+			cardPad.Parent = card
+
+			-- 1. Full-Width Top Title Row (Die Name + ID Tag Badge)
+			local titleRow = Instance.new("Frame")
+			titleRow.Name = "CardTitleRow"
+			titleRow.Size = UDim2.new(1, 0, 0, 20)
+			titleRow.BackgroundTransparency = 1
+			titleRow.Parent = card
+
+			local tTitle = Instance.new("TextLabel")
+			tTitle.Name = "DieTitle"
+			tTitle.Size = UDim2.new(1, -36, 1, 0)
+			tTitle.Position = UDim2.new(0, 0, 0, 0)
+			tTitle.BackgroundTransparency = 1
+			tTitle.Text = string.upper(meta.name)
+			tTitle.TextColor3 = Color3.fromRGB(255, 255, 255)
+			tTitle.TextSize = 13.5
+			tTitle.Font = Enum.Font.GothamBold
+			tTitle.TextXAlignment = Enum.TextXAlignment.Left
+			tTitle.TextTruncate = Enum.TextTruncate.None
+			tTitle.Parent = titleRow
+
+			local diePill = Instance.new("TextLabel")
+			diePill.Name = "DieIdTag"
+			diePill.Size = UDim2.new(0, 32, 0, 18)
+			diePill.Position = UDim2.new(1, -32, 0.5, -9)
+			diePill.BackgroundColor3 = Color3.fromRGB(38, 34, 30)
+			diePill.BorderSizePixel = 0
+			diePill.Text = meta.id
+			diePill.TextColor3 = Color3.fromRGB(245, 205, 100)
+			diePill.TextSize = 11
+			diePill.Font = Enum.Font.GothamBold
+			diePill.Parent = titleRow
+
+			local dpC = Instance.new("UICorner")
+			dpC.CornerRadius = UDim.new(0, 4)
+			dpC.Parent = diePill
+
+			local dpS = Instance.new("UIStroke")
+			dpS.Color = Color3.fromRGB(80, 70, 60)
+			dpS.Thickness = 1
+			dpS.Parent = diePill
+
+			-- 2. Middle Row: Big 3D Die Viewport Stage (Left) + Archetype & Stat Chips (Right)
+			local middleRow = Instance.new("Frame")
+			middleRow.Name = "CardMiddleRow"
+			middleRow.Size = UDim2.new(1, 0, 0, 66)
+			middleRow.Position = UDim2.new(0, 0, 0, 24)
+			middleRow.BackgroundTransparency = 1
+			middleRow.Parent = card
+
+			-- Big 3D Plinth Recess (66x66px Stage - prominently displaying the 3D die solid)
+			local plinth = Instance.new("Frame")
+			plinth.Name = "PlinthRecess"
+			plinth.Size = UDim2.fromOffset(66, 66)
+			plinth.Position = UDim2.fromOffset(0, 0)
+			plinth.BackgroundColor3 = Color3.fromRGB(13, 11, 9)
+			plinth.BorderSizePixel = 0
+			plinth.Parent = middleRow
+
+			local pCorner = Instance.new("UICorner")
+			pCorner.CornerRadius = UDim.new(0, 6)
+			pCorner.Parent = plinth
+
+			local pStroke = Instance.new("UIStroke")
+			pStroke.Color = Color3.fromRGB(56, 48, 40)
+			pStroke.Thickness = 1
+			pStroke.Parent = plinth
+
+			-- Big Hero 3D Viewport with Close Camera Framing
+			local cardVp = Instance.new("ViewportFrame")
+			cardVp.Name = "CardViewport"
+			cardVp.Size = UDim2.fromScale(1, 1)
+			cardVp.BackgroundColor3 = Color3.fromRGB(13, 11, 9)
+			cardVp.BackgroundTransparency = 0
+			cardVp.BorderSizePixel = 0
+			cardVp.Parent = plinth
+
+			local cSource = if folder then folder:FindFirstChild(shapeId) else nil
+			if cSource and cSource:IsA("Model") then
+				local cModel = cSource:Clone()
+				if cModel.PrimaryPart == nil then
+					local pivot = cModel:FindFirstChild("Pivot")
+					if pivot and pivot:IsA("BasePart") then
+						cModel.PrimaryPart = pivot
+					end
+				end
+				local cardScale = RACK_CARD_SCALE_MAP[shapeId] or 0.38
+				cModel:ScaleTo(cardScale)
+				cModel:PivotTo(CFrame.new(0, 0, 0))
+				cModel.Parent = cardVp
+				table.insert(cardModels, cModel)
+
+				local cCam = Instance.new("Camera")
+				cCam.CFrame = CFrame.new(Vector3.new(2.4, 1.8, 2.8), Vector3.new(0, 0, 0))
+				cCam.FieldOfView = 34
+				cCam.Parent = cardVp
+				cardVp.CurrentCamera = cCam
+			end
+
+			-- Right Details Column (Archetype Subtitle + Dual Stat Chips)
+			local infoCol = Instance.new("Frame")
+			infoCol.Name = "CardInfoCol"
+			infoCol.Size = UDim2.new(1, -74, 1, 0)
+			infoCol.Position = UDim2.fromOffset(74, 0)
+			infoCol.BackgroundTransparency = 1
+			infoCol.Parent = middleRow
+
+			local tList = Instance.new("UIListLayout")
+			tList.FillDirection = Enum.FillDirection.Vertical
+			tList.SortOrder = Enum.SortOrder.LayoutOrder
+			tList.Padding = UDim.new(0, 6)
+			tList.Parent = infoCol
+
+			-- Subtitle Archetype (Clean, Bold & Readable: 11.5pt)
+			local tArch = Instance.new("TextLabel")
+			tArch.Name = "ArchetypeLabel"
+			tArch.Size = UDim2.new(1, 0, 0, 18)
+			tArch.BackgroundTransparency = 1
+			tArch.Text = string.upper(meta.faceCount .. " SIDES • " .. meta.archetype)
+			tArch.TextColor3 = Color3.fromRGB(215, 205, 195)
+			tArch.TextSize = 11.5
+			tArch.Font = Enum.Font.GothamBold
+			tArch.TextXAlignment = Enum.TextXAlignment.Left
+			tArch.LayoutOrder = 1
+			tArch.Parent = infoCol
+
+			-- Stat Chips (Void Chance + Peak Multiplier: 11pt GothamBold)
+			local statChipRow = Instance.new("Frame")
+			statChipRow.Name = "StatChipRow"
+			statChipRow.Size = UDim2.new(1, 0, 0, 24)
+			statChipRow.BackgroundTransparency = 1
+			statChipRow.LayoutOrder = 2
+			statChipRow.Parent = infoCol
+
+			local scList = Instance.new("UIListLayout")
+			scList.FillDirection = Enum.FillDirection.Horizontal
+			scList.SortOrder = Enum.SortOrder.LayoutOrder
+			scList.Padding = UDim.new(0, 4)
+			scList.Parent = statChipRow
+
+			local voidChip = Instance.new("TextLabel")
+			voidChip.Name = "VoidChip"
+			voidChip.Size = UDim2.new(0.5, -2, 1, 0)
+			voidChip.BackgroundColor3 = Color3.fromRGB(42, 34, 30)
+			voidChip.BorderSizePixel = 0
+			voidChip.Text = "VOID " .. meta.voidChance
+			voidChip.TextColor3 = Color3.fromRGB(250, 140, 140)
+			voidChip.TextSize = 11
+			voidChip.Font = Enum.Font.GothamBold
+			voidChip.LayoutOrder = 1
+			voidChip.Parent = statChipRow
+
+			local vcCorner = Instance.new("UICorner")
+			vcCorner.CornerRadius = UDim.new(0, 4)
+			vcCorner.Parent = voidChip
+
+			local payChip = Instance.new("TextLabel")
+			payChip.Name = "PayChip"
+			payChip.Size = UDim2.new(0.5, -2, 1, 0)
+			payChip.BackgroundColor3 = Color3.fromRGB(34, 44, 36)
+			payChip.BorderSizePixel = 0
+			payChip.Text = "PEAK " .. meta.payoutMultiplier
+			payChip.TextColor3 = Color3.fromRGB(100, 235, 150)
+			payChip.TextSize = 11
+			payChip.Font = Enum.Font.GothamBold
+			payChip.LayoutOrder = 2
+			payChip.Parent = statChipRow
+
+			local pcCorner = Instance.new("UICorner")
+			pcCorner.CornerRadius = UDim.new(0, 4)
+			pcCorner.Parent = payChip
+
+			-- 3. Bottom Action Button (Full Width, 32px height, 12.5pt GothamBold)
+			local actionBtn = Instance.new("TextButton")
+			actionBtn.Name = "ActionBtn"
+			actionBtn.Size = UDim2.new(1, 0, 0, 32)
+			actionBtn.Position = UDim2.new(0, 0, 1, -32)
+			actionBtn.BorderSizePixel = 0
+			actionBtn.AutoButtonColor = false
+			actionBtn.Text = "LOCKED"
+			actionBtn.TextColor3 = Color3.fromRGB(140, 135, 130)
+			actionBtn.Font = Enum.Font.GothamBold
+			actionBtn.TextSize = 12.5
+			actionBtn.Parent = card
+			cardActionBtns[shapeId] = actionBtn
+
+			local btnCorner = Instance.new("UICorner")
+			btnCorner.CornerRadius = UDim.new(0, 6)
+			btnCorner.Parent = actionBtn
+
+			local clickOverlay = Instance.new("TextButton")
+			clickOverlay.Name = "ClickOverlay"
+			clickOverlay.Size = UDim2.fromScale(1, 1)
+			clickOverlay.BackgroundTransparency = 1
+			clickOverlay.Text = ""
+			clickOverlay.ZIndex = 5
+			clickOverlay.Parent = card
+
+			clickOverlay.MouseButton1Click:Connect(function()
+				inspectShape(shapeId)
+			end)
+		end
+	end
+
+	inspectShape("D6")
+
+	-- 60 FPS Multi-Harmonic Zero-G Kinematics & Turntable Loop
+	local animationActive = false
+	local animConnection: RBXScriptConnection? = nil
+
+	local function startShapesAnimation()
+		if animationActive then return end
+		animationActive = true
+		local elapsed = 0
+
+		animConnection = RunService.RenderStepped:Connect(function(dt: number)
+			if not shapesOverlay.Visible then
+				return
+			end
+			elapsed += math.clamp(dt, 0, 0.05)
+
+			-- Equipped Orbit Chamber Kinematics
+			for _, item in ipairs(orbitItems) do
+				if item.model and item.model.Parent ~= nil then
+					if item.isHeroSingle then
+						local yBob = math.sin(elapsed * 1.3) * 0.18
+						local rotX = math.sin(elapsed * 0.6) * 0.25
+						local rotY = elapsed * 0.70
+						local rotZ = math.cos(elapsed * 0.5) * 0.20
+						item.model:PivotTo(CFrame.new(0, yBob, 0) * CFrame.Angles(rotX, rotY, rotZ))
+					else
+						local driftAngle = math.sin(elapsed * 0.8 + item.phaseX) * 0.16
+						local curAngle = item.baseAngle + (elapsed * item.orbitSpeed) + driftAngle
+						local radBreath = item.radiusX + math.cos(elapsed * 0.65 + item.phaseY) * 0.30
+						local x = radBreath * math.cos(curAngle)
+						local z = radBreath * math.sin(curAngle)
+
+						local y1 = math.sin(elapsed * item.bobFreq1 + item.phase1) * item.bobAmp1
+						local y2 = math.cos(elapsed * item.bobFreq2 + item.phase2) * item.bobAmp2
+						local yBob = y1 + y2 + item.baseHeight
+
+						local rotX = elapsed * item.spinX + math.sin(elapsed * 0.75 + item.phaseX) * 0.5 + item.phaseX
+						local rotY = elapsed * item.spinY + math.cos(elapsed * 0.55 + item.phaseY) * 0.4 + item.phaseY
+						local rotZ = elapsed * item.spinZ + math.sin(elapsed * 1.1 + item.phaseZ) * 0.4 + item.phaseZ
+
+						item.model:PivotTo(CFrame.new(x, yBob, z) * CFrame.Angles(rotX, rotY, rotZ))
+					end
+				end
+			end
+
+			-- Card & Inspector Turntables
+			local cardAngle = elapsed * 0.70
+			for _, cm in ipairs(cardModels) do
+				if cm and cm.Parent ~= nil then
+					cm:PivotTo(CFrame.Angles(0, cardAngle, 0))
+				end
+			end
+
+			if inspectedHeroModel and inspectedHeroModel.Parent ~= nil then
+				inspectedHeroModel:PivotTo(CFrame.Angles(0, cardAngle, 0))
+			end
+		end)
+	end
+
+	local function stopShapesAnimation()
+		animationActive = false
+		if animConnection then
+			animConnection:Disconnect()
+			animConnection = nil
+		end
+	end
+
+	shapesOverlay:GetPropertyChangedSignal("Visible"):Connect(function()
+		if shapesOverlay.Visible then
+			startShapesAnimation()
+		else
+			stopShapesAnimation()
+		end
+	end)
+
+	-- StateSync Dynamic Binding & Network Trigger Logic
+	local function refreshShapes(state: any)
+		if type(state) ~= "table" then return end
+
+		local ownedMap = (state.diamondTree and state.diamondTree.Shapes) or {}
+		local wornMap = (state.diamondTree and state.diamondTree.ShapesEquipped) or {}
+		local currentShape = state.dice and state.dice[1] and state.dice[1].Shape or "D6"
+		local cash = tonumber(state.cash) or 0
+		local diamonds = tonumber(state.diamonds) or 0
+		local switchCost = DiceCatalog.SHAPE_CHANGE_DIAMOND_COST
+		local slots = tonumber(state.dieSlots) or 1
+		local ascensions = tonumber(state.ascensions) or 0
+		local addCost = DiceCatalog.dieSlotCost(slots, ascensions)
+
+		-- Dynamic Orbit Chamber update: STRICTLY EQUIPPED DICE ONLY
+		local equippedDiceList: { string } = {}
+		if type(state.dice) == "table" and #state.dice > 0 then
+			for _, die in ipairs(state.dice) do
+				local sId = if type(die) == "table" and type(die.Shape) == "string" then die.Shape else "D6"
+				table.insert(equippedDiceList, sId)
+			end
+		else
+			table.insert(equippedDiceList, currentShape)
+		end
+
+		local equippedKey = table.concat(equippedDiceList, ",")
+		if equippedKey ~= lastEquippedKey then
+			lastEquippedKey = equippedKey
+			rebuildOrbitChamber(equippedDiceList)
+		end
+
+		-- Update all 12 cards
+		for _, shapeId in ipairs(unlockOrder) do
+			local btn = cardActionBtns[shapeId]
+			local card = cardFrames[shapeId]
+			local stroke = cardStrokes[shapeId]
+			local owned = ownedMap[shapeId] == true or shapeId == "D6" or shapeId == "D2"
+			local isEquipped = (shapeId == currentShape)
+			local cost = DiceCatalog.getUnlockCost(shapeId) or 0
+			local allowed = DiceCatalog.canUnlock(shapeId, ownedMap)
+
+			if btn and card and stroke then
+				if isEquipped then
+					btn.BackgroundColor3 = Color3.fromRGB(56, 44, 28)
+					btn.Text = "[ EQUIPPED SOLID ]"
+					btn.TextColor3 = Color3.fromRGB(245, 240, 235)
+					stroke.Color = Color3.fromRGB(212, 175, 55)
+					stroke.Thickness = 1.8
+				elseif owned then
+					local firstEquip = (wornMap[shapeId] ~= true)
+					if firstEquip then
+						btn.BackgroundColor3 = Color3.fromRGB(30, 62, 40)
+						btn.Text = "EQUIP (FREE)"
+						btn.TextColor3 = Color3.fromRGB(245, 240, 235)
+					else
+						local canAffordDiamonds = (diamonds >= switchCost)
+						btn.BackgroundColor3 = if canAffordDiamonds then Color3.fromRGB(30, 58, 76) else Color3.fromRGB(36, 32, 30)
+						btn.Text = string.format("EQUIP (%d DIAMONDS)", switchCost)
+						btn.TextColor3 = if canAffordDiamonds then Color3.fromRGB(245, 240, 235) else Color3.fromRGB(160, 155, 150)
+					end
+					stroke.Color = Color3.fromRGB(58, 50, 42)
+					stroke.Thickness = 1
+				elseif allowed then
+					local canAffordCash = (cash >= cost)
+					btn.BackgroundColor3 = if canAffordCash then Color3.fromRGB(36, 90, 54) else Color3.fromRGB(44, 38, 34)
+					btn.Text = "UNLOCK $" .. Format.formatNumber(cost)
+					btn.TextColor3 = if canAffordCash then Color3.fromRGB(245, 240, 235) else Color3.fromRGB(180, 175, 170)
+					stroke.Color = if canAffordCash then Color3.fromRGB(74, 222, 128) else Color3.fromRGB(58, 50, 42)
+					stroke.Thickness = 1
+				else
+					local prereq = DiceCatalog.getPrerequisite(shapeId) or "REQ"
+					btn.BackgroundColor3 = Color3.fromRGB(32, 30, 28)
+					btn.Text = "LOCKED (" .. prereq .. ")"
+					btn.TextColor3 = Color3.fromRGB(140, 135, 130)
+					stroke.Color = Color3.fromRGB(44, 38, 32)
+					stroke.Thickness = 1
+				end
+			end
+		end
+
+		-- Update Left Specimen Stage buttons for inspected shape
+		local inspectedOwned = ownedMap[inspectedShapeId] == true or inspectedShapeId == "D6" or inspectedShapeId == "D2"
+		local inspectedEquipped = (inspectedShapeId == currentShape)
+		local inspectedCost = DiceCatalog.getUnlockCost(inspectedShapeId) or 0
+		local inspectedAllowed = DiceCatalog.canUnlock(inspectedShapeId, ownedMap)
+
+		if inspectedEquipped then
+			equipStateBtn.BackgroundColor3 = Color3.fromRGB(56, 44, 28)
+			equipStateBtn.Text = "[ EQUIPPED SOLID ]"
+			equipStateBtn.TextColor3 = Color3.fromRGB(245, 240, 235)
+		elseif inspectedOwned then
+			local firstEquip = (wornMap[inspectedShapeId] ~= true)
+			if firstEquip then
+				equipStateBtn.BackgroundColor3 = Color3.fromRGB(30, 62, 40)
+				equipStateBtn.Text = "EQUIP (FREE)"
+				equipStateBtn.TextColor3 = Color3.fromRGB(245, 240, 235)
+			else
+				local canAffordDiamonds = (diamonds >= switchCost)
+				equipStateBtn.BackgroundColor3 = if canAffordDiamonds then Color3.fromRGB(30, 58, 76) else Color3.fromRGB(36, 32, 30)
+				equipStateBtn.Text = string.format("EQUIP (%d DIAMONDS)", switchCost)
+				equipStateBtn.TextColor3 = if canAffordDiamonds then Color3.fromRGB(245, 240, 235) else Color3.fromRGB(160, 155, 150)
+			end
+		elseif inspectedAllowed then
+			equipStateBtn.BackgroundColor3 = if canAffordCash then Color3.fromRGB(36, 90, 54) else Color3.fromRGB(44, 38, 34)
+			equipStateBtn.Text = "UNLOCK $" .. Format.formatNumber(inspectedCost)
+			equipStateBtn.TextColor3 = if canAffordCash then Color3.fromRGB(245, 240, 235) else Color3.fromRGB(180, 175, 170)
+		else
+			local prereq = DiceCatalog.getPrerequisite(inspectedShapeId) or "REQ"
+			equipStateBtn.BackgroundColor3 = Color3.fromRGB(32, 30, 28)
+			equipStateBtn.Text = "LOCKED (" .. prereq .. ")"
+			equipStateBtn.TextColor3 = Color3.fromRGB(140, 135, 130)
+		end
+
+		if addInstanceBtn then
+			if inspectedOwned then
+				addInstanceBtn.Visible = true
+				if addCost == nil then
+					addInstanceBtn.Text = "MAX DICE REACHED"
+					addInstanceBtn.BackgroundColor3 = Color3.fromRGB(38, 34, 30)
+				else
+					addInstanceBtn.Text = "+1 DIE INSTANCE $" .. Format.formatNumber(addCost)
+					addInstanceBtn.BackgroundColor3 = if cash >= addCost then Color3.fromRGB(36, 76, 48) else Color3.fromRGB(38, 34, 30)
+					addInstanceBtn.TextColor3 = if cash >= addCost then Color3.fromRGB(74, 222, 128) else Color3.fromRGB(160, 155, 150)
+				end
+			else
+				addInstanceBtn.Visible = false
+			end
+		end
+	end
+
+	-- Wire Button Click Handlers to NetClient
+	for _, shapeId in ipairs(unlockOrder) do
+		local btn = cardActionBtns[shapeId]
+		if btn then
+			btn.MouseButton1Click:Connect(function()
+				task.spawn(function()
+					local ctrl = getController()
+					local state = (ctrl and ctrl.lastState)
+					local ownedMap = (state and state.diamondTree and state.diamondTree.Shapes) or {}
+					local owned = (ownedMap[shapeId] == true or shapeId == "D6" or shapeId == "D2")
+					if owned then
+						NetClient.setShape(1, shapeId)
+					else
+						NetClient.buyDiamondNode(shapeId)
+					end
+				end)
+			end)
+		end
+	end
+
+	equipStateBtn.MouseButton1Click:Connect(function()
+		task.spawn(function()
+			local ctrl = getController()
+			local state = (ctrl and ctrl.lastState)
+			local ownedMap = (state and state.diamondTree and state.diamondTree.Shapes) or {}
+			local owned = (ownedMap[inspectedShapeId] == true or inspectedShapeId == "D6" or inspectedShapeId == "D2")
+			if owned then
+				NetClient.setShape(1, inspectedShapeId)
+			else
+				NetClient.buyDiamondNode(inspectedShapeId)
+			end
+		end)
+	end)
+
+	addInstanceBtn.MouseButton1Click:Connect(function()
+		task.spawn(function()
+			NetClient.addDieSlot(inspectedShapeId)
+		end)
+	end)
+
+	return refreshShapes
+end
+
 local function buildQuestsOverlay(screenGui: ScreenGui, overlays: { [string]: Frame }): (any) -> ()
 	local questsOverlay, oldQuestsBody = UITheme.overlay("Daily Quests")
 	questsOverlay.Parent = screenGui
@@ -86,7 +1443,7 @@ local function buildQuestsOverlay(screenGui: ScreenGui, overlays: { [string]: Fr
 			panelStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
 		end
 
-		-- Header Bar (Exact 16px margins)
+		-- Standard Header Bar (Exact 56px height & 14px margins)
 		local header = questsPanelContainer:FindFirstChild("Header") :: Frame?
 		if header then
 			local hList = header:FindFirstChildOfClass("UIListLayout")
@@ -94,8 +1451,8 @@ local function buildQuestsOverlay(screenGui: ScreenGui, overlays: { [string]: Fr
 				hList:Destroy()
 			end
 
-			header.Size = UDim2.new(1, -32, 0, 48)
-			header.Position = UDim2.new(0, 16, 0, 16)
+			header.Size = UDim2.new(1, -28, 0, 56)
+			header.Position = UDim2.new(0, 14, 0, 10)
 			header.BackgroundColor3 = Color3.fromRGB(36, 30, 26)
 			header.BackgroundTransparency = 0
 
@@ -129,10 +1486,10 @@ local function buildQuestsOverlay(screenGui: ScreenGui, overlays: { [string]: Fr
 				if titleFlex then
 					titleFlex:Destroy()
 				end
-				titleLbl.Text = "QUESTS"
+				titleLbl.Text = "~ Quests & Progression ~"
 				titleLbl.TextColor3 = Color3.fromRGB(212, 175, 55)
 				titleLbl.Font = Enum.Font.GothamBold
-				titleLbl.TextSize = 20
+				titleLbl.TextSize = 22
 				titleLbl.TextXAlignment = Enum.TextXAlignment.Left
 				titleLbl.Position = UDim2.new(0, 0, 0, 0)
 				titleLbl.Size = UDim2.new(0.5, 0, 1, 0)
@@ -157,14 +1514,14 @@ local function buildQuestsOverlay(screenGui: ScreenGui, overlays: { [string]: Fr
 
 			local closeBtn = header:FindFirstChild("Close") :: TextButton?
 			if closeBtn then
-				closeBtn.Size = UDim2.new(0, 32, 0, 32)
-				closeBtn.Position = UDim2.new(1, -32, 0.5, -16)
+				closeBtn.Size = UDim2.new(0, 42, 0, 42)
+				closeBtn.Position = UDim2.new(1, -42, 0.5, -21)
 				closeBtn.BackgroundColor3 = Color3.fromRGB(48, 40, 36)
 				closeBtn.BackgroundTransparency = 0
 				closeBtn.TextColor3 = Color3.fromRGB(212, 175, 55)
 				closeBtn.Font = Enum.Font.GothamBold
 				closeBtn.Text = "\u{00D7}"
-				closeBtn.TextSize = 20
+				closeBtn.TextSize = 26
 				closeBtn.TextStrokeTransparency = 1
 
 				local cCorner = closeBtn:FindFirstChildOfClass("UICorner")
@@ -190,11 +1547,11 @@ local function buildQuestsOverlay(screenGui: ScreenGui, overlays: { [string]: Fr
 		end
 	end
 
-	-- Dedicated Non-Clipping Body Container (Exact 16px margins on all 4 sides)
+	-- Dedicated Non-Clipping Body Container (Standardized Size = 1, -28, 1, -80; Position = 0, 14, 0, 72)
 	local questVaultBody = Instance.new("Frame")
 	questVaultBody.Name = "QuestVaultBody"
-	questVaultBody.Size = UDim2.new(1, -32, 1, -92)
-	questVaultBody.Position = UDim2.new(0, 16, 0, 76)
+	questVaultBody.Size = UDim2.new(1, -28, 1, -80)
+	questVaultBody.Position = UDim2.new(0, 14, 0, 72)
 	questVaultBody.BackgroundTransparency = 1
 	questVaultBody.ClipsDescendants = false
 	questVaultBody.Parent = questsPanelContainer or questsOverlay
@@ -1764,451 +3121,10 @@ function V7MenuPanel.new(): V7MenuController
 		end
 	end
 
-	-- 2. SHAPES OVERLAY
-	local shapesOverlay, shapesBody = UITheme.overlay("Dice Shapes")
-	shapesOverlay.Parent = screenGui
-	overlays["shapes"] = shapesOverlay
-
-	-- THE UNLOCK LADDER, drawn from DiceCatalog rather than hardcoded.
-	--
-	-- WHAT WAS HERE BEFORE: three cards -- D4, D6, D20 -- with hand-written
-	-- descriptions carrying FABRICATED statistics ("~33% Void", "~16% Void",
-	-- "~2.5% Void"). Five of the eight shapes were simply absent, there was no
-	-- unlock button, no way to switch, and no connection to what the player
-	-- actually owned. The numbers were also wrong: they described a per-shape
-	-- budget that no longer exists after the FR-6.3 balance fix.
-	--
-	-- Everything below is computed from the shipping catalog and the live
-	-- snapshot, so it cannot drift from the server (L-026).
-	UITheme.verticalStack(shapesBody, UITheme.Scale.SM, UITheme.Scale.LG)
-
-	local shapeCards: { [string]: any } = {}
-
-	-- THE ROTATING PREVIEWS (operator-directed: "maybe can display the dice they
-	-- will be buying with an animation which displays and rotates the dice").
-	--
-	-- Every card owns a ViewportFrame holding the REAL solid the board throws --
-	-- the same `DiceMeshBuilder` output, read and cloned, never rebuilt. This
-	-- code must not touch glyph geometry: the numerals are extruded parts and
-	-- their construction is frozen pending the shearing investigation (L-051).
-	--
-	-- ONE DRIVER FOR ALL OF THEM, and it only runs while the panel is open. A
-	-- RenderStepped connection per card would be a dozen connections spinning
-	-- models nobody is looking at; the loop below allocates nothing per frame
-	-- (roblox_luau skill S5) and disconnects when the overlay closes.
-	local previews: { { model: Model, pivot: CFrame } } = {}
-	local previewConn: RBXScriptConnection? = nil
-
-	local function stopPreviews(): ()
-		if previewConn ~= nil then
-			previewConn:Disconnect()
-			previewConn = nil
-		end
-	end
-
-	local function startPreviews(): ()
-		if previewConn ~= nil or #previews == 0 then
-			return
-		end
-		previewConn = RunService.RenderStepped:Connect(function(dt: number)
-			for _, entry in ipairs(previews) do
-				entry.pivot = entry.pivot * CFrame.Angles(0, dt * 0.9, 0)
-				entry.model:PivotTo(entry.pivot)
-			end
-		end)
-	end
-
-	-- THE DRIVER FOLLOWS THE PANEL'S VISIBILITY, not the code paths that change
-	-- it. Binding start/stop to `openOverlay` and `closeAll` alone missed the
-	-- header's own close button, which `UITheme.overlay` wires internally and
-	-- which simply sets `Visible = false` -- so closing the panel with the X left
-	-- eight invisible models being pivoted every frame for the rest of the
-	-- session, and the `previewConn ~= nil` guard then made reopening a no-op, so
-	-- the leak never healed.
-	--
-	-- Watching the property is what makes this correct for EVERY way the panel
-	-- can be hidden, including ones added later. A visibility-driven resource
-	-- should key off visibility, not off its callers.
-	local function bindPreviewLifecycle(overlay: Frame): ()
-		overlay:GetPropertyChangedSignal("Visible"):Connect(function()
-			if overlay.Visible then
-				startPreviews()
-			else
-				stopPreviews()
-			end
-		end)
-	end
-
-	-- Builds the little turntable for one shape. Returns nil when the shape has
-	-- no source model, which is not an error -- a catalog shape whose builder is
-	-- missing must show an empty frame rather than a stand-in die asserting a
-	-- geometry the player would not actually receive (L-041).
-	local function buildShapePreview(shapeId: string, parent: Instance): ViewportFrame?
-		-- The SAME folder the board renders from, resolved the same way. The
-		-- solids are generated server-side at boot and replicate asynchronously,
-		-- so absent is a legitimate state and not an error.
-		local folder = ReplicatedStorage:FindFirstChild(DICE_SOURCE)
-		if folder == nil or not folder:IsA("Folder") then
-			return nil
-		end
-		local source = folder:FindFirstChild(shapeId)
-		if source == nil or not source:IsA("Model") then
-			return nil
-		end
-
-		local vp = Instance.new("ViewportFrame")
-		vp.Name = "Preview"
-		vp.Size = UDim2.fromOffset(56, 56)
-		vp.BackgroundColor3 = UITheme.Colors.PanelDeep
-		vp.BackgroundTransparency = 0.35
-		vp.BorderSizePixel = 0
-		vp.LayoutOrder = 0
-		vp.ZIndex = 6
-		vp.Parent = parent
-
-		local vpCorner = Instance.new("UICorner")
-		vpCorner.CornerRadius = UDim.new(0, UITheme.Scale.RadiusControl)
-		vpCorner.Parent = vp
-
-		local model = source:Clone()
-
-		-- WITHOUT A PRIMARYPART THE DIE ORBITS INSTEAD OF SPINNING. `PivotTo`
-		-- turns a model about its pivot, and a clone can arrive with PrimaryPart
-		-- unset -- in which case the pivot is the bounding-box centre and the
-		-- turntable becomes a die swinging around an empty point. The builder
-		-- leaves an invisible `Pivot` part at the centroid for this.
-		if model.PrimaryPart == nil then
-			local pivot = model:FindFirstChild("Pivot")
-			if pivot ~= nil and pivot:IsA("BasePart") then
-				model.PrimaryPart = pivot
-			end
-		end
-
-		-- PIVOT BEFORE PARENT. A clone sits at its authored origin and renders on
-		-- the frame it is parented, so parenting first shows it wherever it
-		-- happens to be for one frame (L-052).
-		model:PivotTo(CFrame.new(0, 0, 0))
-		model.Parent = vp
-
-		local cam = Instance.new("Camera")
-		local _, size = model:GetBoundingBox()
-
-		-- FRAMED FROM THE BOUNDING SPHERE, NOT THE AXIS-ALIGNED EXTENT.
-		--
-		-- Extent is the wrong measure for a spinning object, and the D6 proved
-		-- it: the operator reported it "too huge compared to the rest".
-		-- Measured across all twelve solids, every bounding SPHERE is exactly
-		-- 3.00 -- the builder normalises them -- while the axis-aligned extents
-		-- range from 2.76 to 5.01. A cube's widest axis is its EDGE; a
-		-- polyhedron's is its long diagonal, so the same physical size reports
-		-- very differently. Framing on extent pulled the D6's camera 44% closer
-		-- than the D20's and made it apparent-size 1.21 against everything
-		-- else's ~0.68.
-		--
-		-- The sphere is also what the eye actually reads, because a rotating die
-		-- presents every orientation in turn -- so the silhouette the viewer
-		-- integrates is the sphere, not whichever axis happens to face front.
-		-- Same reasoning as `measureRadius` in DiceRenderer (L-029).
-		local centre = model:GetPivot().Position
-		local sphere = 0
-		for _, d in ipairs(model:GetDescendants()) do
-			if d:IsA("BasePart") and d.Name ~= "Pivot" then
-				local r = (d.Position - centre).Magnitude + d.Size.Magnitude * 0.5
-				if r > sphere then
-					sphere = r
-				end
-			end
-		end
-		-- Falls back to the extent if a model somehow has no measurable parts,
-		-- so a preview is never framed at distance zero.
-		if sphere <= 0 then
-			sphere = math.max(size.X, size.Y, size.Z) * 0.5
-		end
-		-- 2.9x rather than 3.6x. The multiplier was tuned against extents that
-		-- averaged ~4.8, and a sphere of 3.0 is a smaller number for the same
-		-- physical die -- so keeping 3.6 would have made every preview uniformly
-		-- correct and uniformly too small. This restores the framing the good
-		-- tiles already had, now applied to all twelve equally.
-		local distance = math.max(2.2, sphere * 2.9)
-
-		-- THE ELEVATION FOLLOWS THE SHAPE'S FLATNESS.
-		--
-		-- One fixed angle suited the chunky solids and failed the flat ones: the
-		-- D2 is a coin, and viewed from a low angle it presented its EDGE -- a
-		-- gold sliver that reads as a bar, not a die. Its numbered face, the whole
-		-- point of the preview, was pointing away from the camera.
-		--
-		-- `flatness` is the ratio of the thinnest axis to the widest: about 1.0
-		-- for a D20 and near 0.2 for the coin. Flat shapes get a steeper, more
-		-- top-down camera so their face is what the player sees; round ones keep
-		-- the three-quarter view that shows a die's corners best.
-		local thinnest = math.min(size.X, size.Y, size.Z)
-		local widest = math.max(size.X, size.Y, size.Z)
-		local flatness = if widest > 0 then thinnest / widest else 1
-		-- 0.42 of the distance at flatness 1 (three-quarter), rising toward 1.35
-		-- (steeply overhead) as the solid approaches a disc.
-		local elevation = 0.42 + (1 - math.clamp(flatness, 0, 1)) * 0.93
-		local ground = math.max(0.18, 1 - (1 - math.clamp(flatness, 0, 1)) * 0.72)
-
-		cam.CFrame = CFrame.new(
-			Vector3.new(distance * 0.55 * ground, distance * elevation, distance * 0.72 * ground),
-			Vector3.new(0, 0, 0))
-		cam.FieldOfView = 40
-		cam.Parent = vp
-		vp.CurrentCamera = cam
-
-		table.insert(previews, { model = model, pivot = CFrame.new(0, 0, 0) })
-		return vp
-	end
-
-	-- Server refusal codes rendered as sentences. The server sends an enumerated
-	-- code and never prose (NFR-5, T-7), so the wording lives here.
-	local SHAPE_REFUSAL: { [string]: string } = {
-		insufficient_funds = string.format("Needs %d diamonds",
-			DiceCatalog.SHAPE_CHANGE_DIAMOND_COST),
-		not_unlocked = "Unlock the shape before it",
-		invalid_request = "Cannot switch to that",
-		profile_unavailable = "Still loading -- try again",
-		rate_limited = "Slow down a moment",
-		throttled = "Slow down a moment",
-	}
-
-	-- Refusals specific to buying ANOTHER die of a shape, which fails for
-	-- different reasons than switching to one.
-	local ADD_DIE_REFUSAL: { [string]: string } = {
-		insufficient_funds = "Not enough Cash",
-		invalid_request = "At your die limit -- ascend to raise it",
-		not_unlocked = "Unlock this shape first",
-		profile_unavailable = "Still loading -- try again",
-		rate_limited = "Slow down a moment",
-		throttled = "Slow down a moment",
-	}
-
-	for rung, shapeId in ipairs(DiceCatalog.getUnlockOrder()) do
-		local def = DiceCatalog.getShape(shapeId)
-		if def ~= nil then
-			-- THE CARD IS NOW A LAID-OUT ROW, and that is the whole fix for this
-			-- panel. Previously the status label spanned x 0.44-0.66 while the
-			-- action button began at x 0.585 -- a hard 7.5% overlap, which is why
-			-- the operator's screenshot shows "OWNED" printed straight through
-			-- "USE 5<>". Two hand-picked fractions collided and nothing in the code
-			-- could notice. Here the preview, the text and the actions are three
-			-- tracks of one horizontal layout, so they cannot overlap whatever the
-			-- text turns out to say.
-			local card, content = UITheme.card(UITheme.Scale.RowHeight)
-			card.Name = "Shape_" .. shapeId
-			card.LayoutOrder = rung
-			card.Parent = shapesBody
-
-			local row, textCol, actions = UITheme.listRow(
-				UITheme.Scale.RowHeight - UITheme.Scale.SM * 2)
-			row.Parent = content
-
-			-- The turntable leads the row, so the player sees the die before the
-			-- words describing it.
-			local preview = buildShapePreview(shapeId, row)
-			if preview ~= nil then
-				preview.LayoutOrder = 0
-			end
-
-			local title = UITheme.textLine(
-				string.format("%s   %d faces", shapeId, def.faceCount),
-				UITheme.Scale.TextHeading, UITheme.Colors.TextGold, UITheme.FontHeading)
-			title.LayoutOrder = 1
-			title.Parent = textCol
-
-			-- The honest character line. Fewer faces means the same mass sits on
-			-- fewer of them, so payouts spike and Voids are frequent; more faces
-			-- means the reverse. This is a DESCRIPTION of the trade, never a
-			-- ranking -- the balance sweep shows low face counts genuinely win at
-			-- low Streak Strength.
-			local character: string
-			if def.faceCount <= 3 then
-				character = "Sniper - huge spikes, frequent Voids"
-			elseif def.faceCount <= 8 then
-				character = "Balanced - moderate spikes and Voids"
-			else
-				character = "Grinder - steady income, rare Voids"
-			end
-			local sub = UITheme.textLine(character, UITheme.Scale.TextSmall,
-				UITheme.Colors.TextDim)
-			sub.LayoutOrder = 2
-			sub.Parent = textCol
-
-			-- STATE AS A CHIP, not as loose coloured text beside a button. The
-			-- refusal messages land here too, which is why it is a pill rather
-			-- than a bare word: a sentence in a chip still reads as status.
-			local status = UITheme.statusPill("", UITheme.Colors.TextDim)
-			status.Name = "Status"
-			status.LayoutOrder = 1
-			status.Parent = actions
-
-			local btn = UITheme.actionButton("", "secondary", UITheme.Colors.Cash)
-			btn.Name = "Use"
-			btn.LayoutOrder = 2
-			btn.Parent = actions
-
-			-- BUY ANOTHER DIE OF THIS SHAPE (operator decision, 2026-08-13: "in
-			-- shape we need to add options to buy multiple of the same dice - this
-			-- helps progression").
-			--
-			-- Deliberately NOT a schema change. Ownership stays a boolean per
-			-- shape; what a repeat purchase buys is another DIE on the board. The
-			-- alternative -- turning `Diamond.Shapes` into counts -- would have
-			-- meant migrating every live profile to represent something the player
-			-- cannot see, since what they actually want is more dice.
-			--
-			-- Shares the SLOT price curve and the ascension cap rather than having
-			-- its own: "buy a second D6" and "buy one more die" are the same
-			-- transaction, and two price tables would drift (L-025).
-			local addBtn = UITheme.actionButton("", "primary", UITheme.Colors.Positive)
-			addBtn.Name = "AddDie"
-			addBtn.Visible = false
-			addBtn.LayoutOrder = 3
-			addBtn.Parent = actions
-
-			UITheme.onPressed(addBtn, function()
-				local entry = shapeCards[shapeId]
-				UITheme.setActionEnabled(addBtn, false)
-				task.spawn(function()
-					local result = NetClient.addDieSlot(shapeId)
-					if not result.ok and entry ~= nil then
-						UITheme.setPill(entry.status,
-							ADD_DIE_REFUSAL[tostring(result.reason)]
-								or "Cannot add a die right now.",
-							UITheme.Colors.Negative)
-					end
-					UITheme.setActionEnabled(addBtn, true)
-				end)
-			end)
-
-			UITheme.onPressed(btn, function()
-				local entry = shapeCards[shapeId]
-				local owned = entry and entry.owned
-				UITheme.setActionEnabled(btn, false)
-				task.spawn(function()
-					local result
-					if owned then
-						-- Switching costs Diamonds and is freely reversible (FR-6.1).
-						result = NetClient.setShape(1, shapeId)
-					else
-						-- Unlock. BuyDiamondNode carries shape ids too; the server
-						-- prices them in Cash and enforces the ladder order.
-						result = NetClient.buyDiamondNode(shapeId)
-					end
-					-- A REFUSAL HAS TO SHOW. Pressing USE with too few Diamonds used
-					-- to do nothing at all: no movement, no message, no clue. The
-					-- next snapshot repaints the row, so this note is transient by
-					-- construction and cannot linger as a stale claim.
-					if not result.ok and entry ~= nil then
-						UITheme.setPill(entry.status,
-							SHAPE_REFUSAL[tostring(result.reason)] or "Not right now.",
-							UITheme.Colors.Negative)
-					end
-					UITheme.setActionEnabled(btn, true)
-				end)
-			end)
-
-			shapeCards[shapeId] = {
-				card = card, status = status, button = btn,
-				addButton = addBtn,
-				owned = false, rung = rung,
-			}
-		end
-	end
-
-	-- Bound AFTER the cards exist, so the first reveal has previews to drive.
-	bindPreviewLifecycle(shapesOverlay)
-
-	-- Redraws every rung from a snapshot. Called on each StateSync, so the panel
-	-- is correct whether it is open or not.
-	local function refreshShapes(state: any)
-		if type(state) ~= "table" then
-			return
-		end
-		local ownedMap = (state.diamondTree and state.diamondTree.Shapes) or {}
-		local wornMap = (state.diamondTree and state.diamondTree.ShapesEquipped) or {}
-		local currentShape = state.dice and state.dice[1] and state.dice[1].Shape
-		local cash = tonumber(state.cash) or 0
-		local diamonds = tonumber(state.diamonds) or 0
-		local switchCost = DiceCatalog.SHAPE_CHANGE_DIAMOND_COST
-
-		-- Buying another die of an owned shape uses the SLOT price and the SLOT
-		-- cap, so the figures here are the same ones the SLOTS panel shows.
-		local slots = tonumber(state.dieSlots) or 1
-		local ascensions = tonumber(state.ascensions) or 0
-		local addCost = DiceCatalog.dieSlotCost(slots, ascensions)
-
-		for shapeId, entry in pairs(shapeCards) do
-			local owned = ownedMap[shapeId] == true
-
-			-- The +1 DIE button appears only on shapes the player OWNS, since the
-			-- server refuses a shape they have not unlocked.
-			if entry.addButton ~= nil then
-				entry.addButton.Visible = owned
-				if owned then
-					if addCost == nil then
-						-- At the die limit. Shown rather than hidden, so the ceiling
-						-- is legible and the player knows ascending raises it.
-						entry.addButton.Text = "MAX"
-						UITheme.setActionEnabled(entry.addButton, false)
-					else
-						entry.addButton.Text = "+1 die   $" .. Format.formatNumber(addCost)
-						UITheme.setActionEnabled(entry.addButton, cash >= addCost)
-					end
-				end
-			end
-			entry.owned = owned
-			local cost = DiceCatalog.getUnlockCost(shapeId) or 0
-			local allowed = DiceCatalog.canUnlock(shapeId, ownedMap)
-
-			if shapeId == currentShape then
-				UITheme.setPill(entry.status, "IN USE", UITheme.Colors.TextGold)
-				entry.button.Text = "Equipped"
-				UITheme.setActionEnabled(entry.button, false)
-			elseif owned then
-				-- THE SWITCH PRICE, ON THE BUTTON.
-				--
-				-- This read "OWNED" and "USE" with no mention of a cost. FR-6.1
-				-- charges Diamonds to change shape, so a player who owned D3 and
-				-- had no Diamonds pressed USE and watched nothing happen -- the
-				-- server refused, correctly, and the panel had never said there was
-				-- a price to refuse over.
-				--
-				-- FIRST EQUIP IS FREE, so the label has to distinguish the two
-				-- cases. `ShapesEquipped` comes from the snapshot rather than being
-				-- inferred from ownership, because "bought" and "has been worn" are
-				-- genuinely different facts and only the server knows the second.
-				local firstEquip = wornMap[shapeId] ~= true
-				if firstEquip then
-					UITheme.setPill(entry.status, "Owned", UITheme.Colors.Positive)
-					entry.button.Text = "Equip - free"
-					UITheme.setActionEnabled(entry.button, true)
-				else
-					local affordable = diamonds >= switchCost
-					UITheme.setPill(entry.status, "Owned",
-						if affordable then UITheme.Colors.Positive else UITheme.Colors.TextDim)
-					entry.button.Text = string.format("Equip   %d\u{2666}", switchCost)
-					UITheme.setActionEnabled(entry.button, affordable)
-				end
-			elseif allowed then
-				-- The next rung. Affordability decides whether it is pressable,
-				-- but the price is shown either way so the goal is visible.
-				UITheme.setPill(entry.status, "$" .. Format.formatNumber(cost),
-					if cash >= cost then UITheme.Colors.Positive else UITheme.Colors.TextDim)
-				entry.button.Text = "Unlock"
-				UITheme.setActionEnabled(entry.button, cash >= cost)
-			else
-				-- Locked behind an earlier rung. Naming the prerequisite is what
-				-- turns a wall into a goal.
-				local prereq = DiceCatalog.getPrerequisite(shapeId)
-				UITheme.setPill(entry.status, "Needs " .. tostring(prereq),
-					UITheme.Colors.TextDim)
-				entry.button.Text = "Locked"
-				UITheme.setActionEnabled(entry.button, false)
-			end
-		end
-	end
+	-- 2. SHAPES OVERLAY (Approved 2-Column Dual-Stage + Toolroom Rack Architecture)
+	local refreshShapes = buildShapesOverlay(screenGui, overlays, function()
+		return controller
+	end)
 
 	-- 3. LEADERBOARD OVERLAY
 	local boardsOverlay, boardsBody = UITheme.overlay("Leaderboards")

@@ -981,7 +981,7 @@ local function buildD14(scale: number, color: Color3): Model
 	return model
 end
 
--- 11. D16 Octagonal Bipyramid [FIXED]
+-- 11. D16 Octagonal Bipyramid [FIXED: Jitter-Free & Perfectly Inlaid]
 local function buildD16(scale: number, color: Color3): Model
 	local s = scale
 	local h = s * 1.30
@@ -1006,25 +1006,20 @@ local function buildD16(scale: number, color: Color3): Model
 		table.insert(faces, { 2, 2 + nxt, 2 + i })
 	end
 
-	local model, centroids, normals = buildChamferedSolid("D16", verts, faces, color, 0.16)
-	local baseRatio = 0.25
+	local model, centroids, normals = buildChamferedSolid("D16", verts, faces, color, 0.06)
 	for i = 1, 8 do
-		local nxt = if i == 8 then 1 else i + 1
-		local baseMid = (ring[i] + ring[nxt]) / 2
-		local c = baseMid * (1 - baseRatio) + topApex * baseRatio
+		local c = centroids[i]
 		local n = normals[i]
 		local tempUp = (topApex - c).Unit
 		local up = (tempUp - n * tempUp:Dot(n)).Unit
-		addEngravedFaceNumeral(c, n, tostring(i), model, scale * 0.95, up)
+		addEngravedFaceNumeral(c, n, tostring(i), model, scale * 0.65, up)
 	end
 	for i = 1, 8 do
-		local nxt = if i == 8 then 1 else i + 1
-		local baseMid = (ring[i] + ring[nxt]) / 2
-		local c = baseMid * (1 - baseRatio) + botApex * baseRatio
+		local c = centroids[8 + i]
 		local n = normals[8 + i]
 		local tempUp = (botApex - c).Unit
 		local up = (tempUp - n * tempUp:Dot(n)).Unit
-		addEngravedFaceNumeral(c, n, tostring(i + 8), model, scale * 0.95, up)
+		addEngravedFaceNumeral(c, n, tostring(i + 8), model, scale * 0.65, up)
 	end
 	return model
 end

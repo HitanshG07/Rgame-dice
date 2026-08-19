@@ -36,9 +36,10 @@ Rejections are appended to the active task's line AT REJECTION TIME (circuit-bre
 - [2026-08-17] settings-options-ui-redesign | PRODUCTION | lane: full | rejections: none | none | **DELIVERED.** Settings & Options UI redesign in `src/Client/V7MenuPanel.luau`, Casino Ledger aesthetics, custom toggle switches, symmetric 16px margins, audio/perf options wired.
 - [2026-08-18] sovereign-vault-ascension-redesign | PRODUCTION | lane: full | rejections: none | none | **DELIVERED.** Sovereign Ascension Vault Master UI in `src/Client/V7MenuPanel.luau`, 48/52 two-column density, recessed projections pod (176px), non-clipping frame architecture (L-060), 100% live Studio verified.
 - [2026-08-19] quests-progression-ui-redesign | PRODUCTION | lane: full | rejections: none | none | **DELIVERED.** Dual-Column Quests & Progression UI in `src/Client/V7MenuPanel.luau`, 58% Quests / 42% Progression Stack (60% Playtime Rewards with 6 tiers + 40% Daily Login 3x2 matrix & Day 7 Grand Finale), 16px symmetrical perimeter margins, top-level helper encapsulation (L-061: Luau 200 register limit), responsive shell parity (L-062), 100% live Studio verified.
+- [2026-08-20] dice-shapes-and-specimen-redesign | PRODUCTION | lane: full | rejections: none | none | **DELIVERED.** Dice Shapes & Master Catalog UI redesign in `src/Client/V7MenuPanel.luau`, Option 4 Cozy Mocha/Gold theme, universal 900x620.83px modal shell parity across all 6 panels (L-062), 42/58 split (Equipped loadout orbit ring + redesigned horizontal Display | Stats telemetry stage with non-colliding two-tier caliper rows), 2-column milled toolroom rack, per-shape visual scale normalization lookup tables for all 12 polyhedra (D2–D20, L-063), 100% Studio verified.
 
 ## RUNNING TALLIES
-- Total pipeline runs: 16 (one superseded, one disputed, one breaker-halted then reset and delivered)
+- Total pipeline runs: 17 (one superseded, one disputed, one breaker-halted then reset and delivered)
 - Rejections by gate: G2: 3 | G3: 6 | G4: 1 | G5: 0 | G6 vetoes: 0
 - **Breaker trips: 1** (dice-forge-block3-services, 2026-08-07 — and it was BREACHED before being noticed, because the scoreboard line that arms it was never written. The persistence rule failed exactly where it was designed to hold: across a context compaction.)
 - Most recurrent defect classes, measured:
