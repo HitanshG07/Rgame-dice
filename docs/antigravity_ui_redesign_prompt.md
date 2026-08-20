@@ -1,8 +1,10 @@
 # Antigravity prompt — UI redesign as a comparable mock preview
 
-Paste everything below the line. Replace `<<PANEL>>` with the panel you want
-reworked (e.g. `SHOP`, `SHAPES`, `FORGE`, `VAULT`, `ASCEND`, `QUESTS`,
-`BOARDS`, `SETTINGS`, `SLOTS`, or `HUD`).
+**Maintained:** 2026-08-21. Check the STATUS REGISTER below against `git log`
+before each run; a stale register is how a finished panel gets redesigned twice.
+
+Paste everything below the line, having first replaced `<<PANEL>>` in the
+"THE PANEL" section with one panel drawn from the NOT STARTED list.
 
 ---
 
@@ -11,13 +13,48 @@ You are redesigning ONE panel of a Roblox game called Dice Forge, as a
 
 ## THE PANEL
 
-AS THE USER WHICH ONE THEY WOULD LIKE TO TOUCH FIRST 
+Redesign: `<<PANEL>>`
+
+Do not ask which panel to work on, and do not choose one yourself. The operator
+has already picked it and written it above. If `<<PANEL>>` is still literally
+`<<PANEL>>`, or names a panel the register below marks DONE, STOP and say so —
+do not substitute your own choice.
+
+## STATUS REGISTER — WHAT IS ALREADY DONE
+
+Three panels have completed the full mock → port cycle and are LIVE. **They are
+finished. Do not redesign them, do not offer to, do not "harmonise" them with
+your new work, and do not touch their code.**
+
+| Panel | Status | Landed |
+|---|---|---|
+| ASCEND — The Sovereign Ascension Vault | **DONE, live** | `0af794b` |
+| QUESTS — dual-column, 60/40 progression | **DONE, live** | `0af794b` |
+| SHAPES — specimen stage + 12-dice scaling | **DONE, live** | `c3cd0c8` |
+| SHOP | NOT STARTED | — |
+| SETTINGS | NOT STARTED | — |
+| VAULT | NOT STARTED | — |
+| BOARDS | NOT STARTED | — |
+| SLOTS | NOT STARTED | — |
+| FORGE | NOT STARTED | — |
+| HUD | NOT STARTED | — |
+
+The three DONE panels are still worth READING — they are the house style your
+variants should feel native beside. `SPECIMEN_SCALE_MAP` and
+`RACK_CARD_SCALE_MAP` (V7MenuPanel around line 505) and the Sovereign Ascension
+Vault (around line 3318) are the current quality bar. Read them; do not edit
+them.
+
+SLOTS was mocked once in an earlier run and the operator abandoned those
+variants. It is genuinely NOT STARTED — treat any `Slots_Variant_*.png` in
+`screenshots/` as a dead end, not as prior art to build on.
 
 ## READ THIS FIRST — WHAT WENT WRONG LAST TIME
 
-A previous run of this prompt produced good-looking panels and broke the
-game. Every item below actually happened and cost hours to find. Do not
-repeat them.
+Every item below actually happened in this repository and cost hours to find.
+Items 1–6 come from the run that broke the game; items 7–11 come from the three
+successful ports and are logged in `.brain/LEDGER.md` as L-060 through L-064. Do
+not repeat any of them.
 
 1. **It edited `V7MenuPanel.luau` directly** despite the rule below saying not
    to. 705 insertions, 297 deletions, straight into the live file.
@@ -41,22 +78,79 @@ repeat them.
    (`rbxassetid://1786801062`) and wired an ImageLabel to it. Verified in
    Studio: the ID behaves exactly like a junk ID while a real control image
    loads. The settings button rendered blank.
+7. **It put bordered cards inside a `ScrollingFrame` and lost 1px of every
+   border** (L-060). `UITheme.overlay()` returns a `ScrollingFrame` body, and a
+   `ScrollingFrame` forces `ClipsDescendants = true` at engine level — it cannot
+   be turned off. A `UIStroke` with `ApplyStrokeMode.Border` centres on the edge,
+   so its outer half falls outside the frame and is clipped away. Three attempts
+   at padding and rescaling failed before the cause was found. For a modal that
+   does not actually need to scroll, host the cards in a plain `Frame` with
+   `ClipsDescendants = false` and explicit margins instead.
+8. **It hit the Luau compiler's 200-register limit** (L-061). Building a dense
+   overlay inline inside `V7MenuPanel.new()` raised `Out of local registers:
+   exceeded limit 200` — that limit counts locals, temporaries and upvalues per
+   function frame, and eight modal builders in one function blows past it. Put
+   each overlay in its own module-scope helper function.
+9. **It froze a modal at `UDim2.new(0, 920, 0, 580)`** and the panel came out
+   40–60px shorter than every other overlay (L-062). Real overlays are
+   responsive — `UDim2.new(0.86, 0, 0.86, -137.6)` with a `UISizeConstraint`
+   capped at 900x1100 — so on a tall screen they grow to 622px+ while the
+   hardcoded one stays at 580. Never override `Panel.Size` with pixel constants.
+10. **It scaled the D6 off the edge of its own viewport** (L-063). `GetBoundingBox`
+    is axis-aligned, so the cube reports its 2.76-stud SIDE even though its own
+    diagonal is 4.78 studs, while higher polyhedra report AABBs of ~4.8–5.0
+    studs. Dividing by `maxDim` therefore computed `scale / 2.76` for the D6
+    against `scale / 4.84` for the D20 — scaling the cube 1.77x too large and
+    blowing it out of the frustum. Per-shape scale tables fixed it. If your mock
+    renders dice, reuse `SPECIMEN_SCALE_MAP` / `RACK_CARD_SCALE_MAP` rather than
+    computing your own.
+11. **It stacked a 3D viewport above four telemetry rows and squeezed the
+    viewport to 68px**, with percentage labels colliding with their own progress
+    bars (L-064). A metric name, a bar and a value do not fit on one row under
+    ~200px wide. Split display and stats horizontally, and put each metric's
+    label/value on one tier with its bar on the tier below.
 
-The theme running through all six: **the visual layer was rebuilt and the wiring
-behind it was not re-checked.** A panel that looks right and receives no data is
-worse than an ugly one, because nothing announces the failure.
+The theme running through 1–6: **the visual layer was rebuilt and the wiring
+behind it was not re-checked.** The theme running through 7–11: **a value that
+was correct in isolation was wrong in the container it landed in.** A panel that
+looks right and receives no data is worse than an ugly one, because nothing
+announces the failure.
 
-## HARD RULE — YOU MODIFY NO EXISTING FILE
+## HARD RULE — YOU MODIFY EXACTLY ONE SOURCE FILE
 
-This is a preview, not an implementation. You may create exactly ONE new file:
+This is a preview, not an implementation. You may write to exactly one source
+path:
 
     src/Client/UIMockPreview.luau
+
+**That file already exists and is tracked in git** — it currently holds the mock
+from the last panel that went through this process. **Overwrite it wholesale**
+with your three variants for `<<PANEL>>`. Do not append to it, do not preserve
+the previous panel's variants alongside yours, and do not create a second mock
+file. The old contents are safe in git history; the operator does not need them
+on disk.
+
+**The one sanctioned exception is image output.** You will also save three new
+screenshots into `screenshots/` as required by the deliverable. Those are
+capture artefacts, not source, and they are the only other paths you may create.
+Nothing else — no new modules, no config, no notes files, no edits to anything
+that already exists on disk apart from `UIMockPreview.luau` itself.
+
+So the complete, exhaustive list of paths you may write is:
+
+    src/Client/UIMockPreview.luau      (overwrite)
+    screenshots/<Panel>_Variant_A.png  (create)
+    screenshots/<Panel>_Variant_B.png  (create)
+    screenshots/<Panel>_Variant_C.png  (create)
+
+If you find yourself wanting to write a fifth path, that is the signal to STOP
+and say so instead.
 
 You may NOT edit, refactor, or "improve" anything else. Specifically off limits:
 `src/Client/UITheme.luau`, `src/Client/V7HUD.luau`, `src/Client/V7MenuPanel.luau`,
 `src/Client/V7ForgePanel.luau`, `src/Client/ClientBootstrap.client.luau`,
 `src/Shared/**`, `src/Server/**`, `tests/**`, `default.project.json`, anything
-in `.brain/`.
+in `.brain/`, anything in `docs/`.
 
 If you believe a change outside that one file is required, STOP and say so
 instead of making it. A preview that quietly edits the live UI is worse than no
@@ -109,7 +203,7 @@ drawn, not wired. This previews appearance only.
 
 ## MAKE IT NOT LOOK AI-GENERATED
 
-The operator's exact complaint about the current UI: *"it has emojis and
+The operator's exact complaint about the original UI: *"it has emojis and
 everything making it look as if it was made by an ai, and not a proper
 developer."* That is the bar you are clearing.
 
@@ -134,6 +228,9 @@ exploring (pick three, or better ones):
   a printed betting sheet.
 - **Brutalist data** — heavy type, no rounding, stark hierarchy, numbers as
   the loudest thing on screen.
+
+The three panels already shipped landed in this territory, and your variants
+should look like they belong in the same product. Study them before you start.
 
 **Non-negotiable quality floors** (these come from the project's own UI rules
 in `.brain/skills/ui_ux_design.md` — read it):
@@ -167,8 +264,8 @@ specification, not a mood board.
   has it too, worded identically. Do not simplify for the preview and assume the
   detail gets added later — it will not, because nobody will know it was missing.
 - **Show EVERY state, not just the happy one.** The single largest source of
-  breakage last time was states that only exist at runtime. For each panel, the
-  mock must show at minimum: owned / not owned, affordable / unaffordable,
+  breakage was states that only exist at runtime. For each panel, the mock must
+  show at minimum: owned / not owned, affordable / unaffordable,
   locked-with-reason, and empty. Put them on different rows of the same variant
   so they can be compared at a glance.
 - **Name your elements the same as the live ones** (`Item_<key>`, `Setting_<key>`,
@@ -179,7 +276,7 @@ specification, not a mood board.
 ## DO NOT BREAK THE GAME — THE WIRING RULES
 
 You are not touching live code, so you cannot break it directly. But your design
-will be ported, and these are the traps that broke it last time. Design so the
+will be ported, and these are the traps that broke it before. Design so the
 port cannot hit them:
 
 - **Do not invent a control the theme cannot already express.** If you replace a
@@ -200,6 +297,10 @@ port cannot hit them:
   their canvas equals the visible screen and a 0.5/0.5 centre is genuinely
   centred. Setting it true starts the canvas 58px above the screen and no
   arithmetic correction fixes it cleanly — four were tried.
+- **Inherit the modal's responsive size.** `UITheme.overlay()` sizes panels at
+  `0.86` scale under a `UISizeConstraint`. Design your variants to fill whatever
+  that yields, and size internal bands fractionally, so the panel scales as one
+  piece. A pixel-locked child inside a scaling parent is defect 9 above.
 
 ## UNIFORMITY IS A REQUIREMENT, NOT A STYLE NOTE
 
@@ -231,10 +332,23 @@ Within one variant, elements of the same kind must be identical in structure:
 
 ## TECHNICAL CONSTRAINTS
 
-- `--!strict` at the top. Roblox Script Analysis must report **zero errors and
-  zero warnings** — the project is currently at zero and must stay there.
+- `--!strict` at the top.
+- **Roblox Script Analysis currently reports 158 warnings across roughly 20
+  files.** That is a known, recorded debt being worked separately — it is NOT
+  your licence to add more. Your file must contribute **zero new errors and zero
+  new warnings**. Count the warnings before you start and after you finish, and
+  report both numbers. If the count went up, every one of the new warnings will
+  be inside `UIMockPreview.luau`, and you fix them THERE before reporting done.
+  Do not attempt to fix the pre-existing 158. They are out of your scope, and
+  they are being worked separately. Some of them sit in files not named on the
+  off-limits list — that is NOT an invitation. The four-path list above is
+  exhaustive and overrides any reasoning of the form "this file was not
+  forbidden, so I may edit it."
 - A type annotation on a table-field assignment is a SYNTAX error in Luau
   (`Module.Foo: number = 1`). Annotate locals only.
+- Keep each variant's builder in its own module-scope function. A single
+  function that builds all three will exceed Luau's 200-register limit — that is
+  defect 8 above, and it is a hard compiler error, not a warning.
 - Verify every `Enum` symbol you use exists. An invalid one fails module load
   silently.
 - No `require` cycles. Do not require any `src/Server/**` module.
@@ -249,6 +363,10 @@ Within one variant, elements of the same kind must be identical in structure:
   it never truncates while its text spills over the control beneath it. If you
   verify layout, test element RECTANGLES against their container and against
   the siblings they must not overlap.
+- **`ScrollingFrame` clips unconditionally.** If your variant puts stroked cards
+  near the edge of the overlay body, they will lose a pixel of border and no
+  amount of padding will bring it back. Use a plain `Frame` with
+  `ClipsDescendants = false` for non-scrolling content — defect 7 above.
 
 ## HOW TO SHOW IT TO ME
 
@@ -259,21 +377,27 @@ and tell me that line. Something like:
 
 ## DELIVERABLE
 
-1. The single new file.
+1. The overwritten `src/Client/UIMockPreview.luau`.
 2. The one-line command to display it.
-3. A screenshot of each of the three variants.
+3. A screenshot of each of the three variants, saved into `screenshots/` as
+   `<Panel>_Variant_A.png` / `_B` / `_C`.
 4. Two or three sentences per variant on what design idea it is testing and
    what you think its weakness is.
-5. **A PORTING NOTE for the variant you think is strongest**, covering:
+5. **The Script Analysis warning count before and after your change**, stated as
+   two numbers. If the after-count exceeds the before-count, the new warnings are
+   in your file and you fix them there before reporting done.
+6. **A PORTING NOTE for the variant you think is strongest**, covering:
    - every existing element it REPLACES rather than restyles, and for each, the
      helper functions that drive it today (`setEnabled`, `setButtonText`,
      `setPill`, `toggle`) which would need a replacement;
    - every state it shows and every state it does NOT;
    - any figure it displays and which catalog that figure comes from.
    This is what stops the port from looking right and doing nothing.
-6. **Confirmation that you modified no existing file**, as the literal output of
-   `git status --porcelain`. If it lists anything other than your one new file,
-   say so at the top of your report rather than leaving it to be discovered.
+7. **Confirmation of exactly what you modified**, as the literal output of
+   `git status --porcelain`. It should list `src/Client/UIMockPreview.luau` as
+   modified plus your three new screenshots, and nothing else. If it lists
+   anything else, say so at the top of your report rather than leaving it to be
+   discovered.
 
 Report what you actually built and verified. If something did not work, say so
 plainly rather than describing the intent as though it succeeded. A report that
