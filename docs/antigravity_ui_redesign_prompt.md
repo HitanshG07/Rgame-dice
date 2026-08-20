@@ -3,57 +3,68 @@
 **Maintained:** 2026-08-21. Check the STATUS REGISTER below against `git log`
 before each run; a stale register is how a finished panel gets redesigned twice.
 
-Paste everything below the line, having first replaced `<<PANEL>>` in the
-"THE PANEL" section with one panel drawn from the NOT STARTED list.
+Paste everything below the line. The agent will ask you which panel to work on,
+offering only the ones still outstanding.
 
 ---
 
 You are redesigning ONE panel of a Roblox game called Dice Forge, as a
 **mock preview only**. Repo: `C:\RGame`.
 
-## THE PANEL
+## THE PANEL — ASK ME FIRST
 
-Redesign: `<<PANEL>>`
+**Your first action is to ask me which panel to redesign, and then wait for my
+answer.** Do not pick one yourself, and do not start building until I have told
+you. Present the choice as the REMAINING list below, and do not offer any panel
+marked DONE.
 
-Do not ask which panel to work on, and do not choose one yourself. The operator
-has already picked it and written it above. If `<<PANEL>>` is still literally
-`<<PANEL>>`, or names a panel the register below marks DONE, STOP and say so —
-do not substitute your own choice.
+Ask it plainly, like this:
+
+> Which panel would you like to revamp? Remaining: **BOARDS**, **VAULT**,
+> **SLOTS**, **FORGE**, **HUD**. (ASCEND, SHAPES, QUESTS, SHOP and SETTINGS are
+> already done.)
+
+If I name a panel that is marked DONE, say so and ask me to confirm before you
+touch it — I may have a reason, but it should be deliberate rather than
+accidental.
 
 ## STATUS REGISTER — WHAT IS ALREADY DONE
 
-Three panels have completed the full mock → port cycle and are LIVE. **They are
-finished. Do not redesign them, do not offer to, do not "harmonise" them with
-your new work, and do not touch their code.**
+Five panels have completed the full mock → port cycle and are LIVE. **They are
+finished. Do not redesign them, do not offer them in the question above, do not
+"harmonise" them with your new work, and do not touch their code.**
 
-| Panel | Status | Landed |
+| Panel | Status | How to confirm in the code |
 |---|---|---|
-| ASCEND — The Sovereign Ascension Vault | **DONE, live** | `0af794b` |
-| QUESTS — dual-column, 60/40 progression | **DONE, live** | `0af794b` |
-| SHAPES — specimen stage + 12-dice scaling | **DONE, live** | `c3cd0c8` |
-| SHOP | NOT STARTED | — |
-| SETTINGS | NOT STARTED | — |
-| VAULT | NOT STARTED | — |
-| BOARDS | NOT STARTED | — |
-| SLOTS | NOT STARTED | — |
-| FORGE | NOT STARTED | — |
-| HUD | NOT STARTED | — |
+| ASCEND — The Sovereign Ascension Vault | **DONE, live** | `V7MenuPanel.luau` ~line 3318 |
+| QUESTS — dual-column, 60/40 progression | **DONE, live** | module-scope `buildQuestsOverlay` |
+| SHAPES — specimen stage + 12-dice scaling | **DONE, live** | `SPECIMEN_SCALE_MAP` ~line 505 |
+| SHOP — Shop & Exchange | **DONE, live** | `overlay("Shop & Exchange")`, mocha panel + gold stroke |
+| SETTINGS | **DONE, live** | `overlay("Settings")`, mocha panel + gold stroke |
+| **BOARDS — Leaderboards** | **REMAINING** | still the three-tab prose-commented build |
+| **VAULT — Offline Vault** | **REMAINING** | still `UITheme.label` + `UDim2.fromScale` positioning |
+| **SLOTS — Die Slots** | **REMAINING** | still the composed `verticalStack` panel |
+| **FORGE** | **REMAINING** | `V7ForgePanel.luau`, never started |
+| **HUD** | **REMAINING** | `V7HUD.luau`, never started |
 
-The three DONE panels are still worth READING — they are the house style your
-variants should feel native beside. `SPECIMEN_SCALE_MAP` and
-`RACK_CARD_SCALE_MAP` (V7MenuPanel around line 505) and the Sovereign Ascension
-Vault (around line 3318) are the current quality bar. Read them; do not edit
-them.
+The tell for a finished panel: its `Panel` frame is restyled to the dark mocha
+fill `Color3.fromRGB(26, 22, 20)` with a gold `Color3.fromRGB(234, 179, 8)`
+`UIStroke`. The remaining ones have no such block and read as older,
+heavily-commented code.
 
-SLOTS was mocked once in an earlier run and the operator abandoned those
-variants. It is genuinely NOT STARTED — treat any `Slots_Variant_*.png` in
-`screenshots/` as a dead end, not as prior art to build on.
+The five DONE panels are worth READING — they are the house style your variants
+should feel native beside, and the shop in particular is the reference for card
+uniformity. Read them; do not edit them.
+
+SLOTS was mocked once in an earlier run and I abandoned those variants. It is
+genuinely REMAINING — treat any `Slots_Variant_*.png` in `screenshots/` as a
+dead end, not as prior art to build on.
 
 ## READ THIS FIRST — WHAT WENT WRONG LAST TIME
 
 Every item below actually happened in this repository and cost hours to find.
-Items 1–6 come from the run that broke the game; items 7–11 come from the three
-successful ports and are logged in `.brain/LEDGER.md` as L-060 through L-064. Do
+Items 1–6 come from the run that broke the game; items 7–11 come from the ports
+that succeeded and are logged in `.brain/LEDGER.md` as L-060 through L-064. Do
 not repeat any of them.
 
 1. **It edited `V7MenuPanel.luau` directly** despite the rule below saying not
@@ -125,7 +136,7 @@ path:
 
 **That file already exists and is tracked in git** — it currently holds the mock
 from the last panel that went through this process. **Overwrite it wholesale**
-with your three variants for `<<PANEL>>`. Do not append to it, do not preserve
+with your three variants for the panel I chose. Do not append to it, do not preserve
 the previous panel's variants alongside yours, and do not create a second mock
 file. The old contents are safe in git history; the operator does not need them
 on disk.
@@ -162,7 +173,7 @@ preview, because the operator can no longer tell what they are looking at.
 builds a full-screen `ScreenGui` (name it `UIMockPreview`, `DisplayOrder` above
 everything else) containing:
 
-1. **Three complete, independent redesigns of `<<PANEL>>`**, labelled A, B and C.
+1. **Three complete, independent redesigns of the panel I chose**, labelled A, B and C.
 2. **A carousel** — one variant visible at a time, with `<` and `>` buttons and
    an A/B/C indicator showing which is on screen. Switching must be instant and
    must NOT rebuild the variants; build all three up front and toggle `Visible`,
