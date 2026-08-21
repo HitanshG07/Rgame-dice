@@ -3770,14 +3770,31 @@ local function buildSlotsOverlay(
 		buildSectionHeader(invBox, "INVENTORY", "CLICK TWO DICE TO SWAP SLOTS", THEME.GoldPrimary)
 	local slotsSwapStatus = slotsSwapStatusOpt :: TextLabel
 
-	local igFrame = Instance.new("Frame")
+	-- SCROLLS, BECAUSE THE CARD COUNT IS NO LONGER FIXED.
+	--
+	-- The grid used to draw at most six cards into two rows and its cell height
+	-- was `0.50` of this frame -- a fraction that only means "half the height"
+	-- while there are exactly two rows. The inventory now renders one card per
+	-- die, up to the twelve-slot cap, so a player with seven dice needs three
+	-- rows and the third fell straight out of the panel.
+	--
+	-- The cell is a FIXED height now and the canvas grows to fit however many
+	-- rows exist. A fractional cell height cannot work here: it would shrink
+	-- every card as dice are added rather than adding rows.
+	local igFrame = Instance.new("ScrollingFrame")
 	igFrame.Size = UDim2.new(1, 0, 1, -26)
 	igFrame.BackgroundTransparency = 1
+	igFrame.BorderSizePixel = 0
 	igFrame.LayoutOrder = 2
+	igFrame.AutomaticCanvasSize = Enum.AutomaticSize.Y
+	igFrame.CanvasSize = UDim2.new()
+	igFrame.ScrollBarThickness = 4
+	igFrame.ScrollBarImageColor3 = THEME.StrokeGold
+	igFrame.ScrollingDirection = Enum.ScrollingDirection.Y
 	igFrame.Parent = invBox
 
 	local igl = Instance.new("UIGridLayout")
-	igl.CellSize = UDim2.new(0.3333, -6, 0.50, -4)
+	igl.CellSize = UDim2.new(0.3333, -10, 0, 66)
 	igl.CellPadding = UDim2.new(0, 8, 0, 8)
 	igl.SortOrder = Enum.SortOrder.LayoutOrder
 	igl.Parent = igFrame
