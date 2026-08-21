@@ -120,6 +120,87 @@ local RACK_CARD_SCALE_MAP: { [string]: number } = {
 --------------------------------------------------------------------------------
 -- HELPER: Configure Canonical Modal Shell (L-065 Standard)
 --------------------------------------------------------------------------------
+-- THE MODAL DESIGN SPACE.
+--
+-- Every panel in this file is laid out against a 940x580 shell: 63 text
+-- sizes and roughly fifty hand-computed pixel reservations (`1, -20`,
+-- `0, 176`, `0, 118`) are all expressed in those coordinates.
+--
+-- THE PANELS ARE THEREFORE SCALED, NOT REWRITTEN. A `UIScale` multiplies
+-- the whole space at once, so the ratio between an 11px label and the 16px
+-- box reserved for it is IDENTICAL at every scale. Editing the 63 literals
+-- individually would change those ratios and silently break the fifty
+-- reservations that were tuned against them -- text through buttons, which
+-- is the defect this panel already has a ledger entry for (L-058).
+local MODAL_DESIGN_SIZE = Vector2.new(940, 580)
+local MODAL_MIN_SIZE = Vector2.new(680, 420)
+
+-- How much of the viewport the scaled shell may occupy, and the range the
+-- multiplier is allowed to take.
+--
+-- The floor is 1.0: below it the shell is already at `MODAL_MIN_SIZE` and
+-- shrinking further only makes 8px text smaller. The ceiling is 1.45
+-- because past roughly there the panel stops reading as a design and starts
+-- reading as an upscale of a small one -- genuine 1440p density needs the
+-- literals re-cut, which is a much larger job than this.
+local MODAL_VIEWPORT_FRACTION = 0.82
+local MODAL_SCALE_MIN = 1.0
+local MODAL_SCALE_MAX = 1.45
+
+local function computeModalScale(viewport: Vector2): number
+	if viewport.X <= 0 or viewport.Y <= 0 then
+		return MODAL_SCALE_MIN
+	end
+	local kx = (viewport.X * MODAL_VIEWPORT_FRACTION) / MODAL_DESIGN_SIZE.X
+	local ky = (viewport.Y * MODAL_VIEWPORT_FRACTION) / MODAL_DESIGN_SIZE.Y
+	-- MIN, not max. The shell is proportionally taller against 580 than it is
+	-- wide against 940, so on every 16:9 display the vertical term binds --
+	-- and taking the smaller of the two is what guarantees the scaled panel
+	-- fits BOTH axes rather than overflowing the shorter one.
+	return math.clamp(math.min(kx, ky), MODAL_SCALE_MIN, MODAL_SCALE_MAX)
+end
+
+-- Applies the current scale to one shell and keeps it current. A
+-- `UISizeConstraint` clamps a frame's own `Size`; a `UIScale` multiplies how
+-- that result is RENDERED. So the constraint keeps the design space fixed at
+-- 940x580 -- which is what the fifty reservations depend on -- while the
+-- scale alone decides how large it appears.
+local function bindModalScale(shell: Frame)
+	local uiScale = shell:FindFirstChildOfClass("UIScale")
+	if not uiScale then
+		uiScale = Instance.new("UIScale")
+		uiScale.Parent = shell
+	end
+
+	local function apply()
+		local cam = workspace.CurrentCamera
+		if cam then
+			uiScale.Scale = computeModalScale(cam.ViewportSize)
+		end
+	end
+
+	apply()
+
+	-- Rebound when the camera itself is replaced, which happens on respawn --
+	-- otherwise the panel keeps the scale it was built with and stops
+	-- tracking a window the player resizes afterwards.
+	local viewportConn: RBXScriptConnection? = nil
+	local function watchCamera()
+		if viewportConn then
+			viewportConn:Disconnect()
+			viewportConn = nil
+		end
+		local cam = workspace.CurrentCamera
+		if cam then
+			viewportConn = cam:GetPropertyChangedSignal("ViewportSize"):Connect(apply)
+		end
+		apply()
+	end
+
+	watchCamera()
+	workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(watchCamera)
+end
+
 local function formatModalShell(
 	overlayFrame: Frame,
 	titleText: string,
@@ -191,13 +272,15 @@ local function formatModalShell(
 	local modalConstraint = mainShell:FindFirstChildOfClass("UISizeConstraint")
 	if not modalConstraint then
 		modalConstraint = Instance.new("UISizeConstraint")
-		modalConstraint.MinSize = Vector2.new(680, 420)
-		modalConstraint.MaxSize = Vector2.new(940, 580)
 		modalConstraint.Parent = mainShell
-	else
-		modalConstraint.MinSize = Vector2.new(680, 420)
-		modalConstraint.MaxSize = Vector2.new(940, 580)
 	end
+	-- Declared ONCE, above. These bounds were previously written as literals
+	-- in both branches here and again in `UITheme`, so the design space was
+	-- stated in three places and could drift in any of them.
+	modalConstraint.MinSize = MODAL_MIN_SIZE
+	modalConstraint.MaxSize = MODAL_DESIGN_SIZE
+
+	bindModalScale(mainShell)
 
 	-- Header Bar (50px height)
 	local header = mainShell:FindFirstChild("Header") :: Frame?
@@ -2220,9 +2303,13 @@ local function buildShopOverlay(
 		cardPadding.PaddingRight = UDim.new(0, 12)
 		cardPadding.Parent = card
 
+		-- FULL HEIGHT. The `-40` reserved room for an action row that was
+		-- anchored outside this stack; the row is a child of it now, so the
+		-- layout accounts for those pixels itself and reserving them a second
+		-- time would leave a 40px gap under every card.
 		local textStack = Instance.new("Frame")
 		textStack.Name = "TextStack"
-		textStack.Size = UDim2.new(1, 0, 1, -40)
+		textStack.Size = UDim2.new(1, 0, 1, 0)
 		textStack.BackgroundTransparency = 1
 		textStack.Parent = card
 
@@ -2305,13 +2392,26 @@ local function buildShopOverlay(
 			fine.Parent = textStack
 		end
 
+		-- INSIDE THE LAYOUT, not anchored to the card's bottom edge.
+		--
+		-- Anchoring it put the row OUTSIDE the `UIListLayout` governing the text
+		-- stack, so the layout could not see it and had no reason to leave room:
+		-- the tier detail above carries `AutomaticSize.Y`, and once it grew past
+		-- the 40px the stack reserved it rendered straight through the BUY
+		-- button. The reservation was 40px against a 42px need before any text
+		-- grew at all. `TextFits` cannot catch this -- it reports truncation, and
+		-- an auto-sized label never truncates (L-058).
+		--
+		-- In the layout with the highest sort order it is always last, and the
+		-- blurb's existing `UIFlexItem.Fill` absorbs the slack -- so the buttons
+		-- still line up across a row of equal-height cards, which is what the
+		-- anchor was for, but now they cannot be overlapped.
 		local actionRow = Instance.new("Frame")
 		actionRow.Name = "ActionRow"
 		actionRow.Size = UDim2.new(1, 0, 0, 32)
-		actionRow.AnchorPoint = Vector2.new(0.5, 1)
-		actionRow.Position = UDim2.new(0.5, 0, 1, 0)
 		actionRow.BackgroundTransparency = 1
-		actionRow.Parent = card
+		actionRow.LayoutOrder = 99
+		actionRow.Parent = textStack
 
 		local buyBtn = Instance.new("TextButton")
 		buyBtn.Name = "BuyButton"
@@ -3493,6 +3593,19 @@ local function buildSlotsOverlay(
 	local currentSlotPage = 1
 	local selectedSlotIndex = 1
 	local selectedFocusedShape = "D6"
+
+	-- SWAP STATE. `Profile.Dice` is a flat positional array on the server --
+	-- index IS the slot -- so moving a die between slots is an exchange of two
+	-- positions, which is exactly what the existing `SwapDice` remote does. No
+	-- new remote and no schema change is involved in equipping.
+	local pendingSwapIndex: number? = nil
+	local swapInFlight = false
+	-- The inventory rebuild takes NO state parameter. It used to, and its click
+	-- handler closed over the snapshot captured when the card was BUILT, so
+	-- every repaint after the first replayed stale data. It now reads
+	-- `liveEquippedDice`, which `refreshSlots` has already updated from the
+	-- current snapshot -- one source, no captured copy to go stale.
+
 	-- NO `id` FIELD. There is none on the wire, and an array index living in a
 	-- field called `id` is an invitation to send it somewhere that wants a real
 	-- identifier. The die's identity IS its position: `liveEquippedDice[n]` is
@@ -3502,6 +3615,18 @@ local function buildSlotsOverlay(
 	}
 	local unlockedSlotsCount = 1
 	local ascensionsCount = 0
+
+	-- DECLARED AFTER THE TWO VALUES IT READS, and it must stay that way. Lua
+	-- binds a closure's names at parse time, so had this sat above them it would
+	-- have captured neither -- both would silently resolve to nil globals and
+	-- `#nil` would throw on the first snapshot. That is L-057's shape exactly:
+	-- an ordering mistake that produces no warning and no error at the point of
+	-- the mistake, only a dead panel later.
+	local SLOTS_PER_PAGE = 3
+	local function slotPageCount(): number
+		local total = math.max(unlockedSlotsCount, #liveEquippedDice, 1)
+		return math.max(1, math.ceil(total / SLOTS_PER_PAGE))
+	end
 
 	-- TOP ROW (44% height)
 	local topRow = Instance.new("Frame")
@@ -3638,7 +3763,12 @@ local function buildSlotsOverlay(
 
 	-- Bottom-Left: 3x2 Inventory (40%)
 	local invBox = buildQuadrantShell(botRow, "Inventory", UDim2.new(0.40, -5, 1, 0), 1, THEME.StrokeSubtle, THEME.CardBg)
-	buildSectionHeader(invBox, "INVENTORY", "SELECT DIE TO EQUIP", THEME.GoldPrimary)
+	-- The header's right tag doubles as the swap prompt: it is already the line
+	-- the player reads for what this grid expects of them, so the two-click
+	-- instruction and any refusal belong there rather than in a new row.
+	local _invHeader, slotsSwapStatusOpt =
+		buildSectionHeader(invBox, "INVENTORY", "CLICK TWO DICE TO SWAP SLOTS", THEME.GoldPrimary)
+	local slotsSwapStatus = slotsSwapStatusOpt :: TextLabel
 
 	local igFrame = Instance.new("Frame")
 	igFrame.Size = UDim2.new(1, 0, 1, -26)
@@ -3825,8 +3955,14 @@ local function buildSlotsOverlay(
 		val.Parent = card
 	end
 
-	makeBoostCard(1, "BOOST 1", "+65% VELOCITY", THEME.GoldPrimary)
-	makeBoostCard(2, "BOOST 2", "-40% VOID", THEME.AmberFlame)
+	-- Placeholders, deliberately. "+65% VELOCITY" and "-40% VOID" were
+	-- invented figures with nothing behind them, rendered in the live gold
+	-- theme beside the real dice -- and "BOOST" is the name of a system that
+	-- genuinely exists (`state.boosts`), so a player had every reason to read
+	-- them as active effects. The slots are kept to hold the layout; the
+	-- numbers wait for an implementation to supply them.
+	makeBoostCard(1, "BOOST 1", "--", THEME.TextMuted)
+	makeBoostCard(2, "BOOST 2", "--", THEME.TextMuted)
 
 	-- Bottom: Number of Shards + Reroll Trait Button (38% height)
 	local shardDeck = Instance.new("Frame")
@@ -3989,8 +4125,8 @@ local function buildSlotsOverlay(
 	local t1Title = Instance.new("TextLabel")
 	t1Title.Size = UDim2.new(1, -110, 1, 0)
 	t1Title.BackgroundTransparency = 1
-	t1Title.Text = "TRAIT 1: PYRO RESONANCE"
-	t1Title.TextColor3 = THEME.TextPrimary
+	t1Title.Text = "TRAIT 1: NOT YET AVAILABLE"
+	t1Title.TextColor3 = THEME.TextMuted
 	t1Title.Font = Enum.Font.GothamBlack
 	t1Title.TextSize = 10.5
 	t1Title.TextTruncate = Enum.TextTruncate.AtEnd
@@ -4005,7 +4141,7 @@ local function buildSlotsOverlay(
 	local t1Rarity = Instance.new("TextLabel")
 	t1Rarity.Size = UDim2.new(0, 80, 1, 0)
 	t1Rarity.BackgroundTransparency = 1
-	t1Rarity.Text = "LEGENDARY"
+	t1Rarity.Text = "--"
 	t1Rarity.TextColor3 = THEME.GoldPrimary
 	t1Rarity.Font = Enum.Font.GothamBlack
 	t1Rarity.TextSize = 9.5
@@ -4016,8 +4152,9 @@ local function buildSlotsOverlay(
 	local t1Desc = Instance.new("TextLabel")
 	t1Desc.Size = UDim2.new(1, 0, 1, -24)
 	t1Desc.BackgroundTransparency = 1
-	t1Desc.Text = "Supercharges adjacent dice in orrery throw for +1.5x face value with +65% kinetic velocity."
-	t1Desc.TextColor3 = THEME.TextPrimary
+	t1Desc.Text = "Trait effects are not implemented yet. This panel shows where "
+		.. "they will appear."
+	t1Desc.TextColor3 = THEME.TextMuted
 	t1Desc.Font = Enum.Font.GothamMedium
 	t1Desc.TextSize = 10
 	t1Desc.TextWrapped = true
@@ -4075,8 +4212,8 @@ local function buildSlotsOverlay(
 	local t2Title = Instance.new("TextLabel")
 	t2Title.Size = UDim2.new(1, -110, 1, 0)
 	t2Title.BackgroundTransparency = 1
-	t2Title.Text = "TRAIT 2: VOID SHIELD"
-	t2Title.TextColor3 = THEME.TextPrimary
+	t2Title.Text = "TRAIT 2: NOT YET AVAILABLE"
+	t2Title.TextColor3 = THEME.TextMuted
 	t2Title.Font = Enum.Font.GothamBlack
 	t2Title.TextSize = 10.5
 	t2Title.TextTruncate = Enum.TextTruncate.AtEnd
@@ -4091,7 +4228,7 @@ local function buildSlotsOverlay(
 	local t2Rarity = Instance.new("TextLabel")
 	t2Rarity.Size = UDim2.new(0, 80, 1, 0)
 	t2Rarity.BackgroundTransparency = 1
-	t2Rarity.Text = "EPIC (PROC)"
+	t2Rarity.Text = "--"
 	t2Rarity.TextColor3 = THEME.AmberFlame
 	t2Rarity.Font = Enum.Font.GothamBlack
 	t2Rarity.TextSize = 9.5
@@ -4102,8 +4239,9 @@ local function buildSlotsOverlay(
 	local t2Desc = Instance.new("TextLabel")
 	t2Desc.Size = UDim2.new(1, 0, 1, -24)
 	t2Desc.BackgroundTransparency = 1
-	t2Desc.Text = "Dampens void hazard penalties by 40% and converts absorbed kinetic impact into bonus multipliers."
-	t2Desc.TextColor3 = THEME.TextPrimary
+	t2Desc.Text = "Trait effects are not implemented yet. This panel shows where "
+		.. "they will appear."
+	t2Desc.TextColor3 = THEME.TextMuted
 	t2Desc.Font = Enum.Font.GothamMedium
 	t2Desc.TextSize = 10
 	t2Desc.TextWrapped = true
@@ -4182,7 +4320,17 @@ local function buildSlotsOverlay(
 	updateFocusedDie("D6")
 
 	local rebuildShowcaseSlots: () -> ()
-	local rebuildInventory: (any) -> ()
+	local rebuildInventory: () -> ()
+
+	-- Closing the panel cancels a half-finished move. Otherwise the player
+	-- returns later to a card armed for a swap they no longer remember starting.
+	slotsOverlay:GetPropertyChangedSignal("Visible"):Connect(function()
+		if not slotsOverlay.Visible and pendingSwapIndex ~= nil then
+			pendingSwapIndex = nil
+			slotsSwapStatus.Text = ""
+			rebuildInventory()
+		end
+	end)
 
 	rebuildShowcaseSlots = function()
 		for _, child in ipairs(sGrid:GetChildren()) do
@@ -4191,8 +4339,16 @@ local function buildSlotsOverlay(
 			end
 		end
 
-		local startIdx = (currentSlotPage - 1) * 3 + 1
-		for i = 1, 3 do
+		-- CLAMPED HERE, not only in the arrow handlers. An ascension can shrink
+		-- the slot count while the player is sitting on the last page, and the
+		-- arrows are not involved in that.
+		local pageCount = slotPageCount()
+		if currentSlotPage > pageCount then
+			currentSlotPage = pageCount
+		end
+
+		local startIdx = (currentSlotPage - 1) * SLOTS_PER_PAGE + 1
+		for i = 1, SLOTS_PER_PAGE do
 			local slotNum = startIdx + i - 1
 			local dieInfo = liveEquippedDice[slotNum]
 			local isUnlocked = slotNum <= unlockedSlotsCount
@@ -4312,9 +4468,20 @@ local function buildSlotsOverlay(
 		end
 
 		if pageTagLbl then
-			local endIdx = math.min(startIdx + 2, 12)
-			pageTagLbl.Text = string.format("SLOTS %02d - %02d  [PAGE %d/4]", startIdx, endIdx, currentSlotPage)
+			-- Derived from the real counts. The page total was the literal 4 and
+			-- the last slot the literal 12, so a player with three slots was
+			-- told they had four pages and invited to walk through nine empty
+			-- bays.
+			local totalSlots = math.max(unlockedSlotsCount, #liveEquippedDice, 1)
+			local endIdx = math.min(startIdx + SLOTS_PER_PAGE - 1, totalSlots)
+			pageTagLbl.Text = string.format("SLOTS %02d - %02d  [PAGE %d/%d]",
+				startIdx, endIdx, currentSlotPage, pageCount)
 		end
+
+		-- The arrows say whether they lead anywhere, rather than silently
+		-- doing nothing at the ends.
+		lArrow.TextColor3 = if currentSlotPage > 1 then THEME.GoldPrimary else THEME.StrokeSubtle
+		rArrow.TextColor3 = if currentSlotPage < pageCount then THEME.GoldPrimary else THEME.StrokeSubtle
 	end
 
 	lArrow.MouseButton1Click:Connect(function()
@@ -4325,48 +4492,54 @@ local function buildSlotsOverlay(
 	end)
 
 	rArrow.MouseButton1Click:Connect(function()
-		if currentSlotPage < 4 then
+		if currentSlotPage < slotPageCount() then
 			currentSlotPage += 1
 			rebuildShowcaseSlots()
 		end
 	end)
 
-	rebuildInventory = function(state: any)
+	-- Fires the exchange and lets the resulting snapshot repaint the panel.
+	local function commitSwap(a: number, b: number)
+		swapInFlight = true
+		rebuildInventory()
+		task.spawn(function()
+			local result = NetClient.swapDice(a, b)
+			swapInFlight = false
+			if not result.ok then
+				-- A refusal produces no snapshot, so nothing else would repaint
+				-- this panel or tell the player their click did nothing.
+				slotsSwapStatus.Text = "Could not move that die."
+				slotsSwapStatus.TextColor3 = THEME.Negative
+			else
+				slotsSwapStatus.Text = ""
+			end
+			rebuildInventory()
+		end)
+	end
+
+	rebuildInventory = function()
 		for _, child in ipairs(igFrame:GetChildren()) do
 			if child:IsA("Frame") then
 				child:Destroy()
 			end
 		end
+		pruneDeadViewportItems()
 
-		local ownedShapeCounts: { [string]: number } = {}
-		for _, d in ipairs(liveEquippedDice) do
-			ownedShapeCounts[d.shape] = (ownedShapeCounts[d.shape] or 0) + 1
-		end
-		if type(state) == "table" and type(state.diamondTree) == "table" and type(state.diamondTree.Shapes) == "table" then
-			for shapeId, unlocked in pairs(state.diamondTree.Shapes) do
-				if unlocked == true and not ownedShapeCounts[shapeId] then
-					ownedShapeCounts[shapeId] = 1
-				end
-			end
-		end
-		if not next(ownedShapeCounts) then
-			ownedShapeCounts["D6"] = 1
-		end
-
-		local invList: { { shape: string, count: number } } = {}
-		for sId, count in pairs(ownedShapeCounts) do
-			table.insert(invList, { shape = sId, count = count })
-		end
-		table.sort(invList, function(a, b)
-			local order = { D2=1, D3=2, D4=3, D5=4, D6=5, D7=6, D8=7, D10=8, D12=9, D14=10, D16=11, D20=12 }
-			return (order[a.shape] or 99) < (order[b.shape] or 99)
-		end)
-
-		for idx = 1, 6 do
-			local item = invList[idx]
-			if not item then break end
-
-			local isSelected = (item.shape == selectedFocusedShape)
+		-- ONE CARD PER DIE THE PLAYER ACTUALLY HAS.
+		--
+		-- This used to group by SHAPE, inject every shape the diamond tree had
+		-- unlocked, fall back to a phantom D6 when it found nothing, and stop at
+		-- six. Three of those four are wrong: an unlocked shape is something the
+		-- player MAY forge, not a die they hold; the fallback drew a die that
+		-- does not exist; and the cap hid slots 7 through 12 from anyone who got
+		-- that far. `Profile.Dice` is the inventory, and its length is the count.
+		for idx, die in ipairs(liveEquippedDice) do
+			-- Selection is by SLOT, not by shape. Highlighting by shape lit up
+			-- every card sharing it, which with three D6s meant three cards
+			-- claiming to be the one selected.
+			local isSelected = (idx == selectedSlotIndex)
+			local isPending = (pendingSwapIndex == idx)
+			local item = die
 
 			local c = Instance.new("Frame")
 			c.Name = "InvCard_" .. idx
@@ -4381,41 +4554,45 @@ local function buildSlotsOverlay(
 			cc.Parent = c
 
 			local cs = Instance.new("UIStroke")
-			cs.Thickness = if isSelected then 2 else 1
-			cs.Color = if isSelected then THEME.GoldPrimary else THEME.StrokeSubtle
+			cs.Thickness = if isPending or isSelected then 2 else 1
+			cs.Color = if isPending then THEME.AmberFlame
+				elseif isSelected then THEME.GoldPrimary
+				else THEME.StrokeSubtle
 			cs.Parent = c
 
 			createMiniDieViewport(c, UDim2.fromScale(1, 1), item.shape, THEME.InsetBg)
 
-			if item.count > 1 then
-				local badge = Instance.new("TextLabel")
-				badge.Size = UDim2.new(0, 24, 0, 15)
-				badge.Position = UDim2.new(1, -26, 0, 2)
-				badge.BackgroundColor3 = THEME.ModalBg
-				badge.BorderSizePixel = 0
-				badge.Text = "x" .. item.count
-				badge.TextColor3 = THEME.GoldPrimary
-				badge.Font = Enum.Font.Code
-				badge.TextSize = 9.5
-				badge.Parent = c
+			-- The slot this die occupies. With one card per die rather than one
+			-- per shape, the slot number is what distinguishes two identical
+			-- dice, so it is on the card rather than in a count badge.
+			local slotTag = Instance.new("TextLabel")
+			slotTag.Name = "SlotTag"
+			slotTag.Size = UDim2.new(0, 30, 0, 15)
+			slotTag.Position = UDim2.new(1, -32, 0, 2)
+			slotTag.BackgroundColor3 = THEME.ModalBg
+			slotTag.BorderSizePixel = 0
+			slotTag.Text = string.format("%02d", idx)
+			slotTag.TextColor3 = THEME.GoldPrimary
+			slotTag.Font = Enum.Font.Code
+			slotTag.TextSize = 9.5
+			slotTag.Parent = c
 
-				local bc = Instance.new("UICorner")
-				bc.CornerRadius = UDim.new(0, 4)
-				bc.Parent = badge
+			local stC = Instance.new("UICorner")
+			stC.CornerRadius = UDim.new(0, 4)
+			stC.Parent = slotTag
 
-				local bs = Instance.new("UIStroke")
-				bs.Color = THEME.StrokeGold
-				bs.Thickness = 1
-				bs.Parent = badge
-			end
+			local stS = Instance.new("UIStroke")
+			stS.Color = THEME.StrokeGold
+			stS.Thickness = 1
+			stS.Parent = slotTag
 
-			if isSelected then
+			if isPending or isSelected then
 				local selPill = Instance.new("TextLabel")
 				selPill.Size = UDim2.new(1, 0, 0, 14)
 				selPill.Position = UDim2.new(0, 0, 1, -14)
-				selPill.BackgroundColor3 = THEME.GoldPrimary
+				selPill.BackgroundColor3 = if isPending then THEME.AmberFlame else THEME.GoldPrimary
 				selPill.BorderSizePixel = 0
-				selPill.Text = "Selected"
+				selPill.Text = if isPending then "Move to..." else "Selected"
 				selPill.TextColor3 = THEME.TextDark
 				selPill.Font = Enum.Font.GothamBlack
 				selPill.TextSize = 8.5
@@ -4428,9 +4605,30 @@ local function buildSlotsOverlay(
 			invBtn.Text = ""
 			invBtn.Parent = c
 
+			-- TWO CLICKS MOVE A DIE. First arms the card, second names the slot
+			-- to exchange with. Clicking the armed card again cancels -- the
+			-- server rejects `a == b` outright, so it must never be sent.
 			invBtn.MouseButton1Click:Connect(function()
+				if swapInFlight then
+					return
+				end
+				selectedSlotIndex = idx
 				updateFocusedDie(item.shape)
-				rebuildInventory(state)
+
+				if pendingSwapIndex == nil then
+					pendingSwapIndex = idx
+					slotsSwapStatus.Text = "Pick another die to swap slots with."
+					slotsSwapStatus.TextColor3 = THEME.TextMuted
+					rebuildInventory()
+				elseif pendingSwapIndex == idx then
+					pendingSwapIndex = nil
+					slotsSwapStatus.Text = ""
+					rebuildInventory()
+				else
+					local a = pendingSwapIndex
+					pendingSwapIndex = nil
+					commitSwap(a, idx)
+				end
 			end)
 		end
 	end
@@ -4484,7 +4682,7 @@ local function buildSlotsOverlay(
 
 		rebuildOrreryChamber()
 		rebuildShowcaseSlots()
-		rebuildInventory(state)
+		rebuildInventory()
 	end
 
 	return refreshSlots

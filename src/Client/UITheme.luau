@@ -42,12 +42,38 @@ UITheme.Colors = {
 	Felt           = Color3.fromRGB(42, 33, 27),
 
 	-- Legacy
-	PanelDark      = Color3.fromRGB(26, 22, 20),
-	PanelMaroon    = Color3.fromRGB(36, 30, 26),
-	PanelDeep      = Color3.fromRGB(20, 16, 14),
+	PanelDark      = Color3.fromRGB(24, 20, 18),
+	PanelMaroon    = Color3.fromRGB(34, 28, 24),
+	PanelDeep      = Color3.fromRGB(18, 15, 13),
 	BorderGold     = Color3.fromRGB(234, 179, 8),
 	BorderDim      = Color3.fromRGB(28, 22, 18),
 	PrimaryCyan    = Color3.fromRGB(249, 115, 22),
+}
+
+UITheme.Theme = {
+	ModalBg      = Color3.fromRGB(24, 20, 18),
+	HeaderBg     = Color3.fromRGB(34, 28, 24),
+	CardBg       = Color3.fromRGB(32, 26, 22),
+	InsetBg      = Color3.fromRGB(18, 15, 13),
+	ButtonDark   = Color3.fromRGB(44, 36, 30),
+	ButtonHover  = Color3.fromRGB(56, 46, 38),
+
+	GoldPrimary  = Color3.fromRGB(234, 179, 8),
+	GoldLight    = Color3.fromRGB(250, 204, 21),
+	GoldMuted    = Color3.fromRGB(180, 140, 45),
+
+	StrokeGold   = Color3.fromRGB(212, 165, 40),
+	StrokeSubtle = Color3.fromRGB(60, 50, 42),
+	StrokeInset  = Color3.fromRGB(45, 38, 32),
+
+	TextPrimary  = Color3.fromRGB(245, 240, 235),
+	TextGold     = Color3.fromRGB(234, 179, 8),
+	TextMuted    = Color3.fromRGB(160, 148, 140),
+	TextDark     = Color3.fromRGB(24, 20, 18),
+
+	Positive     = Color3.fromRGB(34, 197, 94),
+	Negative     = Color3.fromRGB(239, 68, 68),
+	Amber        = Color3.fromRGB(245, 158, 11),
 }
 
 UITheme.ElementColors = {
@@ -417,72 +443,71 @@ function UITheme.overlay(title: string): (Frame, Frame, TextButton)
 	fullOverlay.Visible = false
 	fullOverlay.ZIndex = UITheme.Layer.Overlay
 
-	-- CAPPED IN PIXELS AS WELL AS SCALED. At a flat 0.85 the panel stretched to
-	-- fill an ultrawide monitor, giving cards a metre of empty width and text
-	-- lines too long to track. Content has a comfortable maximum measure.
 	local container = Instance.new("Frame")
 	container.Name = "Panel"
 	-- Header, divider and body are anchored to one another in pixels rather than
 	-- arranged by a layout -- disjoint bands by construction. Declared so the
 	-- overlap rule can tell a deliberate exception from an oversight.
 	container:SetAttribute("LayoutExempt", true)
-	-- Height discounts the extra the scrim gained at both ends, so the panel
-	-- stays the size it was before the scrim was grown.
-	container.Size = UDim2.new(0.86, 0, 0.86, -INSET_COVER * 2 * 0.86)
+	container.Size = UDim2.new(0.74, 0, 0.74, 0)
 	container.AnchorPoint = Vector2.new(0.5, 0.5)
-
 	container.Position = UDim2.fromScale(0.5, 0.5)
-	container.BackgroundColor3 = UITheme.Colors.BaseCream
+	container.BackgroundColor3 = Color3.fromRGB(26, 22, 20)
 	container.BorderSizePixel = 0
 	container.ZIndex = UITheme.Layer.Overlay + 1
 	container.Parent = fullOverlay
 
-
-	-- A FLOOR AS WELL AS A CEILING, and the floor is the one that matters for
-	-- content-dense panels.
+	-- These are the DEFAULT bounds, and for the eight V7 overlays they are not
+	-- the final word: `V7MenuPanel.formatModalShell` finds this same constraint
+	-- by class and rewrites both fields from its own `MODAL_DESIGN_SIZE`, which
+	-- is where the modal design space is declared. Two copies of the numbers
+	-- therefore exist, and only one of them decides anything.
 	--
-	-- At a flat 0.86 the panel is only as tall as the window allows, and the
-	-- FORGE needs a fixed amount of chrome regardless: a tab strip, a die
-	-- header, a readout, a cost line and an action bar come to roughly 160px
-	-- before a single face row is drawn. Measured on a 276px-tall window the
-	-- body was 174px, leaving the face list THIRTY-TWO pixels -- less than one
-	-- row of a panel whose entire purpose is editing rows.
-	--
-	-- BOUNDED BY THE VIEWPORT, not a bare constant. A hard 420px minimum would
-	-- simply push the panel off a genuinely small screen, trading a cramped
-	-- panel for an unreachable one. This asks for 420px and accepts less when
-	-- less is all there is, so the panel grows to usable on any window that can
-	-- afford it and never exceeds the window that cannot.
-	-- ONE CONSTRAINT CARRYING BOTH BOUNDS. Two `UISizeConstraint`s on the same
-	-- instance do not compose -- only one takes effect -- so the floor and the
-	-- ceiling have to share an object.
+	-- Left in place rather than deleted because this builder is reachable
+	-- without the V7 shell and a panel with no bounds at all would stretch to
+	-- the whole viewport. Anything changing the modal size wants the constant in
+	-- `V7MenuPanel`, not this.
 	local sizeCap = Instance.new("UISizeConstraint")
 	sizeCap.Name = "PanelBounds"
-	sizeCap.MaxSize = Vector2.new(900, 1100)
+	sizeCap.MaxSize = Vector2.new(940, 580)
 	sizeCap.Parent = container
 
+	-- THE FLOOR IS CLAMPED TO THE VIEWPORT, never a bare constant.
+	--
+	-- A `MinSize` larger than the screen does not make a panel big, it makes its
+	-- edges unreachable -- the close button goes off the bottom and the player is
+	-- stuck. This was measured once on a 276px-tall window, which is why the
+	-- clamp exists at all; the revamp replaced it with a hardcoded 680x420 and
+	-- so reintroduced the bug for anything using this builder directly.
+	--
+	-- `V7ForgePanel` is exactly that: it calls `UITheme.overlay` and declares no
+	-- constraint of its own, so this is the only thing standing between it and a
+	-- panel taller than the screen. The eight V7 menu overlays are unaffected
+	-- either way -- `formatModalShell` finds this constraint and overwrites both
+	-- fields from its own `MODAL_DESIGN_SIZE`.
+	-- Measured on the FULL-SCREEN overlay, not on the container. The container is
+	-- the thing this constraint sizes, so reading its size to decide its own
+	-- floor would be circular; `fullOverlay` spans the viewport and is the
+	-- stable reference.
 	local function fitBounds()
 		local vp = fullOverlay.AbsoluteSize
 		if vp.Y <= 0 then
 			return
 		end
-		sizeCap.MinSize = Vector2.new(
-			math.min(320, vp.X),
-			math.min(420, vp.Y))
+		sizeCap.MinSize = Vector2.new(math.min(320, vp.X), math.min(420, vp.Y))
 	end
+
 	fitBounds()
 	fullOverlay:GetPropertyChangedSignal("AbsoluteSize"):Connect(fitBounds)
 
 	local corner = Instance.new("UICorner")
-	corner.CornerRadius = UDim.new(0, UITheme.Scale.LG)
+	corner.CornerRadius = UDim.new(0, 12)
 	corner.Parent = container
 
-	-- A 1px EDGE, not a 4px band. The heavy stroke read as a border drawn around
-	-- the panel; a hairline reads as the panel's own edge.
 	local stroke = Instance.new("UIStroke")
-	stroke.Color = UITheme.Colors.ShadowLight
-	stroke.Thickness = 1
-	stroke.Transparency = 0.3
+	stroke.Color = Color3.fromRGB(234, 179, 8)
+	stroke.Thickness = 2
+	stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
 	stroke.Parent = container
 
 	-- THE HEADER IS A FIXED PIXEL BAND, not a fraction of the panel.
