@@ -178,6 +178,40 @@ end
 -- Block 3 Gate 3 round 3, finding F-AD-5: the die invariant had no upper bound
 -- on PurchasedBudget at all, and `diamondCeiling` was declared here and read
 -- nowhere.
+-- Mass per MassCeiling node level. 15 levels x 80 spans exactly the gap from
+-- `cashBudgetCap` (300) to `diamondCeiling` (1500), so the flat 1500 that used
+-- to apply to everyone becomes the value at MAX level instead of the default.
+-- Nothing new was invented: both ends already existed.
+DiceCatalog.MASS_CEILING_PER_LEVEL = 80
+
+-- FR-3.6, second half: "purchased with Cash up to a per-shape cap, AND BEYOND
+-- THAT WITH PRESTIGE DIAMONDS."
+--
+-- The Cash half worked and stopped at `cashBudgetCap`. The Diamond half did not
+-- exist: `Diamond.MassCeiling` was charged for, stored, and displayed, and had
+-- exactly ONE read in the entire codebase -- in StateSync, to echo the number
+-- back to the client. The ceiling every check actually used was the flat
+-- `shape.diamondCeiling`, which ignored the level completely. A player could buy
+-- all 15 levels and their die would not grow by one gram.
+--
+-- Asked of the catalog rather than restated at each call site, so the server, the
+-- client's button state and the tests cannot disagree about what the ceiling is
+-- (L-025).
+function DiceCatalog.massCeilingFor(shapeId: string, massCeilingLevel: number): number
+	local shape = SHAPES[shapeId]
+	if shape == nil then
+		return 0
+	end
+	local lvl = if type(massCeilingLevel) == "number" and massCeilingLevel == massCeilingLevel
+		then math.max(0, math.floor(massCeilingLevel))
+		else 0
+	local raised = shape.cashBudgetCap + lvl * DiceCatalog.MASS_CEILING_PER_LEVEL
+	-- Clamped to the shape's own ceiling so a future maxLevel rise cannot walk
+	-- the budget past what the rest of the system validates against
+	-- (`maxDiamondCeiling` is the absolute bound every die is checked with).
+	return math.min(raised, shape.diamondCeiling)
+end
+
 function DiceCatalog.maxDiamondCeiling(): number
 	local highest = 0
 	for _, shape in pairs(SHAPES) do
@@ -409,11 +443,27 @@ DiceCatalog.BASE_DIE_SLOT_CAP = 3
 -- Clamped at BOTH ends. The lower clamp matters because an existing player may
 -- already own more slots than their ascension count now permits -- see
 -- `AddDieSlot`, which refuses new purchases without ever confiscating.
-function DiceCatalog.dieSlotCapFor(ascensions: number): number
+-- `slotNodes` is the Diamond tree's SlotNodes level and is OPTIONAL, so the
+-- existing call sites keep compiling and keep their old meaning until each is
+-- updated. It was charged for, stored, displayed, and read by nothing -- the
+-- real cap counted ascensions alone.
+--
+-- +1 slot per level, operator decision 2026-08-27. The progression is already
+-- slow and the COST CURVE is what makes it slow, not the level count: the four
+-- levels run 50 / 200 / 800 / 3200 diamonds, and a billion-dollar ascension pays
+-- 31. The fourth slot is on the order of a hundred ascensions away.
+--
+-- MAX_DIE_SLOTS still hard-clamps the total, so this reaches the same ceiling
+-- sooner and can never exceed it -- which is what keeps SRS FR-1.1 (1..12) true
+-- no matter what the tree grants.
+function DiceCatalog.dieSlotCapFor(ascensions: number, slotNodes: number?): number
 	local a = if type(ascensions) == "number" and ascensions == ascensions
 		then math.max(0, math.floor(ascensions))
 		else 0
-	return math.clamp(DiceCatalog.BASE_DIE_SLOT_CAP + a, 1, DiceCatalog.MAX_DIE_SLOTS)
+	local n = if type(slotNodes) == "number" and slotNodes == slotNodes
+		then math.max(0, math.floor(slotNodes))
+		else 0
+	return math.clamp(DiceCatalog.BASE_DIE_SLOT_CAP + a + n, 1, DiceCatalog.MAX_DIE_SLOTS)
 end
 
 -- Cash cost of buying the NEXT slot, given how many the player owns now.
@@ -429,13 +479,17 @@ end
 -- `ascensions` gates the CAP. Optional so existing callers that only know the
 -- owned count still price correctly against the absolute maximum; the server
 -- and the SLOTS panel both pass it, so both agree on when to stop.
-function DiceCatalog.dieSlotCost(ownedSlots: number, ascensions: number?): number?
+function DiceCatalog.dieSlotCost(ownedSlots: number, ascensions: number?, slotNodes: number?): number?
 	if type(ownedSlots) ~= "number" or ownedSlots ~= ownedSlots then
 		return nil
 	end
 	local owned = math.floor(ownedSlots)
+	-- `slotNodes` threaded through for the same reason as `ascensions`: without
+	-- it this reports "at the cap, no next slot to price" while the player's tree
+	-- has already raised the cap, and the SLOTS panel would hide a slot they can
+	-- afford.
 	local cap = if ascensions ~= nil
-		then DiceCatalog.dieSlotCapFor(ascensions)
+		then DiceCatalog.dieSlotCapFor(ascensions, slotNodes)
 		else DiceCatalog.MAX_DIE_SLOTS
 	if owned < 1 or owned >= cap then
 		return nil -- at the current cap; there is no next slot to price

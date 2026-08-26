@@ -1,0 +1,102 @@
+Phase 0b (MassCeiling + SlotNodes) -- verification.
+Captured 2026-08-27 AFTER the last edit to every file it certifies.
+
+SYNC PROOF (Rojo reconnected, but hashed both sides anyway -- L-019/L-020):
+  tests/DiamondNodes.test.luau   len=7164  hash=892280714   disk == Studio
+Note: Rojo cannot inject a NEW file while Play is running. The first attempt ran
+without DiamondNodes.test present at all and the Tests folder held 24 children
+instead of 25. Stopped, let it sync, re-verified by name AND hash, then ran. A
+suite that is absent reports nothing rather than failing, which is exactly the
+L-019 shape.
+
+=== DICE FORGE TEST SUITE ===
+[PASS] UT-14 Balance (4 assertions)
+[PASS] BoostEffects.test (26 assertions)
+[PASS] UT-13 ClientContract (51 assertions)
+[PASS] DiamondNodes.test (35 assertions)        <-- NEW
+[PASS] UT-5 Elements (32 assertions)
+[PASS] UT-12 ForgeService (369 assertions)
+[PASS] UT-1 ForgeMath (43 assertions)
+[PASS] UT-2 ForgeValidation (52 assertions)
+[PASS] IT-5 Integration_Ascension (19 assertions)
+[PASS] IT-4 Integration_Authority (4 assertions)
+[PASS] IT-2 Integration_Forge (15 assertions)
+[PASS] IT-1 Integration_RollLoop (9 assertions)
+[PASS] IT-3 Integration_SessionLock (11 assertions)
+[PASS] Leaderboard.test (8 assertions)
+[PASS] PassEffects.test (10 assertions)
+[PASS] UT-4 Payout (77 assertions)
+[PASS] UT-8 ProfileLifecycle (38 assertions)
+[PASS] UT-7 ProfileSchema (72 assertions)
+[PASS] UT-6 RateLimit (40 assertions)
+[PASS] UT-15 RemoteContract (16 assertions)
+[PASS] UT-3 Sampling (2627 assertions)
+[PASS] UT-16 Settings (62 assertions)
+[PASS] Vault.test (15 assertions)
+total assertions: 3635
+=== SUITE COMPLETE: 23 passed, 0 failed ===
+
+ASSERTION LINEAGE: 3600 -> 3635, all +35 from DiamondNodes.test. 23 suites.
+Session total: 3569 (baseline) -> 3635, +66 across three new/extended suites.
+
+THE CURVES, computed by the real catalog in a running session:
+
+  MassCeiling L0  -> ceiling  300     (exactly where the Cash path stops)
+  MassCeiling L1  -> ceiling  380
+  MassCeiling L5  -> ceiling  700
+  MassCeiling L10 -> ceiling 1100
+  MassCeiling L15 -> ceiling 1500     (the old flat value, now the MAX)
+
+  SlotNodes L0, 0 asc ->  3 slots
+  SlotNodes L1, 0 asc ->  4 slots
+  SlotNodes L2, 0 asc ->  5 slots
+  SlotNodes L3, 0 asc ->  6 slots
+  SlotNodes L4, 0 asc ->  7 slots
+  SlotNodes L4, 9 asc -> 12 slots     (hard cap holds; SRS FR-1.1 stays true)
+
+15 x 80 = 1200 = 1500 - 300 exactly. No new numbers were invented: both ends of
+the range already existed in the catalog, and the node now spans them.
+
+WHAT THE 35 ASSERTIONS PIN. Every one compares the node level against the thing
+it is supposed to MOVE, never against itself -- the defect class here is a stored
+number nobody consults, which looks identical to one that works:
+  * level 0 lands exactly on cashBudgetCap -- the Diamond tier begins where the
+    Cash tier ends, so no free budget and no stranded budget
+  * max level lands exactly on diamondCeiling
+  * EVERY level in 1..15 raises by exactly 80 (a node that moved on only some
+    levels would still pass a spot check)
+  * clamps past max, so a raised ceiling can never exceed maxDiamondCeiling --
+    the bound the die validator uses, which would otherwise reject a
+    legally-bought die
+  * negative / NaN / unknown-shape all floor safely
+  * one SlotNodes level adds exactly one slot  <-- the read no code performed
+  * ascensions and nodes add together
+  * MAX_DIE_SLOTS holds against absurd input, keeping SRS FR-1.1 (1..12) true
+  * a NEGATIVE node level floors to 0 and never REMOVES slots -- confiscation is
+    the one outcome this must never produce
+  * dieSlotCost prices a next slot once a node has raised the cap, so the panel
+    cannot hide a slot the player already paid to unlock
+
+LIVE VERIFICATION IN THE RUNNING SERVER (read back from the running datamodel):
+  MassCeiling grants mass on buy   true
+  uses massCeilingFor              true
+  slot cap reads SlotNodes         true
+  catalog has massCeilingFor       true
+  dieSlotCapFor takes slotNodes    true
+Console clean.
+
+NOT OBSERVED LIVE: an actual MassCeiling purchase growing a die. The test player
+holds 18 Diamonds and level 1 costs 25, and `execute_luau` cannot reach the live
+profile to top it up (L-022, its own module cache). The grant-on-buy path is
+therefore proven by the catalog unit tests plus the handler being present in the
+running server, NOT by watching a die grow. Stated plainly rather than implied.
+
+NO CONFISCATION IS POSSIBLE BY CONSTRUCTION, and this was the main design risk.
+The per-player ceiling gates PURCHASES only. Die validation still uses the
+absolute `maxDiamondCeiling()` bound, so an existing die bought under the old
+flat 1500 with MassCeiling level 0 keeps every gram it has -- it simply cannot
+buy more until the tree catches up. Same rule `AddDieSlot` already follows:
+refuse new purchases, never take back what was bought.
+
+*** STILL NOT VERIFIED: P-1 STATIC ANALYSIS. *** Unchanged standing operator
+blocker: no Luau analyzer on PATH, pane not script-readable.

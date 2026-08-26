@@ -396,6 +396,45 @@ RemoteGateway.register("BuyDiamondNode", announcing(function(player: Player, nod
 	end
 	PlayerProfile.mutate(player, function(d)
 		d.Diamond[nodeId] = currentLvl + 1
+
+		-- MASSCEILING MUST ACTUALLY GROW THE DICE, not just raise a number.
+		--
+		-- Before this, buying the node stored a level and stopped. The level had
+		-- ONE read in the whole codebase -- StateSync, echoing it back for
+		-- display -- while every real check used the flat `shape.diamondCeiling`.
+		-- A player could spend all fifteen levels and no die gained a gram. It
+		-- charged Diamonds and delivered nothing.
+		--
+		-- This mirrors the Cash `MassBudget` handler above deliberately: raising
+		-- a ceiling nobody can reach is still nothing, so the purchase grants the
+		-- mass at the same time. `massCeilingFor` is asked for the new ceiling
+		-- rather than the arithmetic being repeated here (L-025).
+		if nodeId == "MassCeiling" then
+			local newLevel = currentLvl + 1
+			for _, die in ipairs(d.Dice) do
+				local shape = DiceCatalog.getShape(die.Shape)
+				if shape ~= nil then
+					local ceiling = DiceCatalog.massCeilingFor(die.Shape, newLevel)
+					local target = math.min(ceiling, die.PurchasedBudget + DiceCatalog.MASS_CEILING_PER_LEVEL)
+					local added = target - die.PurchasedBudget
+					if added > 0 then
+						die.PurchasedBudget = target
+						die.MassBudget += added
+						-- Onto the LIGHTEST face, for the same reason the Cash
+						-- path does it: anywhere else silently reshapes a
+						-- distribution the player tuned, and the lightest face is
+						-- the one they have already chosen to starve.
+						local lightest, lightestIdx = math.huge, 1
+						for i, f in ipairs(die.Faces) do
+							if f.Mass < lightest then
+								lightest, lightestIdx = f.Mass, i
+							end
+						end
+						die.Faces[lightestIdx].Mass += added
+					end
+				end
+			end
+		end
 	end)
 	return true, nil
 end))
@@ -495,7 +534,9 @@ RemoteGateway.register("AddDieSlot", announcing(function(player: Player, shapeId
 	-- used to be a flat 7 -- keeps every die they have. This check only refuses
 	-- to sell them ANOTHER one. Taking a purchased slot away because a rule
 	-- changed underneath them would be the worst possible reading of this.
-	local slotCap = DiceCatalog.dieSlotCapFor(data.Ascensions)
+	-- SlotNodes was charged for, stored, displayed, and read by NOTHING -- the
+	-- cap counted ascensions alone. Passed here so a bought slot is a real one.
+	local slotCap = DiceCatalog.dieSlotCapFor(data.Ascensions, data.Diamond.SlotNodes)
 	if data.DieSlots >= slotCap then
 		return false, Remotes.Notice.InvalidRequest
 	end

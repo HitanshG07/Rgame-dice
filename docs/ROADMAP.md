@@ -37,8 +37,8 @@ verdict — see §10b for exactly what that means and what else to update with i
 |---|---|---|---|---|
 | 1 | REDEEM code button does nothing | No button (inverse) | Fix — one line | **DONE** — see §4/0c (P-1 outstanding) |
 | 2 | Element unlocks impossible | No button | Build | OPEN |
-| 3 | MassCeiling / SlotNodes charge Diamonds, do nothing | Takes money | Fix first | OPEN |
-| 4 | Luck Boost / Offline 2x charge **real Robux**, do nothing | Takes money | Fix first | OPEN |
+| 3 | MassCeiling / SlotNodes charge Diamonds, do nothing | Takes money | Fix first | **DONE** — see §4/0b |
+| 4 | Luck Boost / Offline 2x charge **real Robux**, do nothing | Takes money | Fix first | **DONE** — `6cb6aa1`, plus a free-2x vault exploit found in the same seam |
 | 5 | Group Rewards inert (`GROUP_ID = 0`) | Blocked on operator | Set the ID | BLOCKED — operator |
 | 6 | Like Goal event never built | Decoration | **Dropped** | CLOSED — dropped, see §9 |
 | 7 | Daily Spin has no UI | No button | Build | OPEN |
@@ -186,6 +186,27 @@ equivalent point in `OfflineService`'s claim path.
 *Worked example:* buy Luck Boost → today your rolls pay exactly the same as
 before → after this, they genuinely pay more until the timer runs out.
 
+**DONE 2026-08-27 (`6cb6aa1`).** Both boosts now reach a number. Three things
+were wrong, not one:
+
+1. **Nothing called `getMultiplier`.** The seam was already there and already
+   guarded; the call site just passed `1`.
+2. **A live exploit sat in the same seam.** `ClaimVault` took a boolean from the
+   client, checked only that it *was* a boolean, and doubled the payout — so
+   anyone sending `true` took 2× their vault cash, free, every claim. What was
+   being given away is exactly what `OfflineX2` sells for Robux. One fix closed
+   both: the flag is now a *request*, and the server prices it from the player's
+   actual boost.
+3. **`OfflineX2` could never have paid out.** It had no `durationSeconds`, so it
+   fell back to 900 seconds — buy it, go offline for eight hours, come back to a
+   boost that expired fifteen minutes after purchase. It is one-shot by its own
+   wording, so it now has a seven-day window and is spent by the claim.
+
+Luck Boost had to be a **payout** multiplier rather than a real luck one:
+biasing the sampling would break FR-3.4, because the forge preview must show
+exactly the maths that pays you. The shop blurb was corrected to match — a
+real-money product must not be sold on a false claim.
+
 ### 0b — MassCeiling and SlotNodes charge Diamonds and do nothing
 
 **What the player sees:** they spend Diamonds on "Mass Budget Ceiling" or "Die
@@ -206,6 +227,30 @@ Neither ever consults the node level the player paid for.
 **The fix:** MassCeiling must raise the per-die budget cap; SlotNodes must add to
 `dieSlotCapFor`. Both need the node level threaded into a calculation that
 currently ignores it.
+
+**DONE 2026-08-27.** Both nodes now move the thing they charge for.
+
+**MassCeiling: +80 per level, 300 → 1500** (operator decision). This is FR-3.6's
+second half, which had never been built: *"purchased with Cash up to a per-shape
+cap, and beyond that with Prestige Diamonds."* The Cash half worked and stopped
+at 300; the Diamond half stored a level and did nothing. Fifteen levels × 80
+spans exactly the gap to the existing 1500, so **no new numbers were invented —
+the flat 1500 stops being everyone's default and becomes the reward for maxing
+the tree.** Buying a level also *grants* the mass, mirroring the Cash handler,
+because raising a ceiling nobody can reach is still nothing.
+
+**SlotNodes: +1 slot per level** (operator decision, after seeing the real
+numbers). The instinct was to slow it down — but the cost curve already does
+that work: the four levels run 50 / 200 / 800 / 3,200 Diamonds, and a
+*billion-dollar* ascension pays 31. The fourth slot is on the order of a hundred
+ascensions away. `MAX_DIE_SLOTS` still hard-clamps the total, so this reaches the
+same ceiling sooner and can never break FR-1.1.
+
+**Nothing can be confiscated, by construction.** The per-player ceiling gates
+*purchases* only; die validation still uses the absolute bound. A die bought
+under the old flat 1500 with node level 0 keeps every gram — it simply cannot buy
+more until the tree catches up. That is the rule `AddDieSlot` already followed:
+refuse new purchases, never take back what was bought.
 
 ### 0c — The REDEEM button has no click handler
 
@@ -280,6 +325,43 @@ missing.** The mock must not redesign the Forge panel's existing chips.
 **Why the Shapes panel:** it already handles "unlock a thing with currency" for
 dice shapes. Players learn one pattern instead of two, and Antigravity extends a
 panel it has already redesigned and knows.
+
+### 1c — Active-boost timer (operator request, 2026-08-27)
+
+**What the operator asked for:** a proper on-screen indicator showing **which
+boost is running and how long is left**, as a real countdown, in the bottom-left
+or bottom-right corner, with proper icons.
+
+**To be built later. What matters now is that it is READY TO WIRE, and it is.**
+
+*Worked example:* buy Luck Boost → a small icon appears in the corner reading
+`2× PAYOUT — 14:32` → it ticks down every second → at zero it disappears on its
+own.
+
+**The backend is already done. No server work is needed for this.**
+
+- `StateSyncService` already ships `state.boosts` on **every snapshot**, shaped
+  `{ [kind] = expiryUnixTime }` — e.g. `{ LuckBoost = 1756300000 }`.
+- **Only running boosts are listed.** An expired one is simply *absent* rather
+  than sent as expired, because absent is the state the panel should draw. So
+  the UI never has to decide whether something has lapsed.
+- **Nothing on the client reads it yet.** The single mention in the repo is a
+  stale comment in `ForgePanel.luau`, which is one of the dead legacy files
+  Phase 3 deletes. This is a clean greenfield hookup.
+
+**Two constraints the builder must respect:**
+
+1. **Expiry TIMES cross the wire, never multipliers** — that is deliberate
+   (NFR-5). The client must never be told what a boost is *worth*. If the icon
+   needs to say "2×", it reads that from `MonetisationCatalog`, which is in
+   `src/Shared/` precisely so the client can look up names and amounts locally
+   without a figure being sent to it.
+2. **Count down from the server's timestamp, not from a local timer.** Subtract
+   `os.time()` from the expiry each frame. A client-side stopwatch started at
+   purchase would drift, and would keep running through a rejoin.
+
+**Icons:** draw them with `UITheme.createProgrammaticIcon` rather than using an
+emoji — an emoji is a font fallback and renders differently per platform.
 
 ### 1b — Daily Spin
 

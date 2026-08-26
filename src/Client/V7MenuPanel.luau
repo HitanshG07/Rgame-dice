@@ -3858,10 +3858,14 @@ local function buildSlotsOverlay(
 	}
 	local unlockedSlotsCount = 1
 	local ascensionsCount = 0
+	-- The SlotNodes tree level. Tracked here because the slot cap is
+	-- `ascensions + SlotNodes`, and reading only half of it would make this
+	-- panel disagree with the server about how many slots exist.
+	local slotNodesCount = 0
 
 	local SLOTS_PER_PAGE = 3
 	local function slotPageCount(): number
-		local total = math.max(DiceCatalog.dieSlotCapFor(ascensionsCount), unlockedSlotsCount, #liveEquippedDice, 1)
+		local total = math.max(DiceCatalog.dieSlotCapFor(ascensionsCount, slotNodesCount), unlockedSlotsCount, #liveEquippedDice, 1)
 		return math.max(1, math.ceil(total / SLOTS_PER_PAGE))
 	end
 
@@ -4736,7 +4740,7 @@ local function buildSlotsOverlay(
 					updateEquipButton()
 				end)
 			else
-				local nextCost = DiceCatalog.dieSlotCost(slotNum - 1, ascensionsCount)
+				local nextCost = DiceCatalog.dieSlotCost(slotNum - 1, ascensionsCount, slotNodesCount)
 				local isNextBuyable = (slotNum == unlockedSlotsCount + 1 and nextCost ~= nil)
 
 				local lockedLbl = Instance.new("TextLabel")
@@ -4790,7 +4794,7 @@ local function buildSlotsOverlay(
 		end
 
 		if pageTagLbl then
-			local totalSlots = math.max(DiceCatalog.dieSlotCapFor(ascensionsCount), unlockedSlotsCount, #liveEquippedDice, 1)
+			local totalSlots = math.max(DiceCatalog.dieSlotCapFor(ascensionsCount, slotNodesCount), unlockedSlotsCount, #liveEquippedDice, 1)
 			local endIdx = math.min(startIdx + SLOTS_PER_PAGE - 1, totalSlots)
 			pageTagLbl.Text = string.format("SLOTS %02d - %02d  [PAGE %d/%d]",
 				startIdx, endIdx, currentSlotPage, pageCount)
@@ -4985,6 +4989,9 @@ local function buildSlotsOverlay(
 		if type(state) == "table" then
 			currentCash = tonumber(state.cash) or 0
 			ascensionsCount = tonumber(state.ascensions) or 0
+			slotNodesCount = if type(state.diamondTree) == "table"
+				then tonumber(state.diamondTree.SlotNodes) or 0
+				else 0
 			unlockedSlotsCount = tonumber(state.dieSlots) or 1
 
 			if type(state.diamondTree) == "table" and type(state.diamondTree.Shapes) == "table" then
