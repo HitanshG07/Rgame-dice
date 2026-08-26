@@ -1,5 +1,17 @@
 # HANDOFF 5 — Dice geometry, the Gems sink, and the payout flash
 
+> **This is a historical record. Do not action anything in it.**
+> Superseded by **`docs/handoff-8.md`** (current state) and **`docs/ROADMAP.md`**
+> (the plan and the live open-item list). Where this document and those two
+> disagree, **they win** — they were verified against live code on 2026-08-26 and
+> this one was not.
+>
+> **Specifically stale here:** the queue in this document is empty — every item
+> landed, including the sub-pixel dice shearing closed at `cbfb2a8`. The constants
+> it lists as needing changes before release are already at shipping values.
+> **Still valid:** the reasoning behind the VIP vault floor at 10h, and the rule
+> that a dice-geometry fix is signed off from a screenshot, never from a number.
+
 **Date:** 2026-08-15
 **Head:** `8bf09d4` · 21 suites, 3,547 assertions, 0 failing, 0 server errors
 **Tree:** clean apart from `.mcp.json` and `tools/roblox_studio_mcp_proxy.js`,

@@ -3,6 +3,18 @@ STATUS: LIVING — supersede with handoff-2.md, do not edit in place after hando
 
 # HANDOFF 1 — DICE FORGE INCREMENTAL
 
+> **This is a historical record. Do not action anything in it.**
+> Superseded by **`docs/handoff-8.md`** (current state) and **`docs/ROADMAP.md`**
+> (the plan and the live open-item list). Where this document and those two
+> disagree, **they win** — they were verified against live code on 2026-08-26 and
+> this one was not.
+>
+> **Specifically stale here:** every panel listed as unbuilt or unwired has since
+> been built; `src/Client/LegacyUI/` no longer exists; the element-unlock proposal
+> in §4A is now ROADMAP item 2. **Still valid:** the operator's standing rules —
+> finish one element completely before starting another, no mock data, verify by
+> clicking it in Studio, never fabricate social proof or urgency.
+
 **Written:** 2026-08-11
 **Head at handover:** `bbf43ec`
 **Working tree:** clean, everything pushed to `master`

@@ -1,5 +1,18 @@
 # HANDOFF 2 — Operator defect report, triaged
 
+> **This is a historical record. Do not action anything in it.**
+> Superseded by **`docs/handoff-8.md`** (current state) and **`docs/ROADMAP.md`**
+> (the plan and the live open-item list). Where this document and those two
+> disagree, **they win** — they were verified against live code on 2026-08-26 and
+> this one was not.
+>
+> **Specifically stale here:** this was a triage list that was explicitly *not*
+> actioned when written. Everything on it has since been resolved except
+> *“settings also seems to be bugged”*, which was never reproduced because no
+> detail was given. **Do not re-investigate** the two items §0 marks as already
+> correct: post-ascension dice reset (FR-9.1 working as specified) and the
+> one-D2 starting loadout.
+
 **Date:** 2026-08-12
 **Status:** RANKED, NOT FIXED. Nothing in this document has been actioned.
 The operator asked for a severity ranking first and will give the go-ahead

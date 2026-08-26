@@ -1,5 +1,17 @@
 # HANDOFF 3 — Defect batch closed, animation rebuild specified
 
+> **This is a historical record. Do not action anything in it.**
+> Superseded by **`docs/handoff-8.md`** (current state) and **`docs/ROADMAP.md`**
+> (the plan and the live open-item list). Where this document and those two
+> disagree, **they win** — they were verified against live code on 2026-08-26 and
+> this one was not.
+>
+> **Specifically stale here:** the animation rebuild it specifies was built and
+> shipped. **Still valid:** the Void threshold of 0.35 was measured, not picked;
+> manual rolling is deliberately slower than auto-roll so the gamepass confers a
+> real advantage; and FR-1.4 — no die may come to rest outside the tray — remains
+> the hard invariant any arena change must hold.
+
 **Date:** 2026-08-13
 **Head:** `1a43510` · 21 suites, 3,546 assertions, 0 failing · working tree clean
 

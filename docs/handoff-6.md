@@ -1,5 +1,18 @@
 # Handoff 6 — UI quality pass, mid-flight
 
+> **This is a historical record. Do not action anything in it.**
+> Superseded by **`docs/handoff-8.md`** (current state) and **`docs/ROADMAP.md`**
+> (the plan and the live open-item list). Where this document and those two
+> disagree, **they win** — they were verified against live code on 2026-08-26 and
+> this one was not.
+>
+> **Specifically stale here:** the five uncommitted files it warns about were
+> committed long ago, and its §174 instruction to expect *“zero errors and zero
+> warnings”* is **false** — Script Analysis stands at **158 warnings**, which is
+> the open NFR-8 blocker. The three ledger entries it drafted were appended; the
+> ledger now runs to L-079. **Still valid:** do not skip the isolated `qa-auditor`
+> pass, and when a number and a screenshot disagree, the screenshot wins.
+
 **Written:** 2026-08-15, at operator request ("stop, make a handoff, we continue later").
 **Supersedes nothing.** `docs/handoff-5.md` remains accurate for everything it covers;
 this document covers only what happened after it.

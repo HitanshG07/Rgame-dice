@@ -1,5 +1,23 @@
 # Handoff 7 — the UI is connected, aligned and uniform
 
+> **This is a historical record. Do not action anything in it.**
+> Superseded by **`docs/handoff-8.md`** (current state) and **`docs/ROADMAP.md`**
+> (the plan and the live open-item list). Where this document and those two
+> disagree, **they win** — they were verified against live code on 2026-08-26 and
+> this one was not.
+>
+> **Two claims in this document are known to be FALSE and are corrected in
+> `docs/handoff-8.md` §4:**
+>
+> 1. **§3 says “23 audio asset IDs”. The real count is 9** — 8 SFX cues and one
+>    music loop, verified by direct grep of `AudioDirector.luau`. Handoffs 1–6 all
+>    correctly said 9; this document introduced the error.
+> 2. **§5 says “nothing outstanding”** while 158 Script Analysis warnings were open
+>    and recorded two sections above it in this same file. **Treat §5 as void.**
+>
+> **Still valid:** the `Vendor/ProfileStore.luau` warning-policy problem it raises
+> is real and is still the first decision blocking NFR-8.
+
 **Written:** 2026-08-18, end of session. **HEAD: `6b79a66`.**
 Tree clean apart from `.mcp.json` and untracked operator tooling.
 Supersedes the open items in `docs/handoff-6.md`; that document's §4 verification
