@@ -233,7 +233,7 @@ platform's own prompt · `GearMeshBuilder` · `VaultCatalog` · `SettingsCatalog
 | `NetClient.luau` | 314 | The sole outbound wrapper |
 | `ClientBootstrap.client.luau` | 375 | Loads and wires the V7 panels |
 | `FeedbackFX.luau` | 618 | Payout-scaled feedback |
-| **`ForgePanel` / `MenuPanel` / `HUD` / `CurrencyModels`** | **3,662** | **DEAD.** Superseded by the V7 set, required by nothing. Deletion is roadmap item 10 |
+| **`ForgePanel` / `MenuPanel` / `HUD` / `CurrencyModels`** | **3,662** | **DEAD.** Superseded by the V7 set and loaded by no client code — but three of the four are still named by `tests/ClientContract.test.luau`, so deleting them means editing that suite too. Deletion is roadmap item 10 |
 
 **`applyState` is the single most important function in the client.** It fans out
 one state snapshot to all seven refreshers, each wrapped in its own `pcall` with a

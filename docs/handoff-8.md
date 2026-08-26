@@ -1,7 +1,8 @@
 # Handoff 8 — the panels work, and we now know what is left
 
 **Written:** 2026-08-23, end of session. **HEAD: `0f7a3c7`.**
-Tree clean. Supersedes the open items in `docs/handoff-7.md`.
+Tree clean. **Supersedes `docs/handoff-7.md`** — not only its open items; §4 below
+voids two of its factual claims as well.
 
 The forward-looking half of this document has been split into its own file:
 **`docs/ROADMAP.md`** is the plan to launch. This handoff records what happened
@@ -145,14 +146,14 @@ finished. Every row below was independently verified against live code.
 | 7 | **Daily Spin** | Remote, handler and client wrapper all work. **No button anywhere.** | Build |
 | 8 | **Audio** | 9 `DUMMY_ID_*` placeholders. Fails closed correctly; Settings shows Music/SFX as LOCKED. | Operator: upload |
 | 9 | **Trait Forge** | Pure decoration. No trait or shard concept exists in `src/Server/` or `src/Shared/` at all. | Build |
-| 10 | **Dead legacy files** | `ForgePanel`, `MenuPanel`, `HUD`, `CurrencyModels` — ~3,500 lines, required by nothing. | Delete |
+| 10 | **Dead legacy files** | `ForgePanel`, `MenuPanel`, `HUD`, `CurrencyModels` — 3,662 lines, superseded by the `V7*` set. **Not "required by nothing"** — see the correction below. | Delete |
 
 **Items 3 and 4 are not "unfinished" — they are transactions that do not
 deliver.** Item 4 involves real money.
 
 ---
 
-## 4. TWO CORRECTIONS TO THE RECORD
+## 4. THREE CORRECTIONS TO THE RECORD
 
 **Audio placeholder count.** `docs/handoff-7.md` §3 states *"23 audio asset
 IDs"*. The real count is **9** — 8 SFX cues plus one music loop, verified by
@@ -163,8 +164,25 @@ Handoff-7 introduced the error and no later document caught it.
 nothing was outstanding, while 158 Script Analysis warnings were open and
 recorded two sections above it in the same document. Void that section.
 
-Both corrections follow the same pattern the zero-warnings incident did: a figure
-stated once, then carried forward by documents that did not re-check it.
+**"Required by nothing".** The audit table above originally described the four
+dead client files as required by nothing and loaded by nothing. That was **wrong,
+and acting on it would have broken the suite.**
+`tests/ClientContract.test.luau` requires three of the four — `HUD`, `ForgePanel`
+and `MenuPanel` — at `:104-106` in its `VIEW_MODULES` list and again at `:162` in
+its `shutdown()` check. That suite fails loudly when a named module is missing,
+which is its stated purpose. Only `CurrencyModels.luau` (81 lines) is genuinely
+unreferenced. The line total is **3,662**, not ~3,500.
+
+Caught on a re-verification pass, before any deletion was attempted.
+`docs/ROADMAP.md` §7 now carries the corrected instruction, including the L-028
+pre-deletion check for duties these files perform outside themselves.
+
+All three corrections follow the same pattern the zero-warnings incident did: a
+figure stated once, then carried forward by documents that did not re-check it.
+The third adds a wrinkle worth naming — **"nothing references this" is a claim
+about absence, and absence is the one thing a grep for a name cannot confirm.**
+It has to be checked in the producer direction (L-027) or by deleting and running
+the suite.
 
 ---
 

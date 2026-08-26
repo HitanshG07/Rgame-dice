@@ -41,7 +41,7 @@ into three kinds, and the difference matters:
 | 7 | Daily Spin has no UI | No button | Build |
 | 8 | Audio — 9 placeholder asset IDs | Blocked on operator | Upload sounds |
 | 9 | Trait Forge — pure decoration | Decoration | Build |
-| 10 | ~3,500 lines of dead legacy files | Housekeeping | Delete |
+| 10 | 3,662 lines of dead legacy files | Housekeeping | Delete |
 
 ---
 
@@ -253,6 +253,16 @@ spends currency, and writes `Diamond.Shapes[id] = true`.
 Elements need the identical branch writing `Diamond.Elements[id] = true`. The
 read side (`src/Server/ForgeService.luau:506`) already exists and is waiting.
 
+**This is L-027, and the code already says so.** The comment directly above the
+branch you are copying (`src/Server/ServerBootstrap.server.luau:347`) reads: *"the
+requirement was specified (FR-9.3), the READ was implemented, and the WRITE was
+missing — ledger L-027 exactly."* Shapes had this identical defect and it was
+fixed there; Elements is the same bug in the same shape, one field over.
+
+L-027's lesson is that **a read with no writer is invisible** — there is no file
+to open and nothing fails, because nothing is listening. The only check that can
+see it is a sweep in the *producer* direction (see §10).
+
 *Worked example:* unlock Fire → open the Forge → the Fire chip on a face is no
 longer greyed out → apply it → your payouts change.
 
@@ -271,8 +281,14 @@ every control in it. Un-inerting is therefore centralised in one place.
 `src/Server/` or `src/Shared/` — no schema field, no remote, no catalog, no test.
 
 **The good news:** the hardest part is already prepared. The payout line has a
-spare multiplier slot (`coinBonus`) that is declared, guarded, and currently
-hardcoded to `1` — the same seam Phase 0a uses.
+multiplier slot (`coinBonus`) that is declared, guarded, and currently hardcoded
+to `1`.
+
+**But it is one scalar, not two — and Phase 0a gets there first.** By the time
+this phase runs, 0a has already fed the boost multiplier into that slot, so you
+will find it occupied rather than free. This is fine: multipliers compose, so
+combine the two into the value passed at `:458` rather than replacing what 0a
+put there. Expect it, and do not read the occupied slot as a mistake.
 
 **Build order:**
 
@@ -296,12 +312,40 @@ hardcoded to `1` — the same seam Phase 0a uses.
 
 ### Housekeeping (no UI impact)
 
-- **Delete dead files.** `ForgePanel.luau`, `MenuPanel.luau`, `HUD.luau`,
-  `CurrencyModels.luau` — roughly 3,500 lines superseded by their `V7*`
-  replacements, required by nothing, loaded by nothing. They actively mislead
-  searches, which cost real time during this audit.
-- **Remove the dropped Like Goal's leftovers** — the dead `EventState` remote and
-  the client's progress bar that reads fields no snapshot ever contains.
+- **Delete dead files, and remove the Like Goal leftovers in the same step.**
+  `ForgePanel.luau`, `MenuPanel.luau`, `HUD.luau`, `CurrencyModels.luau` — **3,662
+  lines** superseded by their `V7*` replacements. They actively mislead searches,
+  which cost real time during this audit.
+
+  **They are NOT "required by nothing" — that claim was wrong.** Three of the four
+  are required by the test suite:
+
+  - `tests/ClientContract.test.luau:104-106` names `HUD`, `ForgePanel` and
+    `MenuPanel` in its `VIEW_MODULES` list.
+  - `tests/ClientContract.test.luau:162` names the same three again in the
+    `shutdown()` check.
+
+  That suite **fails loudly when a named module is missing** — that is its stated
+  purpose, not a bug. Deleting the files without editing the test turns a green
+  suite red, against this document's own verification standard. Only
+  `CurrencyModels.luau` (81 lines) is genuinely unreferenced.
+
+  **Do the L-028 check before deleting anything.** L-028 is *"Deleting a Module
+  Deletes Its Undocumented Duties Too"* — written when `ArenaView.luau` was
+  removed after a dependency sweep found all six call sites, and the board then
+  rendered with the baseplate, skybox and the player's own avatar in frame. The
+  duty that broke had no export and therefore **no grep signature**. All three
+  panels here contain references to `Workspace` / `Lighting` / `CurrentCamera` /
+  `GetService`, which is exactly the signature L-028 says to check. For each file,
+  enumerate what it touches outside itself and either reassign the duty or drop it
+  consciously — recorded either way in the commit.
+
+  **Order matters, because these two items overlap.** The Like Goal progress bar
+  lives *inside* `HUD.luau`. Delete first, and it goes with the file; do it the
+  other way round and you hunt leftovers that are already gone. After the
+  deletion, the only surviving Like Goal residue is the `EventState` remote at
+  `src/Shared/Remotes.luau:30` and `:68`, and its client subscriber at
+  `src/Client/NetClient.luau:280-281`.
 - **Script Analysis to zero** (NFR-8). 158 pre-existing warnings. Decide the
   `Vendor/ProfileStore.luau` policy *first* — it is 2,242 lines of third-party
   code and editing it would be clobbered by any upstream update. It needs a
@@ -405,6 +449,15 @@ dropped from every subsequent one. This document ends that ambiguity: it is
   — a count that drops means assertions stopped running, which looks identical to
   a pass in the summary line.
 - Script Analysis: **zero new** warnings against the 158 baseline.
+- **The producer-direction sweep (L-027).** For every field or event the code
+  *reads*, grep for what *writes* it. A read with no writer looks exactly like a
+  working feature and fails silently — that is how Elements shipped unreachable,
+  and `StateSync` before it went unemitted for three whole blocks through five
+  audit rounds. Every gate asked *"is what the code does correct?"*; none asked
+  *"is everything promised actually implemented?"* The sweep is mechanical and
+  cheap, and it is the only check that can see the hole. Run it before launch on
+  `Diamond.*`, every remote in `Remotes.luau`, and every field `StateSyncService`
+  emits.
 - **Proven in a running game, not by reading code.** This is not ceremony: the
   previous session found two real defects in a running session that a
   fresh-context code audit had already passed.
