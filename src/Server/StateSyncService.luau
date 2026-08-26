@@ -268,11 +268,21 @@ function StateSyncService.buildSnapshot(data: PlayerProfile.Profile, streak: num
 		expiresAt = data.BundleExpiry,
 	}
 
+	local inventory: { [string]: number } = {}
+	if type(data.Inventory) == "table" then
+		for shape, count in pairs(data.Inventory) do
+			if type(count) == "number" and count > 0 then
+				inventory[shape] = count
+			end
+		end
+	end
+
 	return {
 		cash = data.Cash,
 		gems = data.Gems,
 		diamonds = data.Diamonds,
 		dice = dice,
+		inventory = inventory,
 		upgrades = upgrades,
 		diamondTree = {
 			StreakStrength = data.Diamond.StreakStrength,

@@ -1,7 +1,4 @@
 --!strict
--- V7MenuPanel.luau
--- Dedicated Full-Screen Overlay Manager for Shapes, Slots, Ascension, Shop, Boards, Quests, Vault, and Settings.
--- Standardized to the Canonical HUD-Clearing Bounding Envelope (L-065) and Unified Luxury Casino Theme.
 
 local MarketplaceService = game:GetService("MarketplaceService")
 local Players = game:GetService("Players")
@@ -41,9 +38,8 @@ export type V7MenuController = {
 	lastState: any,
 }
 
--- =============================================================================
--- UNIFIED THEME TOKENS
--- =============================================================================
+-- ==============================
+-- ==============================
 local THEME = {
 	ModalBg      = Color3.fromRGB(24, 20, 18),
 	HeaderBg     = Color3.fromRGB(34, 28, 24),
@@ -64,6 +60,7 @@ local THEME = {
 	TextPrimary  = Color3.fromRGB(245, 240, 235),
 	TextGold     = Color3.fromRGB(234, 179, 8),
 	TextMuted    = Color3.fromRGB(160, 148, 140),
+	TextSubtle   = Color3.fromRGB(120, 110, 102),
 	TextDark     = Color3.fromRGB(24, 20, 18),
 
 	Positive     = Color3.fromRGB(34, 197, 94),
@@ -117,54 +114,24 @@ local RACK_CARD_SCALE_MAP: { [string]: number } = {
 	D20 = 0.38,
 }
 
---------------------------------------------------------------------------------
--- HELPER: Configure Canonical Modal Shell (L-065 Standard)
---------------------------------------------------------------------------------
--- THE MODAL DESIGN SPACE.
---
--- Every panel in this file is laid out against a 940x580 shell: 63 text
--- sizes and roughly fifty hand-computed pixel reservations (`1, -20`,
--- `0, 176`, `0, 118`) are all expressed in those coordinates.
---
--- THE PANELS ARE THEREFORE SCALED, NOT REWRITTEN. A `UIScale` multiplies
--- the whole space at once, so the ratio between an 11px label and the 16px
--- box reserved for it is IDENTICAL at every scale. Editing the 63 literals
--- individually would change those ratios and silently break the fifty
--- reservations that were tuned against them -- text through buttons, which
--- is the defect this panel already has a ledger entry for (L-058).
+-- ------------------------------
+-- ------------------------------
 local MODAL_DESIGN_SIZE = Vector2.new(940, 580)
 local MODAL_MIN_SIZE = Vector2.new(680, 420)
 
--- How much of the viewport the scaled shell may occupy, and the range the
--- multiplier is allowed to take.
---
--- The floor is 1.0: below it the shell is already at `MODAL_MIN_SIZE` and
--- shrinking further only makes 8px text smaller. The ceiling is 1.45
--- because past roughly there the panel stops reading as a design and starts
--- reading as an upscale of a small one -- genuine 1440p density needs the
--- literals re-cut, which is a much larger job than this.
-local MODAL_VIEWPORT_FRACTION = 0.82
-local MODAL_SCALE_MIN = 1.0
-local MODAL_SCALE_MAX = 1.45
+local MODAL_VIEWPORT_FRACTION = 0.85
+local MODAL_SCALE_MIN = 0.65
+local MODAL_SCALE_MAX = 1.25
 
 local function computeModalScale(viewport: Vector2): number
 	if viewport.X <= 0 or viewport.Y <= 0 then
-		return MODAL_SCALE_MIN
+		return 1.0
 	end
 	local kx = (viewport.X * MODAL_VIEWPORT_FRACTION) / MODAL_DESIGN_SIZE.X
 	local ky = (viewport.Y * MODAL_VIEWPORT_FRACTION) / MODAL_DESIGN_SIZE.Y
-	-- MIN, not max. The shell is proportionally taller against 580 than it is
-	-- wide against 940, so on every 16:9 display the vertical term binds --
-	-- and taking the smaller of the two is what guarantees the scaled panel
-	-- fits BOTH axes rather than overflowing the shorter one.
 	return math.clamp(math.min(kx, ky), MODAL_SCALE_MIN, MODAL_SCALE_MAX)
 end
 
--- Applies the current scale to one shell and keeps it current. A
--- `UISizeConstraint` clamps a frame's own `Size`; a `UIScale` multiplies how
--- that result is RENDERED. So the constraint keeps the design space fixed at
--- 940x580 -- which is what the fifty reservations depend on -- while the
--- scale alone decides how large it appears.
 local function bindModalScale(shell: Frame)
 	local uiScale = shell:FindFirstChildOfClass("UIScale")
 	if not uiScale then
@@ -181,9 +148,6 @@ local function bindModalScale(shell: Frame)
 
 	apply()
 
-	-- Rebound when the camera itself is replaced, which happens on respawn --
-	-- otherwise the panel keeps the scale it was built with and stops
-	-- tracking a window the player resizes afterwards.
 	local viewportConn: RBXScriptConnection? = nil
 	local function watchCamera()
 		if viewportConn then
@@ -240,12 +204,13 @@ local function formatModalShell(
 	end
 
 	mainShell.ZIndex = 2
-	mainShell.Size = UDim2.new(0.74, 0, 0.74, 0)
+	mainShell.Size = UDim2.new(0, 940, 0, 580)
 	mainShell.Position = UDim2.new(0.5, 0, 0.5, 0)
 	mainShell.AnchorPoint = Vector2.new(0.5, 0.5)
 	mainShell.BackgroundColor3 = THEME.ModalBg
 	mainShell.BackgroundTransparency = 0
 	mainShell.BorderSizePixel = 0
+	mainShell.ClipsDescendants = false
 
 	local panelCorner = mainShell:FindFirstChildOfClass("UICorner")
 	if not panelCorner then
@@ -269,20 +234,8 @@ local function formatModalShell(
 		panelStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
 	end
 
-	local modalConstraint = mainShell:FindFirstChildOfClass("UISizeConstraint")
-	if not modalConstraint then
-		modalConstraint = Instance.new("UISizeConstraint")
-		modalConstraint.Parent = mainShell
-	end
-	-- Declared ONCE, above. These bounds were previously written as literals
-	-- in both branches here and again in `UITheme`, so the design space was
-	-- stated in three places and could drift in any of them.
-	modalConstraint.MinSize = MODAL_MIN_SIZE
-	modalConstraint.MaxSize = MODAL_DESIGN_SIZE
-
 	bindModalScale(mainShell)
 
-	-- Header Bar (50px height)
 	local header = mainShell:FindFirstChild("Header") :: Frame?
 	if not header then
 		header = Instance.new("Frame")
@@ -388,7 +341,6 @@ local function formatModalShell(
 		divider.Visible = false
 	end
 
-	-- Dedicated standardized body canvas (1, -24, 1, -68 at 0, 12, 0, 60)
 	local bodyCanvas = Instance.new("Frame")
 	bodyCanvas.Name = "BodyCanvas"
 	bodyCanvas.Size = UDim2.new(1, -24, 1, -68)
@@ -400,9 +352,9 @@ local function formatModalShell(
 	return mainShell, bodyCanvas
 end
 
---------------------------------------------------------------------------------
+-- ------------------------------
 -- 1. DICE SHAPES OVERLAY
---------------------------------------------------------------------------------
+-- ------------------------------
 local function buildShapesOverlay(
 	screenGui: ScreenGui,
 	overlays: { [string]: Frame },
@@ -421,7 +373,6 @@ local function buildShapesOverlay(
 	colLayout.Padding = UDim.new(0, 12)
 	colLayout.Parent = contentArea
 
-	-- LEFT COLUMN (42% width): Orbit Chamber + Specimen Telemetry Stage
 	local leftCol = Instance.new("Frame")
 	leftCol.Name = "DualStageColumn"
 	leftCol.Size = UDim2.new(0.42, -6, 1, 0)
@@ -435,7 +386,6 @@ local function buildShapesOverlay(
 	leftList.Padding = UDim.new(0, 8)
 	leftList.Parent = leftCol
 
-	-- Top Stage: Equipped Orbit Chamber (46% height)
 	local loadoutChamber = Instance.new("Frame")
 	loadoutChamber.Name = "EquippedFloatingChamber"
 	loadoutChamber.Size = UDim2.new(1, 0, 0.46, -4)
@@ -641,7 +591,6 @@ local function buildShapesOverlay(
 		end
 	end
 
-	-- Bottom Stage: Specimen Telemetry Stage (54% height)
 	local specimenStage = Instance.new("Frame")
 	specimenStage.Name = "SpecimenTelemetryStage"
 	specimenStage.Size = UDim2.new(1, 0, 0.54, -4)
@@ -684,7 +633,6 @@ local function buildShapesOverlay(
 	ssTitle.LayoutOrder = 1
 	ssTitle.Parent = specimenStage
 
-	-- Middle Split Row (Display | Stats)
 	local splitRow = Instance.new("Frame")
 	splitRow.Name = "SplitDisplayStatsRow"
 	splitRow.Size = UDim2.new(1, 0, 1, -70)
@@ -854,7 +802,6 @@ local function buildShapesOverlay(
 	createCaliperRow(3, "volatility", "WIN RATE", "83.3% WIN", 0.833)
 	createCaliperRow(4, "payout", "MAX PAYOUT", "18.0x MULT", 0.36)
 
-	-- Bottom Action Buttons (Stacked at Bottom, 26px height)
 	local equipStateBtn = Instance.new("TextButton")
 	equipStateBtn.Name = "EquipStateBtn"
 	equipStateBtn.Size = UDim2.new(1, 0, 0, 26)
@@ -888,7 +835,6 @@ local function buildShapesOverlay(
 	aiCorner.CornerRadius = UDim.new(0, 5)
 	aiCorner.Parent = addInstanceBtn
 
-	-- RIGHT COLUMN: Milled Toolroom Grid / Ladder (58% width)
 	local rightContainer = Instance.new("Frame")
 	rightContainer.Name = "RightToolroomContainer"
 	rightContainer.Size = UDim2.new(0.58, -6, 1, 0)
@@ -919,7 +865,6 @@ local function buildShapesOverlay(
 	rcPad.PaddingBottom = UDim.new(0, 6)
 	rcPad.Parent = rightContainer
 
-	-- 4-Tab Filter Bar (ALL, HIGH RISK, BALANCED, SAFE)
 	local filterBar = Instance.new("Frame")
 	filterBar.Name = "FilterTabBar"
 	filterBar.Size = UDim2.new(1, 0, 0, 32)
@@ -1022,7 +967,6 @@ local function buildShapesOverlay(
 		end)
 	end
 
-	-- Scrollable Grid Rack
 	local rightCol = Instance.new("ScrollingFrame")
 	rightCol.Name = "ToolroomRackScroll"
 	rightCol.Size = UDim2.new(1, 0, 1, -38)
@@ -1036,28 +980,68 @@ local function buildShapesOverlay(
 	rightCol.LayoutOrder = 2
 	rightCol.Parent = rightContainer
 
+	local rPad = Instance.new("UIPadding")
+	rPad.PaddingLeft = UDim.new(0, 4)
+	rPad.PaddingRight = UDim.new(0, 8)
+	rPad.PaddingTop = UDim.new(0, 4)
+	rPad.PaddingBottom = UDim.new(0, 8)
+	rPad.Parent = rightCol
+
 	local rGrid = Instance.new("UIGridLayout")
-	rGrid.CellSize = UDim2.new(0.5, -4, 0, 118)
+	rGrid.CellSize = UDim2.new(0.5, -9, 0, 118)
 	rGrid.CellPadding = UDim2.new(0, 6, 0, 6)
 	rGrid.SortOrder = Enum.SortOrder.LayoutOrder
 	rGrid.Parent = rightCol
 
 	local cardModels: { Model } = {}
 	local inspectedShapeId = "D6"
+	local currentEquippedShapeList: { string } = { "D6" }
+	local currentDieSlotsCount = 1
+	local currentAscensionsCount = 0
+	local currentCashBalance = 0
+	local ownedShapesMap: { [string]: boolean } = { D2 = true }
+
+	local updateActionButtons: () -> ()
 
 	local function inspectShape(shapeId: string)
 		inspectedShapeId = shapeId
 		local meta = shapeMeta[shapeId] or shapeMeta["D6"]
-		ssTitle.Text = string.format("STATS & SPECIMEN: %s (%s)", meta.name, meta.id)
+		local isOwned = (ownedShapesMap[shapeId] == true)
+		local canUnlock, _ = DiceCatalog.canUnlock(shapeId, ownedShapesMap)
 
-		if statValueLabels["face"] then statValueLabels["face"].Text = meta.faceCount .. " SIDES" end
-		if statMeterFills["face"] then statMeterFills["face"].Size = UDim2.new(meta.faceCount / 20, 0, 1, 0) end
+		if isOwned then
+			ssTitle.Text = string.format("STATS & SPECIMEN: %s (%s)", meta.name, meta.id)
+			if statValueLabels["face"] then statValueLabels["face"].Text = meta.faceCount .. " SIDES" end
+			if statMeterFills["face"] then statMeterFills["face"].Size = UDim2.new(meta.faceCount / 20, 0, 1, 0) end
 
-		if statValueLabels["volatility"] then statValueLabels["volatility"].Text = "VOID " .. meta.voidChance end
-		if statMeterFills["volatility"] then statMeterFills["volatility"].Size = UDim2.new(meta.voidRatio, 0, 1, 0) end
+			if statValueLabels["volatility"] then statValueLabels["volatility"].Text = "VOID " .. meta.voidChance end
+			if statMeterFills["volatility"] then statMeterFills["volatility"].Size = UDim2.new(meta.voidRatio, 0, 1, 0) end
 
-		if statValueLabels["payout"] then statValueLabels["payout"].Text = meta.payoutMultiplier .. " PEAK" end
-		if statMeterFills["payout"] then statMeterFills["payout"].Size = UDim2.new(meta.payoutRatio, 0, 1, 0) end
+			if statValueLabels["payout"] then statValueLabels["payout"].Text = meta.payoutMultiplier .. " PEAK" end
+			if statMeterFills["payout"] then statMeterFills["payout"].Size = UDim2.new(meta.payoutRatio, 0, 1, 0) end
+		elseif canUnlock then
+			local cost = DiceCatalog.getUnlockCost(shapeId) or 0
+			ssTitle.Text = string.format("AVAILABLE: %s [UNLOCK: $%s]", meta.name, Format.formatNumber(cost))
+			if statValueLabels["face"] then statValueLabels["face"].Text = meta.faceCount .. " SIDES" end
+			if statMeterFills["face"] then statMeterFills["face"].Size = UDim2.new(meta.faceCount / 20, 0, 1, 0) end
+
+			if statValueLabels["volatility"] then statValueLabels["volatility"].Text = "VOID " .. meta.voidChance end
+			if statMeterFills["volatility"] then statMeterFills["volatility"].Size = UDim2.new(meta.voidRatio, 0, 1, 0) end
+
+			if statValueLabels["payout"] then statValueLabels["payout"].Text = meta.payoutMultiplier .. " PEAK" end
+			if statMeterFills["payout"] then statMeterFills["payout"].Size = UDim2.new(meta.payoutRatio, 0, 1, 0) end
+		else
+			local prereq = DiceCatalog.getPrerequisite(shapeId)
+			ssTitle.Text = string.format("LOCKED: %s [REQUIRES %s]", meta.name, prereq or "PREVIOUS")
+			if statValueLabels["face"] then statValueLabels["face"].Text = "? SIDES" end
+			if statMeterFills["face"] then statMeterFills["face"].Size = UDim2.new(0, 0, 1, 0) end
+
+			if statValueLabels["volatility"] then statValueLabels["volatility"].Text = "LOCKED" end
+			if statMeterFills["volatility"] then statMeterFills["volatility"].Size = UDim2.new(0, 0, 1, 0) end
+
+			if statValueLabels["payout"] then statValueLabels["payout"].Text = "LOCKED" end
+			if statMeterFills["payout"] then statMeterFills["payout"].Size = UDim2.new(0, 0, 1, 0) end
+		end
 
 		for _, child in ipairs(singleVpContainer:GetChildren()) do
 			if child:IsA("ViewportFrame") then
@@ -1078,7 +1062,152 @@ local function buildShapesOverlay(
 				end
 			end
 		end
+
+		if updateActionButtons then
+			updateActionButtons()
+		end
 	end
+
+	updateActionButtons = function()
+		local isUnlocked = (ownedShapesMap[inspectedShapeId] == true)
+		local ownedTotal = if type(playerInventory) == "table" then (tonumber(playerInventory[inspectedShapeId]) or 0) else 0
+		local inUseCount = 0
+		for _, s in ipairs(currentEquippedShapeList) do
+			if s == inspectedShapeId then
+				inUseCount += 1
+			end
+		end
+		local isEquippedOnSlot1 = (#currentEquippedShapeList > 0 and currentEquippedShapeList[1] == inspectedShapeId)
+		local availableCount = math.max(0, ownedTotal - inUseCount)
+		local cost = DiceCatalog.getUnlockCost(inspectedShapeId) or 0
+
+		if isUnlocked then
+			addInstanceBtn.Visible = true
+			if ownedTotal == 0 then
+				equipStateBtn.Text = "[ NO DICE OWNED ]"
+				equipStateBtn.BackgroundColor3 = THEME.ButtonDark
+				equipStateBtn.TextColor3 = THEME.TextMuted
+				equipStateBtn.AutoButtonColor = false
+
+				if currentCashBalance < cost then
+					addInstanceBtn.Text = string.format("BUY %s ($%s)", inspectedShapeId, Format.formatNumber(cost))
+					addInstanceBtn.BackgroundColor3 = THEME.ButtonDark
+					addInstanceBtn.TextColor3 = THEME.Negative
+					addInstanceBtn.AutoButtonColor = false
+				else
+					addInstanceBtn.Text = string.format("BUY %s ($%s)", inspectedShapeId, Format.formatNumber(cost))
+					addInstanceBtn.BackgroundColor3 = THEME.Positive
+					addInstanceBtn.TextColor3 = THEME.TextDark
+					addInstanceBtn.AutoButtonColor = true
+				end
+			else
+				if isEquippedOnSlot1 then
+					equipStateBtn.Text = "[ EQUIPPED ON DIE 1 ]"
+					equipStateBtn.BackgroundColor3 = THEME.ButtonDark
+					equipStateBtn.TextColor3 = THEME.Positive
+					equipStateBtn.AutoButtonColor = false
+				elseif availableCount > 0 then
+					equipStateBtn.Text = "EQUIP " .. inspectedShapeId .. " TO ACTIVE DIE"
+					equipStateBtn.BackgroundColor3 = THEME.GoldPrimary
+					equipStateBtn.TextColor3 = THEME.TextDark
+					equipStateBtn.AutoButtonColor = true
+				else
+					equipStateBtn.Text = string.format("[ ALL %d IN USE ]", ownedTotal)
+					equipStateBtn.BackgroundColor3 = THEME.ButtonDark
+					equipStateBtn.TextColor3 = THEME.TextMuted
+					equipStateBtn.AutoButtonColor = false
+				end
+
+				if currentCashBalance < cost then
+					addInstanceBtn.Text = string.format("+1 %s INSTANCE ($%s)", inspectedShapeId, Format.formatNumber(cost))
+					addInstanceBtn.BackgroundColor3 = THEME.ButtonDark
+					addInstanceBtn.TextColor3 = THEME.Negative
+					addInstanceBtn.AutoButtonColor = false
+				else
+					addInstanceBtn.Text = string.format("+1 %s INSTANCE ($%s)", inspectedShapeId, Format.formatNumber(cost))
+					addInstanceBtn.BackgroundColor3 = THEME.Positive
+					addInstanceBtn.TextColor3 = THEME.TextDark
+					addInstanceBtn.AutoButtonColor = true
+				end
+			end
+		else
+			addInstanceBtn.Visible = false
+			local canUnlock, _ = DiceCatalog.canUnlock(inspectedShapeId, ownedShapesMap)
+			if canUnlock then
+				local unlockCost = DiceCatalog.getUnlockCost(inspectedShapeId) or 0
+				local canAfford = currentCashBalance >= unlockCost
+				equipStateBtn.Text = string.format("UNLOCK %s ($%s)", inspectedShapeId, Format.formatNumber(unlockCost))
+				equipStateBtn.BackgroundColor3 = if canAfford then THEME.GoldPrimary else THEME.ButtonDark
+				equipStateBtn.TextColor3 = if canAfford then THEME.TextDark else THEME.Negative
+				equipStateBtn.AutoButtonColor = canAfford
+			else
+				local prereq = DiceCatalog.getPrerequisite(inspectedShapeId)
+				equipStateBtn.Text = string.format("LOCKED (REQUIRES %s)", prereq or "PREVIOUS")
+				equipStateBtn.BackgroundColor3 = THEME.ButtonDark
+				equipStateBtn.TextColor3 = THEME.TextMuted
+				equipStateBtn.AutoButtonColor = false
+			end
+		end
+	end
+
+	local actionInFlight = false
+	equipStateBtn.MouseButton1Click:Connect(function()
+		if actionInFlight then return end
+		local isUnlocked = (ownedShapesMap[inspectedShapeId] == true)
+		local ownedTotal = if type(playerInventory) == "table" then (tonumber(playerInventory[inspectedShapeId]) or 0) else 0
+		local inUseCount = 0
+		for _, s in ipairs(currentEquippedShapeList) do
+			if s == inspectedShapeId then
+				inUseCount += 1
+			end
+		end
+		local isEquippedOnSlot1 = (#currentEquippedShapeList > 0 and currentEquippedShapeList[1] == inspectedShapeId)
+		local availableCount = math.max(0, ownedTotal - inUseCount)
+
+		if isUnlocked then
+			if ownedTotal > 0 and availableCount > 0 and not isEquippedOnSlot1 then
+				actionInFlight = true
+				task.spawn(function()
+					NetClient.setShape(1, inspectedShapeId)
+					actionInFlight = false
+					updateActionButtons()
+				end)
+			end
+		else
+			local canUnlock, _ = DiceCatalog.canUnlock(inspectedShapeId, ownedShapesMap)
+			if canUnlock then
+				local unlockCost = DiceCatalog.getUnlockCost(inspectedShapeId) or 0
+				if currentCashBalance < unlockCost then return end
+				actionInFlight = true
+				equipStateBtn.Text = "UNLOCKING..."
+				task.spawn(function()
+					local res = NetClient.buyDiamondNode(inspectedShapeId)
+					actionInFlight = false
+					updateActionButtons()
+				end)
+			end
+		end
+	end)
+
+	local purchaseInFlight = false
+	addInstanceBtn.MouseButton1Click:Connect(function()
+		if purchaseInFlight then return end
+		local isOwned = (ownedShapesMap[inspectedShapeId] == true)
+		if not isOwned then return end
+
+		local cost = DiceCatalog.getUnlockCost(inspectedShapeId) or 0
+		if currentCashBalance < cost then
+			return
+		end
+
+		purchaseInFlight = true
+		addInstanceBtn.Text = "PURCHASING..."
+		task.spawn(function()
+			local res = NetClient.buyDieInstance(inspectedShapeId)
+			purchaseInFlight = false
+			updateActionButtons()
+		end)
+	end)
 
 	for orderIdx, shapeId in ipairs(unlockOrder) do
 		local meta = shapeMeta[shapeId]
@@ -1109,7 +1238,6 @@ local function buildShapesOverlay(
 			cPad.PaddingRight = UDim.new(0, 8)
 			cPad.Parent = card
 
-			-- Title Row
 			local titleRow = Instance.new("Frame")
 			titleRow.Size = UDim2.new(1, 0, 0, 16)
 			titleRow.BackgroundTransparency = 1
@@ -1141,7 +1269,6 @@ local function buildShapesOverlay(
 			dpC.CornerRadius = UDim.new(0, 4)
 			dpC.Parent = diePill
 
-			-- Middle Row (3D Viewport Stage + Stats)
 			local middleRow = Instance.new("Frame")
 			middleRow.Size = UDim2.new(1, 0, 0, 52)
 			middleRow.Position = UDim2.new(0, 0, 0, 20)
@@ -1246,7 +1373,6 @@ local function buildShapesOverlay(
 			pcCorner.CornerRadius = UDim.new(0, 4)
 			pcCorner.Parent = payChip
 
-			-- Bottom Action Button (26px height)
 			local actionBtn = Instance.new("TextButton")
 			actionBtn.Name = "ActionBtn"
 			actionBtn.Size = UDim2.new(1, 0, 0, 26)
@@ -1254,7 +1380,7 @@ local function buildShapesOverlay(
 			actionBtn.BackgroundColor3 = THEME.ButtonDark
 			actionBtn.BorderSizePixel = 0
 			actionBtn.AutoButtonColor = false
-			actionBtn.Text = "LOCKED"
+			actionBtn.Text = "SELECT"
 			actionBtn.TextColor3 = THEME.TextMuted
 			actionBtn.Font = Enum.Font.GothamBold
 			actionBtn.TextSize = 11
@@ -1278,9 +1404,8 @@ local function buildShapesOverlay(
 		end
 	end
 
-	inspectShape("D6")
+	inspectShape("D2")
 
-	-- Turntable loop
 	local animActive = false
 	local elapsed = 0
 
@@ -1321,50 +1446,79 @@ local function buildShapesOverlay(
 	end)
 
 	local function refreshShapes(state: any)
-		-- `Shape`, capitalised, as `StateSyncService.buildSnapshot` writes it.
-		-- This read asked for `shape` and so never matched, pinning the whole
-		-- panel to the "D6" fallback -- the same defect as the slots panel, in
-		-- a second place.
-		local currentShape = if type(state) == "table" and type(state.dice) == "table" and #state.dice > 0
-			then tostring(state.dice[1].Shape or "D6")
-			else "D6"
+		if type(state) == "table" then
+			currentCashBalance = tonumber(state.cash) or 0
+			currentDieSlotsCount = tonumber(state.dieSlots) or 1
+			currentAscensionsCount = tonumber(state.ascensions) or 0
 
-		local equippedList = {}
-		if type(state) == "table" and type(state.dice) == "table" then
-			for _, d in ipairs(state.dice) do
-				table.insert(equippedList, d.Shape or "D6")
-			end
-		end
-		if #equippedList == 0 then
-			table.insert(equippedList, currentShape)
-		end
-
-		rebuildOrbitChamber(equippedList)
-
-		for shapeId, btn in pairs(cardActionBtns) do
-			local isEquipped = false
-			for _, eqId in ipairs(equippedList) do
-				if eqId == shapeId then isEquipped = true; break end
+			if type(state.diamondTree) == "table" and type(state.diamondTree.Shapes) == "table" then
+				ownedShapesMap = state.diamondTree.Shapes
 			end
 
-			if isEquipped then
-				btn.Text = "EQUIPPED"
-				btn.BackgroundColor3 = THEME.ButtonDark
-				btn.TextColor3 = THEME.GoldPrimary
-			else
-				btn.Text = "SELECT"
-				btn.BackgroundColor3 = THEME.ButtonDark
-				btn.TextColor3 = THEME.TextMuted
+			local currentShape = if type(state.dice) == "table" and #state.dice > 0
+				then tostring(state.dice[1].Shape or "D2")
+				else "D2"
+
+			currentEquippedShapeList = {}
+			if type(state.dice) == "table" then
+				for _, d in ipairs(state.dice) do
+					table.insert(currentEquippedShapeList, d.Shape or "D2")
+				end
 			end
+			if #currentEquippedShapeList == 0 then
+				table.insert(currentEquippedShapeList, currentShape)
+			end
+
+			rebuildOrbitChamber(currentEquippedShapeList)
+
+			for shapeId, btn in pairs(cardActionBtns) do
+				local isOwned = (ownedShapesMap[shapeId] == true)
+				local isEquipped = false
+				for _, eqId in ipairs(currentEquippedShapeList) do
+					if eqId == shapeId then isEquipped = true; break end
+				end
+
+				local card = cardFrames[shapeId]
+				local cStroke = cardStrokes[shapeId]
+
+				if isOwned then
+					if card then card.BackgroundColor3 = THEME.InsetBg end
+					if isEquipped then
+						btn.Text = "EQUIPPED"
+						btn.BackgroundColor3 = THEME.ButtonDark
+						btn.TextColor3 = THEME.GoldPrimary
+					else
+						btn.Text = "SELECT"
+						btn.BackgroundColor3 = THEME.ButtonDark
+						btn.TextColor3 = THEME.TextMuted
+					end
+				else
+					local canUnlock, _ = DiceCatalog.canUnlock(shapeId, ownedShapesMap)
+					if canUnlock then
+						local unlockCost = DiceCatalog.getUnlockCost(shapeId) or 0
+						if card then card.BackgroundColor3 = THEME.InsetBg end
+						btn.Text = string.format("UNLOCK ($%s)", Format.formatNumber(unlockCost))
+						btn.BackgroundColor3 = if currentCashBalance >= unlockCost then THEME.GoldPrimary else THEME.ButtonDark
+						btn.TextColor3 = if currentCashBalance >= unlockCost then THEME.TextDark else THEME.Negative
+					else
+						if card then card.BackgroundColor3 = Color3.fromRGB(14, 12, 10) end
+						btn.Text = "[ LOCKED ]"
+						btn.BackgroundColor3 = THEME.ButtonDark
+						btn.TextColor3 = THEME.TextMuted
+					end
+				end
+			end
+
+			updateActionButtons()
 		end
 	end
 
 	return refreshShapes
 end
 
---------------------------------------------------------------------------------
+-- ------------------------------
 -- 2. DAILY QUESTS & REWARDS OVERLAY
---------------------------------------------------------------------------------
+-- ------------------------------
 local function buildQuestsOverlay(
 	screenGui: ScreenGui,
 	overlays: { [string]: Frame },
@@ -1383,7 +1537,6 @@ local function buildQuestsOverlay(
 	mainRowLayout.Padding = UDim.new(0, 12)
 	mainRowLayout.Parent = questVaultBody
 
-	-- Left Column (58%): 3 Heavy Quest Directives
 	local leftCol = Instance.new("Frame")
 	leftCol.Name = "LeftQuestsCol"
 	leftCol.Size = UDim2.new(0.58, -6, 1, 0)
@@ -1563,7 +1716,6 @@ local function buildQuestsOverlay(
 		})
 	end
 
-	-- Right Column (42%): Stacked Playtime Rewards & Daily Login
 	local rightCol = Instance.new("Frame")
 	rightCol.Name = "RightProgressionCol"
 	rightCol.Size = UDim2.new(0.42, -6, 1, 0)
@@ -1576,7 +1728,6 @@ local function buildQuestsOverlay(
 	rList.SortOrder = Enum.SortOrder.LayoutOrder
 	rList.Parent = rightCol
 
-	-- Top Pod: Playtime Rewards (58% height, clipping enabled)
 	local chestPod = Instance.new("Frame")
 	chestPod.Name = "PlaytimeRewardsPod"
 	chestPod.Size = UDim2.new(1, 0, 0.58, -4)
@@ -1626,6 +1777,13 @@ local function buildQuestsOverlay(
 	chestScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
 	chestScroll.Parent = chestPod
 
+	local csPad = Instance.new("UIPadding")
+	csPad.PaddingLeft = UDim.new(0, 4)
+	csPad.PaddingRight = UDim.new(0, 8)
+	csPad.PaddingTop = UDim.new(0, 4)
+	csPad.PaddingBottom = UDim.new(0, 6)
+	csPad.Parent = chestScroll
+
 	local cpList = Instance.new("UIListLayout")
 	cpList.Padding = UDim.new(0, 6)
 	cpList.SortOrder = Enum.SortOrder.LayoutOrder
@@ -1645,7 +1803,7 @@ local function buildQuestsOverlay(
 
 	for i, tier in ipairs(PLAYTIME_CONFIG) do
 		local tRow = Instance.new("Frame")
-		tRow.Size = UDim2.new(1, -4, 0, 52)
+		tRow.Size = UDim2.new(1, 0, 0, 52)
 		tRow.BackgroundColor3 = THEME.InsetBg
 		tRow.BorderSizePixel = 0
 		tRow.LayoutOrder = i
@@ -1749,7 +1907,6 @@ local function buildQuestsOverlay(
 		})
 	end
 
-	-- Bottom Pod: Daily Login Streak (42% height with 3x2 + Day 7 layout)
 	local loginPod = Instance.new("Frame")
 	loginPod.Name = "DailyLoginPod"
 	loginPod.Size = UDim2.new(1, 0, 0.42, -4)
@@ -1933,7 +2090,6 @@ local function buildQuestsOverlay(
 		createDayCard(LOGIN_LADDER[i], row2)
 	end
 
-	-- Day 7 Grand Reward
 	local day7Card = Instance.new("Frame")
 	day7Card.Name = "Day7GrandReward"
 	day7Card.Size = UDim2.new(0.28, -3, 1, 0)
@@ -2013,7 +2169,6 @@ local function buildQuestsOverlay(
 	})
 
 	local function refreshQuests(state: any)
-		-- Update playtime tiers
 		local sessionSec = os.clock() - sessionStartTime
 		for _, row in ipairs(playtimeRows) do
 			if not row.state.claimed then
@@ -2037,7 +2192,6 @@ local function buildQuestsOverlay(
 			end
 		end
 
-		-- Refresh Daily Login Matrix
 		local streakData = if type(state) == "table" then state.loginStreak else nil
 		local currentDay = 1
 		local claimedToday = false
@@ -2100,9 +2254,9 @@ local function buildQuestsOverlay(
 	return refreshQuests
 end
 
---------------------------------------------------------------------------------
+-- ------------------------------
 -- 3. SHOP & EXCHANGE OVERLAY
---------------------------------------------------------------------------------
+-- ------------------------------
 local function buildShopOverlay(
 	screenGui: ScreenGui,
 	overlays: { [string]: Frame },
@@ -2115,7 +2269,6 @@ local function buildShopOverlay(
 
 	local mainShell, shopBodyCanvas = formatModalShell(shopOverlay, "~ Shop & Exchange ~", getController)
 
-	-- Category Selector Tabs Bar (36px height)
 	local categoryBar = Instance.new("Frame")
 	categoryBar.Name = "CategoryBar"
 	categoryBar.Size = UDim2.new(1, 0, 0, 36)
@@ -2204,7 +2357,6 @@ local function buildShopOverlay(
 		end)
 	end
 
-	-- Scrolling Shop Body
 	local shopScroll = Instance.new("ScrollingFrame")
 	shopScroll.Name = "ShopGridScroll"
 	shopScroll.Position = UDim2.new(0, 0, 0, 42)
@@ -2218,9 +2370,16 @@ local function buildShopOverlay(
 	shopScroll.ClipsDescendants = true
 	shopScroll.Parent = shopBodyCanvas
 
+	local sPad = Instance.new("UIPadding")
+	sPad.PaddingLeft = UDim.new(0, 6)
+	sPad.PaddingRight = UDim.new(0, 12)
+	sPad.PaddingTop = UDim.new(0, 6)
+	sPad.PaddingBottom = UDim.new(0, 10)
+	sPad.Parent = shopScroll
+
 	local gridLayout = Instance.new("UIGridLayout")
-	gridLayout.CellSize = UDim2.new(0.5, -6, 0, 176)
-	gridLayout.CellPadding = UDim2.new(0, 12, 0, 12)
+	gridLayout.CellSize = UDim2.new(0.5, -14, 0, 176)
+	gridLayout.CellPadding = UDim2.new(0, 10, 0, 10)
 	gridLayout.SortOrder = Enum.SortOrder.LayoutOrder
 	gridLayout.Parent = shopScroll
 
@@ -2255,9 +2414,6 @@ local function buildShopOverlay(
 		TimeSkip24 = "Pays 24 hours at your own earning rate.",
 	}
 
-	-- THE OWNED-STATE REGISTRY. Only gamepasses appear here: a pass is owned
-	-- forever and must stop being offered, whereas a developer product (gems,
-	-- boosts, time skips) is repeatable and always has a live BUY button.
 	type ShopPassCard = {
 		button: TextButton,
 		blurb: TextLabel,
@@ -2287,10 +2443,6 @@ local function buildShopOverlay(
 		cCorn.Parent = card
 
 		local cardStroke = Instance.new("UIStroke")
-		-- `entry.owned` is not a field on `MonetisationCatalog.Entry`; the
-		-- catalog describes the PRODUCT, and ownership is per-player state that
-		-- arrives on the snapshot. Reading it here was always nil, so this
-		-- branch never fired. `refreshShop` repaints this stroke instead.
 		cardStroke.Color = THEME.StrokeSubtle
 		cardStroke.Thickness = 1
 		cardStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
@@ -2303,10 +2455,6 @@ local function buildShopOverlay(
 		cardPadding.PaddingRight = UDim.new(0, 12)
 		cardPadding.Parent = card
 
-		-- FULL HEIGHT. The `-40` reserved room for an action row that was
-		-- anchored outside this stack; the row is a child of it now, so the
-		-- layout accounts for those pixels itself and reserving them a second
-		-- time would leave a 40px gap under every card.
 		local textStack = Instance.new("Frame")
 		textStack.Name = "TextStack"
 		textStack.Size = UDim2.new(1, 0, 1, 0)
@@ -2392,20 +2540,6 @@ local function buildShopOverlay(
 			fine.Parent = textStack
 		end
 
-		-- INSIDE THE LAYOUT, not anchored to the card's bottom edge.
-		--
-		-- Anchoring it put the row OUTSIDE the `UIListLayout` governing the text
-		-- stack, so the layout could not see it and had no reason to leave room:
-		-- the tier detail above carries `AutomaticSize.Y`, and once it grew past
-		-- the 40px the stack reserved it rendered straight through the BUY
-		-- button. The reservation was 40px against a 42px need before any text
-		-- grew at all. `TextFits` cannot catch this -- it reports truncation, and
-		-- an auto-sized label never truncates (L-058).
-		--
-		-- In the layout with the highest sort order it is always last, and the
-		-- blurb's existing `UIFlexItem.Fill` absorbs the slack -- so the buttons
-		-- still line up across a row of equal-height cards, which is what the
-		-- anchor was for, but now they cannot be overlapped.
 		local actionRow = Instance.new("Frame")
 		actionRow.Name = "ActionRow"
 		actionRow.Size = UDim2.new(1, 0, 0, 32)
@@ -2419,11 +2553,6 @@ local function buildShopOverlay(
 		buyBtn.BackgroundColor3 = THEME.GoldPrimary
 		buyBtn.BorderSizePixel = 0
 		buyBtn.Font = Enum.Font.GothamBold
-		-- "BUY", NOT A PRICE. This read `entry.priceRobux`, which does not exist
-		-- on `Entry` -- so `or 0` fired for every item and every button in the
-		-- shop advertised "BUY FOR R$ 0". The catalog holds no price on purpose:
-		-- Roblox owns the price, it varies by region and sale, and a figure
-		-- asserted here is one the platform's own prompt will contradict.
 		buyBtn.Text = "BUY"
 		buyBtn.TextColor3 = THEME.TextDark
 		buyBtn.TextSize = 12
@@ -2433,8 +2562,6 @@ local function buildShopOverlay(
 		bbC.CornerRadius = UDim.new(0, 6)
 		bbC.Parent = buyBtn
 
-		-- OWNED, shown in the button's place rather than beside it, so an owned
-		-- pass cannot be bought twice.
 		local ownedPill = Instance.new("TextLabel")
 		ownedPill.Name = "OwnedPill"
 		ownedPill.Size = UDim2.fromScale(1, 1)
@@ -2451,12 +2578,6 @@ local function buildShopOverlay(
 		opC.CornerRadius = UDim.new(0, 6)
 		opC.Parent = ownedPill
 
-		-- THE PURCHASE ITSELF. The revamp left every BUY button inert -- no
-		-- handler at all, on the only screen in the game that earns money.
-		--
-		-- The client never grants anything: it opens the platform prompt, and
-		-- the grant happens server-side in `ProcessReceipt` against the receipt
-		-- Roblox issues. A failure to OPEN the window is all this can report.
 		local assetId = entry.assetId
 		buyBtn.MouseButton1Click:Connect(function()
 			if assetId == nil then
@@ -2491,9 +2612,6 @@ local function buildShopOverlay(
 		end
 	end
 
-	-- Paints owned state across the gamepass cards. Was an empty stub after the
-	-- revamp, so no card ever showed OWNED and every pass stayed on sale to the
-	-- player who already had it.
 	local function refreshShop(state: any)
 		local owned = if type(state) == "table" and type(state.ownedPasses) == "table"
 			then state.ownedPasses
@@ -2511,9 +2629,9 @@ local function buildShopOverlay(
 	return refreshShop
 end
 
---------------------------------------------------------------------------------
+-- ------------------------------
 -- 4. THE SOVEREIGN ASCENSION VAULT OVERLAY
---------------------------------------------------------------------------------
+-- ------------------------------
 local function buildAscendOverlay(
 	screenGui: ScreenGui,
 	overlays: { [string]: Frame },
@@ -2538,7 +2656,6 @@ local function buildAscendOverlay(
 	bodyLayout.Padding = UDim.new(0, 12)
 	bodyLayout.Parent = bodyRow
 
-	-- LEFT COLUMN (48%): Prestige Command Pod
 	local leftCol = Instance.new("Frame")
 	leftCol.Name = "LeftCommandCol"
 	leftCol.Size = UDim2.new(0.48, -6, 1, 0)
@@ -2682,12 +2799,12 @@ local function buildAscendOverlay(
 	mcList.Parent = metricsCard
 
 	local mHeader = Instance.new("TextLabel")
-	mHeader.Size = UDim2.new(1, 0, 0, 16)
+	mHeader.Size = UDim2.new(1, 0, 0, 18)
 	mHeader.BackgroundTransparency = 1
 	mHeader.Font = Enum.Font.GothamBold
 	mHeader.Text = "VAULT YIELD & PROJECTIONS"
 	mHeader.TextColor3 = THEME.GoldPrimary
-	mHeader.TextSize = 11
+	mHeader.TextSize = 12.5
 	mHeader.TextXAlignment = Enum.TextXAlignment.Left
 	mHeader.LayoutOrder = 1
 	mHeader.Parent = metricsCard
@@ -2705,7 +2822,7 @@ local function buildAscendOverlay(
 		rLabel.Font = Enum.Font.GothamMedium
 		rLabel.Text = lblText
 		rLabel.TextColor3 = THEME.TextMuted
-		rLabel.TextSize = 11
+		rLabel.TextSize = 12
 		rLabel.TextXAlignment = Enum.TextXAlignment.Left
 		rLabel.Parent = row
 
@@ -2716,7 +2833,7 @@ local function buildAscendOverlay(
 		rVal.Font = Enum.Font.GothamBold
 		rVal.Text = defaultVal
 		rVal.TextColor3 = valColor
-		rVal.TextSize = 12
+		rVal.TextSize = 13
 		rVal.TextXAlignment = Enum.TextXAlignment.Right
 		rVal.Parent = row
 		return rVal
@@ -2728,13 +2845,13 @@ local function buildAscendOverlay(
 
 	local ascendBtn = Instance.new("TextButton")
 	ascendBtn.Name = "AscendButton"
-	ascendBtn.Size = UDim2.new(1, 0, 0, 42)
+	ascendBtn.Size = UDim2.new(1, 0, 0, 44)
 	ascendBtn.BackgroundColor3 = THEME.GoldPrimary
 	ascendBtn.BorderSizePixel = 0
 	ascendBtn.Font = Enum.Font.GothamBold
 	ascendBtn.Text = "SEAL THE VAULT & ASCEND"
 	ascendBtn.TextColor3 = THEME.TextDark
-	ascendBtn.TextSize = 13
+	ascendBtn.TextSize = 14
 	ascendBtn.LayoutOrder = 7
 	ascendBtn.Parent = leftCol
 
@@ -2745,6 +2862,7 @@ local function buildAscendOverlay(
 	local bStroke = Instance.new("UIStroke")
 	bStroke.Color = THEME.StrokeGold
 	bStroke.Thickness = 1
+	bStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
 	bStroke.Parent = ascendBtn
 
 	local ascendStatus = Instance.new("TextLabel")
@@ -2754,12 +2872,11 @@ local function buildAscendOverlay(
 	ascendStatus.Font = Enum.Font.GothamMedium
 	ascendStatus.Text = "Ready to ascend. Press button to begin two-step confirmation."
 	ascendStatus.TextColor3 = THEME.GoldPrimary
-	ascendStatus.TextSize = 10
+	ascendStatus.TextSize = 11.5
 	ascendStatus.TextWrapped = true
 	ascendStatus.LayoutOrder = 8
 	ascendStatus.Parent = leftCol
 
-	-- RIGHT COLUMN (52%): Retention Ledger
 	local rightCol = Instance.new("Frame")
 	rightCol.Name = "RightLedgerCol"
 	rightCol.Size = UDim2.new(0.52, -6, 1, 0)
@@ -2772,7 +2889,6 @@ local function buildAscendOverlay(
 	rightLayout.SortOrder = Enum.SortOrder.LayoutOrder
 	rightLayout.Parent = rightCol
 
-	-- Top Card: Preserved Wealth
 	local keptCard = Instance.new("Frame")
 	keptCard.Name = "KeptCard"
 	keptCard.Size = UDim2.new(1, 0, 0.5, -4)
@@ -2835,7 +2951,6 @@ local function buildAscendOverlay(
 		row.Parent = keptCard
 	end
 
-	-- Bottom Card: Reset Losses
 	local lostCard = Instance.new("Frame")
 	lostCard.Name = "LostCard"
 	lostCard.Size = UDim2.new(1, 0, 0.5, -4)
@@ -2898,16 +3013,6 @@ local function buildAscendOverlay(
 		row.Parent = lostCard
 	end
 
-	-- THE TWO-STEP CONFIRM.
-	--
-	-- The status label already promised one; the revamp shipped no handler at
-	-- all, so the button was decorative. Ascension is IRREVERSIBLE -- it wipes
-	-- cash, dice and upgrades -- so a single press must never reach the server.
-	--
-	-- Arming is deliberately fragile: it expires on a timer, it is cleared when
-	-- the panel closes, and `refreshAscend` disarms it the moment the reward
-	-- stops being available. Every one of those is a path where the player's
-	-- intent has gone stale, and the safe reading of stale intent is "no".
 	local ascendArmed = false
 	local ascendInFlight = false
 	local armToken = 0
@@ -2927,11 +3032,6 @@ local function buildAscendOverlay(
 		ascendBtn.TextColor3 = if enabled then THEME.TextDark else THEME.TextMuted
 	end
 
-	-- CLOSING THE PANEL CANCELS THE CONFIRMATION. Bound to the overlay's own
-	-- visibility rather than routed through the controller's `closeAll`, so it
-	-- holds for every path that hides this panel -- the close button, the scrim,
-	-- and opening a different overlay -- without any of them having to know that
-	-- ascend keeps arming state.
 	ascendOverlay:GetPropertyChangedSignal("Visible"):Connect(function()
 		if not ascendOverlay.Visible and ascendArmed then
 			disarmAscend()
@@ -2953,9 +3053,6 @@ local function buildAscendOverlay(
 				.. "within a few seconds to confirm, or wait to cancel."
 			ascendStatus.TextColor3 = THEME.Negative
 			task.delay(ARM_WINDOW_SEC, function()
-				-- Only the arming that is still current may disarm. A second
-				-- arm inside the window bumps the token, so an older timer
-				-- firing late cannot cancel a fresh confirmation.
 				if ascendArmed and armToken == myToken then
 					disarmAscend()
 					ascendStatus.Text = "Confirmation expired. Press again to ascend."
@@ -2974,9 +3071,6 @@ local function buildAscendOverlay(
 			local result = NetClient.ascend()
 			ascendInFlight = false
 			if result.ok then
-				-- Deliberately no success figure here. The reward is the
-				-- server's to state, and the snapshot that follows repaints
-				-- every number on this panel from the profile.
 				ascendStatus.Text = "Ascension complete."
 				ascendStatus.TextColor3 = THEME.Positive
 			else
@@ -2988,12 +3082,6 @@ local function buildAscendOverlay(
 	end)
 
 	local function refreshAscend(state: any)
-		-- CASH ON HAND -- the same figure the HUD's cash readout shows.
-		--
-		-- Reading `lifetimeCash` here once told a player "$1.09M this run" when
-		-- they had earned nothing of the sort, because lifetime never resets.
-		-- Reading `cash` means this panel and the HUD are the same number by
-		-- construction and cannot contradict each other.
 		local cash = if type(state) == "table" then tonumber(state.cash) or 0 else 0
 		local ascensions = if type(state) == "table" then tonumber(state.ascensions) or 0 else 0
 		local diamonds = if type(state) == "table" then tonumber(state.diamonds) else nil
@@ -3003,9 +3091,6 @@ local function buildAscendOverlay(
 		careerAscendVal.Text = string.format("%d Completed", ascensions)
 		nextTierVal.Text = "at $" .. Format.formatNumber(threshold)
 
-		-- A figure with no field on the wire reads "--". It does NOT read zero:
-		-- "0 diamonds" is a claim about the player's balance, and a balance the
-		-- panel does not actually know is not one it may assert.
 		if diamonds ~= nil then
 			postVaultVal.Text = string.format("%s \u{2666} (+%s)",
 				Format.formatNumber(diamonds), Format.formatNumber(projected))
@@ -3019,8 +3104,6 @@ local function buildAscendOverlay(
 		if projected > 0 then
 			ascendReward.Text = string.format("+%s \u{2666} DIAMONDS", Format.formatNumber(projected))
 			ascendReward.TextColor3 = THEME.Diamonds
-			-- Earned / target stays visible past the threshold so the two
-			-- numbers remain comparable for the whole run.
 			ascendProgress.Text = string.format("Run Basis: $%s / $%s",
 				Format.formatNumber(cash), Format.formatNumber(threshold))
 			setAscendEnabled(true)
@@ -3035,9 +3118,6 @@ local function buildAscendOverlay(
 			ascendProgress.Text = string.format("Run Basis: $%s / $%s",
 				Format.formatNumber(cash), Format.formatNumber(threshold))
 			setAscendEnabled(false)
-			-- THE REWARD WENT AWAY, SO THE ARMING MUST TOO. Otherwise a player
-			-- who armed at the threshold and then spent below it still has a
-			-- live confirmation pointed at a server call that would refuse.
 			if ascendArmed then
 				disarmAscend()
 			end
@@ -3051,9 +3131,9 @@ local function buildAscendOverlay(
 	return refreshAscend
 end
 
---------------------------------------------------------------------------------
+-- ------------------------------
 -- 5. SETTINGS OVERLAY
---------------------------------------------------------------------------------
+-- ------------------------------
 local function buildSettingsOverlay(
 	screenGui: ScreenGui,
 	overlays: { [string]: Frame },
@@ -3067,7 +3147,7 @@ local function buildSettingsOverlay(
 	local mainShell, settingsBody = formatModalShell(settingsOverlay, "~ Settings & Options ~", getController)
 
 	local sList = Instance.new("UIListLayout")
-	sList.Padding = UDim.new(0, 8)
+	sList.Padding = UDim.new(0, 12)
 	sList.SortOrder = Enum.SortOrder.LayoutOrder
 	sList.Parent = settingsBody
 
@@ -3076,7 +3156,7 @@ local function buildSettingsOverlay(
 	for i, def in ipairs(SettingsCatalog.ordered()) do
 		local row = Instance.new("Frame")
 		row.Name = "SettingRow_" .. def.key
-		row.Size = UDim2.new(1, 0, 0, 58)
+		row.Size = UDim2.new(1, 0, 0, 80)
 		row.BackgroundColor3 = THEME.CardBg
 		row.BorderSizePixel = 0
 		row.LayoutOrder = i
@@ -3093,43 +3173,43 @@ local function buildSettingsOverlay(
 		rowStroke.Parent = row
 
 		local rowPadding = Instance.new("UIPadding")
-		rowPadding.PaddingTop = UDim.new(0, 8)
-		rowPadding.PaddingBottom = UDim.new(0, 8)
-		rowPadding.PaddingLeft = UDim.new(0, 14)
-		rowPadding.PaddingRight = UDim.new(0, 14)
+		rowPadding.PaddingTop = UDim.new(0, 12)
+		rowPadding.PaddingBottom = UDim.new(0, 12)
+		rowPadding.PaddingLeft = UDim.new(0, 18)
+		rowPadding.PaddingRight = UDim.new(0, 18)
 		rowPadding.Parent = row
 
 		local infoFrame = Instance.new("Frame")
 		infoFrame.Name = "InfoFrame"
-		infoFrame.Size = UDim2.new(1, -135, 1, 0)
+		infoFrame.Size = UDim2.new(1, -160, 1, 0)
 		infoFrame.BackgroundTransparency = 1
 		infoFrame.Parent = row
 
 		local infoList = Instance.new("UIListLayout")
-		infoList.Padding = UDim.new(0, 2)
+		infoList.Padding = UDim.new(0, 4)
 		infoList.SortOrder = Enum.SortOrder.LayoutOrder
 		infoList.Parent = infoFrame
 
 		local label = Instance.new("TextLabel")
 		label.Name = "Label"
-		label.Size = UDim2.new(1, 0, 0, 20)
+		label.Size = UDim2.new(1, 0, 0, 24)
 		label.BackgroundTransparency = 1
 		label.Font = Enum.Font.GothamBold
 		label.Text = def.label
 		label.TextColor3 = THEME.GoldPrimary
-		label.TextSize = 14
+		label.TextSize = 16
 		label.TextXAlignment = Enum.TextXAlignment.Left
 		label.LayoutOrder = 1
 		label.Parent = infoFrame
 
 		local blurb = Instance.new("TextLabel")
 		blurb.Name = "Blurb"
-		blurb.Size = UDim2.new(1, 0, 0, 18)
+		blurb.Size = UDim2.new(1, 0, 0, 22)
 		blurb.BackgroundTransparency = 1
 		blurb.Font = Enum.Font.Gotham
 		blurb.Text = def.blurb
 		blurb.TextColor3 = THEME.TextMuted
-		blurb.TextSize = 12
+		blurb.TextSize = 13
 		blurb.TextWrapped = true
 		blurb.TextXAlignment = Enum.TextXAlignment.Left
 		blurb.LayoutOrder = 2
@@ -3137,14 +3217,14 @@ local function buildSettingsOverlay(
 
 		local toggleBtn = Instance.new("TextButton")
 		toggleBtn.Name = "ToggleButton"
-		toggleBtn.Size = UDim2.new(0, 120, 0, 36)
-		toggleBtn.Position = UDim2.new(1, -120, 0.5, -18)
+		toggleBtn.Size = UDim2.new(0, 140, 0, 46)
+		toggleBtn.Position = UDim2.new(1, -140, 0.5, -23)
 		toggleBtn.BackgroundColor3 = THEME.GoldPrimary
 		toggleBtn.BorderSizePixel = 0
 		toggleBtn.Font = Enum.Font.GothamBold
 		toggleBtn.Text = "ACTIVE"
 		toggleBtn.TextColor3 = THEME.TextDark
-		toggleBtn.TextSize = 13
+		toggleBtn.TextSize = 14
 		toggleBtn.Parent = row
 
 		local btnCorner = Instance.new("UICorner")
@@ -3154,6 +3234,7 @@ local function buildSettingsOverlay(
 		local btnStroke = Instance.new("UIStroke")
 		btnStroke.Color = THEME.StrokeGold
 		btnStroke.Thickness = 1
+		btnStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
 		btnStroke.Parent = toggleBtn
 
 		local key = def.key
@@ -3191,10 +3272,9 @@ local function buildSettingsOverlay(
 		}
 	end
 
-	-- PROMO CODES (Casino Ledger Style, 90px height)
 	local codeCard = Instance.new("Frame")
 	codeCard.Name = "PromoCard"
-	codeCard.Size = UDim2.new(1, 0, 0, 90)
+	codeCard.Size = UDim2.new(1, 0, 0, 126)
 	codeCard.BackgroundColor3 = THEME.CardBg
 	codeCard.BorderSizePixel = 0
 	codeCard.LayoutOrder = 90
@@ -3211,36 +3291,36 @@ local function buildSettingsOverlay(
 	promoStroke.Parent = codeCard
 
 	local promoPad = Instance.new("UIPadding")
-	promoPad.PaddingTop = UDim.new(0, 10)
-	promoPad.PaddingBottom = UDim.new(0, 10)
-	promoPad.PaddingLeft = UDim.new(0, 14)
-	promoPad.PaddingRight = UDim.new(0, 14)
+	promoPad.PaddingTop = UDim.new(0, 14)
+	promoPad.PaddingBottom = UDim.new(0, 14)
+	promoPad.PaddingLeft = UDim.new(0, 18)
+	promoPad.PaddingRight = UDim.new(0, 18)
 	promoPad.Parent = codeCard
 
 	local promoList = Instance.new("UIListLayout")
-	promoList.Padding = UDim.new(0, 6)
+	promoList.Padding = UDim.new(0, 10)
 	promoList.SortOrder = Enum.SortOrder.LayoutOrder
 	promoList.Parent = codeCard
 
 	local codeTitle = Instance.new("TextLabel")
-	codeTitle.Size = UDim2.new(1, 0, 0, 18)
+	codeTitle.Size = UDim2.new(1, 0, 0, 22)
 	codeTitle.BackgroundTransparency = 1
 	codeTitle.Font = Enum.Font.GothamBold
 	codeTitle.Text = "PROMO CODE REDEMPTION"
 	codeTitle.TextColor3 = THEME.GoldPrimary
-	codeTitle.TextSize = 13
+	codeTitle.TextSize = 14
 	codeTitle.TextXAlignment = Enum.TextXAlignment.Left
 	codeTitle.LayoutOrder = 1
 	codeTitle.Parent = codeCard
 
 	local inputRow = Instance.new("Frame")
-	inputRow.Size = UDim2.new(1, 0, 0, 36)
+	inputRow.Size = UDim2.new(1, 0, 0, 48)
 	inputRow.BackgroundTransparency = 1
 	inputRow.LayoutOrder = 2
 	inputRow.Parent = codeCard
 
 	local codeBox = Instance.new("TextBox")
-	codeBox.Size = UDim2.new(1, -130, 1, 0)
+	codeBox.Size = UDim2.new(1, -152, 1, 0)
 	codeBox.BackgroundColor3 = THEME.InsetBg
 	codeBox.BorderSizePixel = 0
 	codeBox.Font = Enum.Font.Code
@@ -3248,7 +3328,7 @@ local function buildSettingsOverlay(
 	codeBox.PlaceholderColor3 = Color3.fromRGB(140, 130, 120)
 	codeBox.Text = ""
 	codeBox.TextColor3 = THEME.TextPrimary
-	codeBox.TextSize = 13
+	codeBox.TextSize = 14
 	codeBox.TextXAlignment = Enum.TextXAlignment.Left
 	codeBox.ClearTextOnFocus = false
 	codeBox.Parent = inputRow
@@ -3258,24 +3338,25 @@ local function buildSettingsOverlay(
 	boxCorner.Parent = codeBox
 
 	local boxPad = Instance.new("UIPadding")
-	boxPad.PaddingLeft = UDim.new(0, 10)
-	boxPad.PaddingRight = UDim.new(0, 10)
+	boxPad.PaddingLeft = UDim.new(0, 14)
+	boxPad.PaddingRight = UDim.new(0, 14)
 	boxPad.Parent = codeBox
 
 	local boxStroke = Instance.new("UIStroke")
 	boxStroke.Color = THEME.StrokeSubtle
 	boxStroke.Thickness = 1
+	boxStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
 	boxStroke.Parent = codeBox
 
 	local redeemBtn = Instance.new("TextButton")
-	redeemBtn.Size = UDim2.new(0, 120, 1, 0)
-	redeemBtn.Position = UDim2.new(1, -120, 0, 0)
+	redeemBtn.Size = UDim2.new(0, 140, 1, 0)
+	redeemBtn.Position = UDim2.new(1, -140, 0, 0)
 	redeemBtn.BackgroundColor3 = THEME.GoldPrimary
 	redeemBtn.BorderSizePixel = 0
 	redeemBtn.Font = Enum.Font.GothamBold
 	redeemBtn.Text = "REDEEM"
 	redeemBtn.TextColor3 = THEME.TextDark
-	redeemBtn.TextSize = 13
+	redeemBtn.TextSize = 14
 	redeemBtn.Parent = inputRow
 
 	local rbc = Instance.new("UICorner")
@@ -3297,9 +3378,9 @@ local function buildSettingsOverlay(
 	return refreshSettings
 end
 
---------------------------------------------------------------------------------
+-- ------------------------------
 -- 6. DIE SLOTS & TRAIT FORGE OVERLAY (APPROVED 4-QUADRANT ARCHITECTURE)
---------------------------------------------------------------------------------
+-- ------------------------------
 local function buildSlotsOverlay(
 	screenGui: ScreenGui,
 	overlays: { [string]: Frame },
@@ -3329,21 +3410,6 @@ local function buildSlotsOverlay(
 	local animActive = false
 	local animElapsed = 0
 
-	-- DROPS EVERY ITEM WHOSE MODEL IS NO LONGER IN THE DATA MODEL.
-	--
-	-- Both rebuild paths used to prune this list by testing `orbitRadius`, one
-	-- keeping `== 0` and the other keeping `~= 0`, using the radius as a stand-in
-	-- for "is this an orrery item or a mini". That stand-in is wrong for the most
-	-- common profile in the game: `createOrreryChamber` sets `orbitRadius = 0`
-	-- when there is a single die, so a one-die orrery satisfied BOTH tests -- it
-	-- was kept by the sweep that had just destroyed its ViewportFrame (leaking a
-	-- model pivoted every frame forever) and discarded by the other. Every new
-	-- player hit this on their first look at the panel.
-	--
-	-- Parentage answers the question directly instead of inferring it. A
-	-- destroyed ViewportFrame is out of the tree, so its children are too, and
-	-- `IsDescendantOf(game)` is false for exactly the items that should go --
-	-- regardless of which grid rebuilt, how many did, or what geometry they use.
 	local function pruneDeadViewportItems()
 		local live: { SlotsViewportItem } = {}
 		for _, item in ipairs(slotsVpItems) do
@@ -3373,7 +3439,8 @@ local function buildSlotsOverlay(
 		local orbitRadius = if count == 1 then 0 else math.clamp(2.8 + count * 0.22, 3.2, 4.8)
 		local modelScale = if count == 1 then 0.72 else math.clamp(1.35 / math.sqrt(count), 0.44, 0.68)
 
-		for idx, shapeId in ipairs(shapeList) do
+		for idx, rawItem in ipairs(shapeList) do
+			local shapeId = if type(rawItem) == "table" then tostring((rawItem :: any).shape or "D2") else tostring(rawItem)
 			local source = if folder then folder:FindFirstChild(shapeId) else nil
 			if source and source:IsA("Model") then
 				local model = source:Clone()
@@ -3515,7 +3582,7 @@ local function buildSlotsOverlay(
 		tLbl.Text = title
 		tLbl.TextColor3 = accentColor
 		tLbl.Font = Enum.Font.GothamBold
-		tLbl.TextSize = 12
+		tLbl.TextSize = 13.5
 		tLbl.TextXAlignment = Enum.TextXAlignment.Left
 		tLbl.Parent = hFrame
 
@@ -3528,7 +3595,7 @@ local function buildSlotsOverlay(
 			rLbl.Text = rightTag
 			rLbl.TextColor3 = THEME.TextMuted
 			rLbl.Font = Enum.Font.Code
-			rLbl.TextSize = 10
+			rLbl.TextSize = 11.5
 			rLbl.TextXAlignment = Enum.TextXAlignment.Right
 			rLbl.Parent = hFrame
 		end
@@ -3582,53 +3649,31 @@ local function buildSlotsOverlay(
 		return box
 	end
 
-	-- Master Quad Container
 	local quadList = Instance.new("UIListLayout")
 	quadList.FillDirection = Enum.FillDirection.Vertical
 	quadList.SortOrder = Enum.SortOrder.LayoutOrder
 	quadList.Padding = UDim.new(0, 8)
 	quadList.Parent = bodyContainer
 
-	-- State tracking for active slots & focus
 	local currentSlotPage = 1
 	local selectedSlotIndex = 1
-	local selectedFocusedShape = "D6"
+	local selectedInventoryShape = "D2"
+	local currentCash = 0
+	local ownedShapesMap: { [string]: boolean } = { D2 = true }
+	local playerInventory: { [string]: number } = { D2 = 1 }
 
-	-- SWAP STATE. `Profile.Dice` is a flat positional array on the server --
-	-- index IS the slot -- so moving a die between slots is an exchange of two
-	-- positions, which is exactly what the existing `SwapDice` remote does. No
-	-- new remote and no schema change is involved in equipping.
-	local pendingSwapIndex: number? = nil
-	local swapInFlight = false
-	-- The inventory rebuild takes NO state parameter. It used to, and its click
-	-- handler closed over the snapshot captured when the card was BUILT, so
-	-- every repaint after the first replayed stale data. It now reads
-	-- `liveEquippedDice`, which `refreshSlots` has already updated from the
-	-- current snapshot -- one source, no captured copy to go stale.
-
-	-- NO `id` FIELD. There is none on the wire, and an array index living in a
-	-- field called `id` is an invitation to send it somewhere that wants a real
-	-- identifier. The die's identity IS its position: `liveEquippedDice[n]` is
-	-- the die in slot n, exactly as `Profile.Dice[n]` is on the server.
 	local liveEquippedDice: { { shape: string, mass: number } } = {
-		{ shape = "D6", mass = 60 },
+		{ shape = "D2", mass = 60 },
 	}
 	local unlockedSlotsCount = 1
 	local ascensionsCount = 0
 
-	-- DECLARED AFTER THE TWO VALUES IT READS, and it must stay that way. Lua
-	-- binds a closure's names at parse time, so had this sat above them it would
-	-- have captured neither -- both would silently resolve to nil globals and
-	-- `#nil` would throw on the first snapshot. That is L-057's shape exactly:
-	-- an ordering mistake that produces no warning and no error at the point of
-	-- the mistake, only a dead panel later.
 	local SLOTS_PER_PAGE = 3
 	local function slotPageCount(): number
-		local total = math.max(unlockedSlotsCount, #liveEquippedDice, 1)
+		local total = math.max(DiceCatalog.dieSlotCapFor(ascensionsCount), unlockedSlotsCount, #liveEquippedDice, 1)
 		return math.max(1, math.ceil(total / SLOTS_PER_PAGE))
 	end
 
-	-- TOP ROW (44% height)
 	local topRow = Instance.new("Frame")
 	topRow.Name = "TopRow"
 	topRow.Size = UDim2.new(1, 0, 0.44, -4)
@@ -3639,14 +3684,14 @@ local function buildSlotsOverlay(
 	local topList = Instance.new("UIListLayout")
 	topList.FillDirection = Enum.FillDirection.Horizontal
 	topList.SortOrder = Enum.SortOrder.LayoutOrder
-	topList.Padding = UDim.new(0, 10)
+	topList.Padding = UDim.new(0, 8)
 	topList.Parent = topRow
 
-	-- Top-Left: Preview (30%)
-	local prevBox = buildQuadrantShell(topRow, "OrreryChamber", UDim2.new(0.30, -5, 1, 0), 1, THEME.StrokeSubtle, THEME.CardBg)
+	local prevBox = buildQuadrantShell(topRow, "Visualizer", UDim2.new(0.30, -3, 1, 0), 1, THEME.StrokeSubtle, THEME.CardBg)
 	buildSectionHeader(prevBox, "PREVIEW", nil, THEME.GoldPrimary)
 
 	local pvFrame = Instance.new("Frame")
+	pvFrame.Name = "OrreryViewportContainer"
 	pvFrame.Size = UDim2.new(1, 0, 1, -26)
 	pvFrame.BackgroundColor3 = THEME.InsetBg
 	pvFrame.BorderSizePixel = 0
@@ -3660,6 +3705,7 @@ local function buildSlotsOverlay(
 	local pvStroke = Instance.new("UIStroke")
 	pvStroke.Color = THEME.StrokeSubtle
 	pvStroke.Thickness = 1
+	pvStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
 	pvStroke.Parent = pvFrame
 
 	local function rebuildOrreryChamber()
@@ -3671,142 +3717,148 @@ local function buildSlotsOverlay(
 
 		pruneDeadViewportItems()
 
-		local shapeList = {}
-		for _, d in ipairs(liveEquippedDice) do
-			table.insert(shapeList, d.shape)
+		if #liveEquippedDice <= 1 then
+			local shape = if liveEquippedDice[1] then liveEquippedDice[1].shape else "D2"
+			createMiniDieViewport(pvFrame, UDim2.fromScale(1, 1), shape, THEME.InsetBg)
+		else
+			local shapes: { string } = {}
+			for _, d in ipairs(liveEquippedDice) do
+				table.insert(shapes, d.shape or "D2")
+			end
+			createOrreryChamber(pvFrame, UDim2.fromScale(1, 1), shapes, THEME.InsetBg)
 		end
-		if #shapeList == 0 then table.insert(shapeList, "D6") end
-
-		createOrreryChamber(pvFrame, UDim2.fromScale(1, 1), shapeList, THEME.InsetBg)
 	end
 
 	rebuildOrreryChamber()
 
-	-- Top-Right: 1x3 Showcase Slots (70%)
-	local slotsBox = buildQuadrantShell(topRow, "ShowcaseSlots", UDim2.new(0.70, -5, 1, 0), 2, THEME.StrokeSubtle, THEME.CardBg)
-	local _, pageTagLbl = buildSectionHeader(slotsBox, "ACTIVE SLOTS", "SLOTS 01 - 03  [PAGE 1/4]", THEME.GoldPrimary)
+	local slotsBox = buildQuadrantShell(topRow, "ActiveSlots", UDim2.new(0.70, -5, 1, 0), 2, THEME.StrokeGold, THEME.CardBg)
 
-	local slotStrip = Instance.new("Frame")
-	slotStrip.Size = UDim2.new(1, 0, 1, -26)
-	slotStrip.BackgroundTransparency = 1
-	slotStrip.LayoutOrder = 2
-	slotStrip.Parent = slotsBox
+	local sHeadFrame = Instance.new("Frame")
+	sHeadFrame.Size = UDim2.new(1, 0, 0, 20)
+	sHeadFrame.BackgroundTransparency = 1
+	sHeadFrame.LayoutOrder = 1
+	sHeadFrame.Parent = slotsBox
 
-	local ssList = Instance.new("UIListLayout")
-	ssList.FillDirection = Enum.FillDirection.Horizontal
-	ssList.SortOrder = Enum.SortOrder.LayoutOrder
-	ssList.VerticalAlignment = Enum.VerticalAlignment.Center
-	ssList.Padding = UDim.new(0, 8)
-	ssList.Parent = slotStrip
+	local sHeadLeft = Instance.new("TextLabel")
+	sHeadLeft.Size = UDim2.new(0.5, 0, 1, 0)
+	sHeadLeft.BackgroundTransparency = 1
+	sHeadLeft.Text = "ACTIVE SLOTS"
+	sHeadLeft.TextColor3 = THEME.GoldPrimary
+	sHeadLeft.Font = Enum.Font.GothamBold
+	sHeadLeft.TextSize = 13.5
+	sHeadLeft.TextXAlignment = Enum.TextXAlignment.Left
+	sHeadLeft.Parent = sHeadFrame
+
+	local pageTagLbl = Instance.new("TextLabel")
+	pageTagLbl.Size = UDim2.new(0.5, 0, 1, 0)
+	pageTagLbl.Position = UDim2.new(0.5, 0, 0, 0)
+	pageTagLbl.BackgroundTransparency = 1
+	pageTagLbl.Text = "SLOTS 01 - 03  [PAGE 1/1]"
+	pageTagLbl.TextColor3 = THEME.TextMuted
+	pageTagLbl.Font = Enum.Font.Code
+	pageTagLbl.TextSize = 10.5
+	pageTagLbl.TextXAlignment = Enum.TextXAlignment.Right
+	pageTagLbl.Parent = sHeadFrame
+
+	local sBody = Instance.new("Frame")
+	sBody.Size = UDim2.new(1, 0, 1, -26)
+	sBody.BackgroundTransparency = 1
+	sBody.LayoutOrder = 2
+	sBody.Parent = slotsBox
+
+	local sList = Instance.new("UIListLayout")
+	sList.FillDirection = Enum.FillDirection.Horizontal
+	sList.SortOrder = Enum.SortOrder.LayoutOrder
+	sList.VerticalAlignment = Enum.VerticalAlignment.Center
+	sList.Padding = UDim.new(0, 4)
+	sList.Parent = sBody
 
 	local lArrow = Instance.new("TextButton")
-	lArrow.Size = UDim2.new(0, 28, 0.90, 0)
-	lArrow.BackgroundColor3 = THEME.ButtonDark
+	lArrow.Size = UDim2.new(0, 24, 1, 0)
+	lArrow.BackgroundColor3 = THEME.InsetBg
 	lArrow.BorderSizePixel = 0
 	lArrow.Text = "<"
 	lArrow.TextColor3 = THEME.GoldPrimary
-	lArrow.Font = Enum.Font.GothamBlack
+	lArrow.Font = Enum.Font.GothamBold
 	lArrow.TextSize = 16
 	lArrow.LayoutOrder = 1
-	lArrow.Parent = slotStrip
-	local laCorn = Instance.new("UICorner")
-	laCorn.CornerRadius = UDim.new(0, 4)
-	laCorn.Parent = lArrow
-	local laStroke = Instance.new("UIStroke")
-	laStroke.Color = THEME.StrokeSubtle
-	laStroke.Thickness = 1
-	laStroke.Parent = lArrow
+	lArrow.Parent = sBody
+
+	local lac = Instance.new("UICorner")
+	lac.CornerRadius = UDim.new(0, 6)
+	lac.Parent = lArrow
 
 	local sGrid = Instance.new("Frame")
-	sGrid.Size = UDim2.new(1, -72, 1, 0)
+	sGrid.Name = "ShowcaseSlots"
+	sGrid.Size = UDim2.new(1, -56, 1, 0)
 	sGrid.BackgroundTransparency = 1
 	sGrid.LayoutOrder = 2
-	sGrid.Parent = slotStrip
+	sGrid.Parent = sBody
 
 	local sgl = Instance.new("UIGridLayout")
-	sgl.CellSize = UDim2.new(0.3333, -6, 1, 0)
-	sgl.CellPadding = UDim2.new(0, 8, 0, 0)
+	sgl.CellSize = UDim2.new(0.3333, -4, 1, 0)
+	sgl.CellPadding = UDim2.new(0, 6, 0, 0)
 	sgl.SortOrder = Enum.SortOrder.LayoutOrder
 	sgl.Parent = sGrid
 
 	local rArrow = Instance.new("TextButton")
-	rArrow.Size = UDim2.new(0, 28, 0.90, 0)
-	rArrow.BackgroundColor3 = THEME.ButtonDark
+	rArrow.Size = UDim2.new(0, 24, 1, 0)
+	rArrow.BackgroundColor3 = THEME.InsetBg
 	rArrow.BorderSizePixel = 0
 	rArrow.Text = ">"
 	rArrow.TextColor3 = THEME.GoldPrimary
-	rArrow.Font = Enum.Font.GothamBlack
+	rArrow.Font = Enum.Font.GothamBold
 	rArrow.TextSize = 16
 	rArrow.LayoutOrder = 3
-	rArrow.Parent = slotStrip
-	local raCorn = Instance.new("UICorner")
-	raCorn.CornerRadius = UDim.new(0, 4)
-	raCorn.Parent = rArrow
-	local raStroke = Instance.new("UIStroke")
-	raStroke.Color = THEME.StrokeSubtle
-	raStroke.Thickness = 1
-	raStroke.Parent = rArrow
+	rArrow.Parent = sBody
 
-	-- BOTTOM ROW (56% height)
-	local botRow = Instance.new("Frame")
-	botRow.Name = "BottomRow"
-	botRow.Size = UDim2.new(1, 0, 0.56, -4)
-	botRow.BackgroundTransparency = 1
-	botRow.LayoutOrder = 2
-	botRow.Parent = bodyContainer
+	local rac = Instance.new("UICorner")
+	rac.CornerRadius = UDim.new(0, 6)
+	rac.Parent = rArrow
 
-	local botList = Instance.new("UIListLayout")
-	botList.FillDirection = Enum.FillDirection.Horizontal
-	botList.SortOrder = Enum.SortOrder.LayoutOrder
-	botList.Padding = UDim.new(0, 10)
-	botList.Parent = botRow
+	local btmRow = Instance.new("Frame")
+	btmRow.Name = "BottomRow"
+	btmRow.Size = UDim2.new(1, 0, 0.56, -4)
+	btmRow.BackgroundTransparency = 1
+	btmRow.LayoutOrder = 2
+	btmRow.Parent = bodyContainer
 
-	-- Bottom-Left: 3x2 Inventory (40%)
-	local invBox = buildQuadrantShell(botRow, "Inventory", UDim2.new(0.40, -5, 1, 0), 1, THEME.StrokeSubtle, THEME.CardBg)
-	-- The header's right tag doubles as the swap prompt: it is already the line
-	-- the player reads for what this grid expects of them, so the two-click
-	-- instruction and any refusal belong there rather than in a new row.
-	local _invHeader, slotsSwapStatusOpt =
-		buildSectionHeader(invBox, "INVENTORY", "CLICK TWO DICE TO SWAP SLOTS", THEME.GoldPrimary)
-	local slotsSwapStatus = slotsSwapStatusOpt :: TextLabel
+	local btmList = Instance.new("UIListLayout")
+	btmList.FillDirection = Enum.FillDirection.Horizontal
+	btmList.SortOrder = Enum.SortOrder.LayoutOrder
+	btmList.Padding = UDim.new(0, 8)
+	btmList.Parent = btmRow
 
-	-- SCROLLS, BECAUSE THE CARD COUNT IS NO LONGER FIXED.
-	--
-	-- The grid used to draw at most six cards into two rows and its cell height
-	-- was `0.50` of this frame -- a fraction that only means "half the height"
-	-- while there are exactly two rows. The inventory now renders one card per
-	-- die, up to the twelve-slot cap, so a player with seven dice needs three
-	-- rows and the third fell straight out of the panel.
-	--
-	-- The cell is a FIXED height now and the canvas grows to fit however many
-	-- rows exist. A fractional cell height cannot work here: it would shrink
-	-- every card as dice are added rather than adding rows.
+	local invBox = buildQuadrantShell(btmRow, "Inventory", UDim2.new(0.30, -3, 1, 0), 1, THEME.StrokeSubtle, THEME.CardBg)
+	buildSectionHeader(invBox, "INVENTORY", "CLICK DIE TO SELECT", THEME.GoldPrimary)
+
 	local igFrame = Instance.new("ScrollingFrame")
+	igFrame.Name = "InventoryGrid"
 	igFrame.Size = UDim2.new(1, 0, 1, -26)
 	igFrame.BackgroundTransparency = 1
 	igFrame.BorderSizePixel = 0
+	igFrame.ScrollBarThickness = 3
+	igFrame.ScrollBarImageColor3 = THEME.GoldPrimary
 	igFrame.LayoutOrder = 2
+	igFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
 	igFrame.AutomaticCanvasSize = Enum.AutomaticSize.Y
-	igFrame.CanvasSize = UDim2.new()
-	igFrame.ScrollBarThickness = 4
-	igFrame.ScrollBarImageColor3 = THEME.StrokeGold
-	igFrame.ScrollingDirection = Enum.ScrollingDirection.Y
 	igFrame.Parent = invBox
 
+	local igPad = Instance.new("UIPadding")
+	igPad.PaddingTop = UDim.new(0, 4)
+	igPad.PaddingBottom = UDim.new(0, 4)
+	igPad.PaddingLeft = UDim.new(0, 4)
+	igPad.PaddingRight = UDim.new(0, 4)
+	igPad.Parent = igFrame
+
 	local igl = Instance.new("UIGridLayout")
-	igl.CellSize = UDim2.new(0.3333, -10, 0, 66)
-	igl.CellPadding = UDim2.new(0, 8, 0, 8)
+	igl.CellSize = UDim2.new(0.3333, -6, 0, 80)
+	igl.CellPadding = UDim2.new(0, 6, 0, 6)
 	igl.SortOrder = Enum.SortOrder.LayoutOrder
 	igl.Parent = igFrame
 
-	-- Bottom-Right: Trait Forge & Shards (60%)
-	local traitsBox = buildQuadrantShell(botRow, "TraitsSection", UDim2.new(0.60, -5, 1, 0), 2, THEME.StrokeSubtle, THEME.CardBg)
-	-- NOT IMPLEMENTED. Traits and shards exist nowhere in this project -- not
-	-- in the profile, not in any catalog, not on the server. The visual design
-	-- is kept because it is worth building against later, but every figure it
-	-- once displayed was invented, so the header says so and the controls below
-	-- are inert rather than pretending to spend a currency that does not exist.
-	buildSectionHeader(traitsBox, "TRAIT FORGE & SHARDS", "COMING SOON", THEME.TextMuted)
+	local traitsBox = buildQuadrantShell(btmRow, "TraitsSection", UDim2.new(0.70, -5, 1, 0), 2, THEME.StrokeSubtle, THEME.CardBg)
+	buildSectionHeader(traitsBox, "TRAIT FORGE & INSPECTION", "ACTIVE", THEME.GoldPrimary)
 
 	local tBody = Instance.new("Frame")
 	tBody.Size = UDim2.new(1, 0, 1, -26)
@@ -3820,7 +3872,6 @@ local function buildSlotsOverlay(
 	tbl.Padding = UDim.new(0, 8)
 	tbl.Parent = tBody
 
-	-- Left Sub-Panel (38%): Focused Die Preview + Boost 1 & 2 + Shards & Reroll Button
 	local leftCol = Instance.new("Frame")
 	leftCol.Name = "LeftCol"
 	leftCol.Size = UDim2.new(0.38, -4, 1, 0)
@@ -3834,10 +3885,9 @@ local function buildSlotsOverlay(
 	lcl.Padding = UDim.new(0, 4)
 	lcl.Parent = leftCol
 
-	-- Top Focused Die Box (40% height)
 	local dieBox = Instance.new("Frame")
 	dieBox.Name = "DieReceptacle"
-	dieBox.Size = UDim2.new(1, 0, 0.40, -3)
+	dieBox.Size = UDim2.new(1, 0, 0.40, 0)
 	dieBox.BackgroundColor3 = THEME.InsetBg
 	dieBox.BorderSizePixel = 0
 	dieBox.LayoutOrder = 1
@@ -3850,6 +3900,7 @@ local function buildSlotsOverlay(
 	local dbs = Instance.new("UIStroke")
 	dbs.Color = THEME.StrokeSubtle
 	dbs.Thickness = 1
+	dbs.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
 	dbs.Parent = dieBox
 
 	local focusedDieVpContainer = Instance.new("Frame")
@@ -3858,66 +3909,32 @@ local function buildSlotsOverlay(
 	focusedDieVpContainer.Parent = dieBox
 
 	local focusedDieTag = Instance.new("TextLabel")
-	focusedDieTag.Size = UDim2.new(0.72, 0, 0, 16)
+	focusedDieTag.Size = UDim2.new(0.90, 0, 0, 18)
 	focusedDieTag.Position = UDim2.new(0, 8, 0, 4)
 	focusedDieTag.BackgroundTransparency = 1
-	focusedDieTag.Text = SLOTS_CANONICAL_NAMES[selectedFocusedShape] or "FOUNDRY OBSIDIAN"
+	focusedDieTag.Text = SLOTS_CANONICAL_NAMES[selectedInventoryShape] or "Foundry Obsidian"
 	focusedDieTag.TextColor3 = THEME.GoldPrimary
-	focusedDieTag.Font = Enum.Font.GothamBlack
-	focusedDieTag.TextSize = 10
+	focusedDieTag.Font = Enum.Font.GothamBold
+	focusedDieTag.TextSize = 12
 	focusedDieTag.TextXAlignment = Enum.TextXAlignment.Left
 	focusedDieTag.Parent = dieBox
 
-	local infoBtn = Instance.new("TextButton")
-	infoBtn.Name = "InfoBtn"
-	infoBtn.Size = UDim2.new(0, 18, 0, 18)
-	infoBtn.Position = UDim2.new(1, -24, 0, 4)
-	infoBtn.BackgroundColor3 = THEME.ButtonDark
-	infoBtn.BorderSizePixel = 0
-	infoBtn.Text = ""
-	infoBtn.AutoButtonColor = true
-	infoBtn.Parent = dieBox
+	local equipToSlotBtn = Instance.new("TextButton")
+	equipToSlotBtn.Name = "EquipToSlotBtn"
+	equipToSlotBtn.Size = UDim2.new(1, 0, 0, 28)
+	equipToSlotBtn.BackgroundColor3 = THEME.GoldPrimary
+	equipToSlotBtn.BorderSizePixel = 0
+	equipToSlotBtn.Text = "EQUIP TO SLOT 01"
+	equipToSlotBtn.TextColor3 = THEME.TextDark
+	equipToSlotBtn.Font = Enum.Font.GothamBold
+	equipToSlotBtn.TextSize = 11
+	equipToSlotBtn.LayoutOrder = 2
+	equipToSlotBtn.Parent = leftCol
 
-	local ibc = Instance.new("UICorner")
-	ibc.CornerRadius = UDim.new(1, 0)
-	ibc.Parent = infoBtn
+	local etc = Instance.new("UICorner")
+	etc.CornerRadius = UDim.new(0, 5)
+	etc.Parent = equipToSlotBtn
 
-	local ibs = Instance.new("UIStroke")
-	ibs.Color = THEME.StrokeGold
-	ibs.Thickness = 1
-	ibs.Parent = infoBtn
-
-	local iDot = Instance.new("Frame")
-	iDot.Size = UDim2.new(0, 2, 0, 2)
-	iDot.Position = UDim2.new(0.5, -1, 0, 3)
-	iDot.BackgroundColor3 = THEME.GoldPrimary
-	iDot.BorderSizePixel = 0
-	iDot.Parent = infoBtn
-
-	local iStem = Instance.new("Frame")
-	iStem.Size = UDim2.new(0, 2, 0, 7)
-	iStem.Position = UDim2.new(0.5, -1, 0, 7)
-	iStem.BackgroundColor3 = THEME.GoldPrimary
-	iStem.BorderSizePixel = 0
-	iStem.Parent = infoBtn
-
-	-- Middle: Boost 1 & Boost 2 Row (22% height)
-	local boostRow = Instance.new("Frame")
-	boostRow.Name = "BoostRow"
-	boostRow.Size = UDim2.new(1, 0, 0.22, -2)
-	boostRow.BackgroundTransparency = 1
-	boostRow.LayoutOrder = 2
-	boostRow.Parent = leftCol
-
-	local brList = Instance.new("UIListLayout")
-	brList.FillDirection = Enum.FillDirection.Horizontal
-	brList.SortOrder = Enum.SortOrder.LayoutOrder
-	brList.Padding = UDim.new(0, 4)
-	brList.Parent = boostRow
-
-	-- Mutes a control that has no implementation behind it, so it cannot be
-	-- mistaken for a working one: no hover response, no click target, and the
-	-- dead palette every other disabled control in this file uses.
 	local function setTraitControlInert(btn: TextButton)
 		btn.Active = false
 		btn.AutoButtonColor = false
@@ -3931,7 +3948,6 @@ local function buildSlotsOverlay(
 		card.BackgroundColor3 = THEME.InsetBg
 		card.BorderSizePixel = 0
 		card.LayoutOrder = order
-		card.Parent = boostRow
 
 		local bCorner = Instance.new("UICorner")
 		bCorner.CornerRadius = UDim.new(0, 6)
@@ -3940,6 +3956,7 @@ local function buildSlotsOverlay(
 		local bStroke = Instance.new("UIStroke")
 		bStroke.Color = THEME.StrokeSubtle
 		bStroke.Thickness = 1
+		bStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
 		bStroke.Parent = card
 
 		local bPad = Instance.new("UIPadding")
@@ -3970,24 +3987,34 @@ local function buildSlotsOverlay(
 		val.Font = Enum.Font.GothamBold
 		val.TextSize = 9.5
 		val.Parent = card
+
+		return card
 	end
 
-	-- Placeholders, deliberately. "+65% VELOCITY" and "-40% VOID" were
-	-- invented figures with nothing behind them, rendered in the live gold
-	-- theme beside the real dice -- and "BOOST" is the name of a system that
-	-- genuinely exists (`state.boosts`), so a player had every reason to read
-	-- them as active effects. The slots are kept to hold the layout; the
-	-- numbers wait for an implementation to supply them.
-	makeBoostCard(1, "BOOST 1", "--", THEME.TextMuted)
-	makeBoostCard(2, "BOOST 2", "--", THEME.TextMuted)
+	local boostRow = Instance.new("Frame")
+	boostRow.Name = "BoostRow"
+	boostRow.Size = UDim2.new(1, 0, 0.24, -2)
+	boostRow.BackgroundTransparency = 1
+	boostRow.LayoutOrder = 3
+	boostRow.Parent = leftCol
 
-	-- Bottom: Number of Shards + Reroll Trait Button (38% height)
+	local brList = Instance.new("UIListLayout")
+	brList.FillDirection = Enum.FillDirection.Horizontal
+	brList.SortOrder = Enum.SortOrder.LayoutOrder
+	brList.Padding = UDim.new(0, 4)
+	brList.Parent = boostRow
+
+	local b1 = makeBoostCard(1, "BOOST 1", "--", THEME.TextMuted)
+	b1.Parent = boostRow
+	local b2 = makeBoostCard(2, "BOOST 2", "--", THEME.TextMuted)
+	b2.Parent = boostRow
+
 	local shardDeck = Instance.new("Frame")
 	shardDeck.Name = "ShardDeck"
-	shardDeck.Size = UDim2.new(1, 0, 0.38, -2)
+	shardDeck.Size = UDim2.new(1, 0, 0.24, -4)
 	shardDeck.BackgroundColor3 = THEME.InsetBg
 	shardDeck.BorderSizePixel = 0
-	shardDeck.LayoutOrder = 3
+	shardDeck.LayoutOrder = 4
 	shardDeck.Parent = leftCol
 
 	local sdc = Instance.new("UICorner")
@@ -3997,72 +4024,55 @@ local function buildSlotsOverlay(
 	local sds = Instance.new("UIStroke")
 	sds.Color = THEME.StrokeSubtle
 	sds.Thickness = 1
+	sds.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
 	sds.Parent = shardDeck
 
 	local sPad = Instance.new("UIPadding")
 	sPad.PaddingLeft = UDim.new(0, 6)
 	sPad.PaddingRight = UDim.new(0, 6)
-	sPad.PaddingTop = UDim.new(0, 4)
-	sPad.PaddingBottom = UDim.new(0, 4)
+	sPad.PaddingTop = UDim.new(0, 2)
+	sPad.PaddingBottom = UDim.new(0, 2)
 	sPad.Parent = shardDeck
 
 	local sList = Instance.new("UIListLayout")
-	sList.FillDirection = Enum.FillDirection.Vertical
+	sList.FillDirection = Enum.FillDirection.Horizontal
 	sList.SortOrder = Enum.SortOrder.LayoutOrder
 	sList.VerticalAlignment = Enum.VerticalAlignment.Center
-	sList.Padding = UDim.new(0, 4)
 	sList.Parent = shardDeck
 
-	local countPill = Instance.new("Frame")
-	countPill.Size = UDim2.new(1, 0, 0, 20)
-	countPill.BackgroundTransparency = 1
-	countPill.LayoutOrder = 1
-	countPill.Parent = shardDeck
-
 	local shardValLbl = Instance.new("TextLabel")
-	shardValLbl.Size = UDim2.new(0.60, 0, 1, 0)
+	shardValLbl.Size = UDim2.new(0.50, 0, 1, 0)
 	shardValLbl.BackgroundTransparency = 1
 	shardValLbl.Text = "◆ -- SHARDS"
 	shardValLbl.TextColor3 = THEME.GoldPrimary
-	shardValLbl.Font = Enum.Font.GothamBlack
+	shardValLbl.Font = Enum.Font.GothamBold
 	shardValLbl.TextSize = 10
 	shardValLbl.TextXAlignment = Enum.TextXAlignment.Left
-	shardValLbl.Parent = countPill
-
-	local costTagLbl = Instance.new("TextLabel")
-	costTagLbl.Size = UDim2.new(0.40, 0, 1, 0)
-	costTagLbl.Position = UDim2.new(0.60, 0, 0, 0)
-	costTagLbl.BackgroundTransparency = 1
-	costTagLbl.Text = "COST: --"
-	costTagLbl.TextColor3 = THEME.TextMuted
-	costTagLbl.Font = Enum.Font.Code
-	costTagLbl.TextSize = 9
-	costTagLbl.TextXAlignment = Enum.TextXAlignment.Right
-	costTagLbl.Parent = countPill
+	shardValLbl.Parent = shardDeck
 
 	local rollBtn = Instance.new("TextButton")
 	rollBtn.Name = "RollButton"
-	rollBtn.Size = UDim2.new(1, 0, 0, 28)
-	rollBtn.BackgroundColor3 = THEME.GoldPrimary
+	rollBtn.Size = UDim2.new(0.48, 0, 0.85, 0)
+	rollBtn.BackgroundColor3 = THEME.ButtonDark
 	rollBtn.BorderSizePixel = 0
-	rollBtn.Text = "REROLL TRAITS"
-	rollBtn.TextColor3 = THEME.TextDark
-	rollBtn.Font = Enum.Font.GothamBlack
-	rollBtn.TextSize = 11
-	rollBtn.LayoutOrder = 2
+	rollBtn.Text = "REROLL"
+	rollBtn.TextColor3 = THEME.TextMuted
+	rollBtn.Font = Enum.Font.GothamBold
+	rollBtn.TextSize = 10.5
 	rollBtn.Parent = shardDeck
 
 	local rbc = Instance.new("UICorner")
-	rbc.CornerRadius = UDim.new(0, 5)
+	rbc.CornerRadius = UDim.new(0, 4)
 	rbc.Parent = rollBtn
 
-	-- The handler here decremented the shard label from 145 to 135 and did
-	-- nothing else -- no server call, no persistence, and it would keep
-	-- "charging" forever. Deleted rather than replaced: a control that
-	-- fabricates a transaction is worse than an inert one.
+	local rbs = Instance.new("UIStroke")
+	rbs.Color = THEME.StrokeSubtle
+	rbs.Thickness = 1
+	rbs.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+	rbs.Parent = rollBtn
+
 	setTraitControlInert(rollBtn)
 
-	-- Right Sub-Panel (62%): Dual-Trait Results
 	local rightCol = Instance.new("Frame")
 	rightCol.Name = "RightResultCol"
 	rightCol.Size = UDim2.new(0.62, -4, 1, 0)
@@ -4078,6 +4088,7 @@ local function buildSlotsOverlay(
 	local rcStroke = Instance.new("UIStroke")
 	rcStroke.Color = THEME.StrokeSubtle
 	rcStroke.Thickness = 1
+	rcStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
 	rcStroke.Parent = rightCol
 
 	local rPad = Instance.new("UIPadding")
@@ -4090,13 +4101,12 @@ local function buildSlotsOverlay(
 	local rList = Instance.new("UIListLayout")
 	rList.FillDirection = Enum.FillDirection.Vertical
 	rList.SortOrder = Enum.SortOrder.LayoutOrder
-	rList.Padding = UDim.new(0, 6)
+	rList.Padding = UDim.new(0, 4)
 	rList.Parent = rightCol
 
-	-- Trait Slot 1 Container (42% height)
 	local t1Container = Instance.new("Frame")
 	t1Container.Name = "Trait1_Container"
-	t1Container.Size = UDim2.new(1, 0, 0.42, -4)
+	t1Container.Size = UDim2.new(1, 0, 0.44, -4)
 	t1Container.BackgroundColor3 = THEME.CardBg
 	t1Container.BorderSizePixel = 0
 	t1Container.LayoutOrder = 1
@@ -4109,23 +4119,24 @@ local function buildSlotsOverlay(
 	local t1s = Instance.new("UIStroke")
 	t1s.Color = THEME.StrokeSubtle
 	t1s.Thickness = 1
+	t1s.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
 	t1s.Parent = t1Container
 
 	local t1Pad = Instance.new("UIPadding")
 	t1Pad.PaddingLeft = UDim.new(0, 8)
 	t1Pad.PaddingRight = UDim.new(0, 8)
-	t1Pad.PaddingTop = UDim.new(0, 6)
-	t1Pad.PaddingBottom = UDim.new(0, 6)
+	t1Pad.PaddingTop = UDim.new(0, 4)
+	t1Pad.PaddingBottom = UDim.new(0, 4)
 	t1Pad.Parent = t1Container
 
 	local t1List = Instance.new("UIListLayout")
 	t1List.FillDirection = Enum.FillDirection.Vertical
 	t1List.SortOrder = Enum.SortOrder.LayoutOrder
-	t1List.Padding = UDim.new(0, 3)
+	t1List.Padding = UDim.new(0, 2)
 	t1List.Parent = t1Container
 
 	local t1Head = Instance.new("Frame")
-	t1Head.Size = UDim2.new(1, 0, 0, 20)
+	t1Head.Size = UDim2.new(1, 0, 0, 18)
 	t1Head.BackgroundTransparency = 1
 	t1Head.LayoutOrder = 1
 	t1Head.Parent = t1Container
@@ -4140,50 +4151,33 @@ local function buildSlotsOverlay(
 	createTraitEmblem(t1Head, 1, THEME.GoldPrimary)
 
 	local t1Title = Instance.new("TextLabel")
-	t1Title.Size = UDim2.new(1, -110, 1, 0)
+	t1Title.Size = UDim2.new(1, -26, 1, 0)
 	t1Title.BackgroundTransparency = 1
 	t1Title.Text = "TRAIT 1: NOT YET AVAILABLE"
 	t1Title.TextColor3 = THEME.TextMuted
-	t1Title.Font = Enum.Font.GothamBlack
+	t1Title.Font = Enum.Font.GothamBold
 	t1Title.TextSize = 10.5
 	t1Title.TextTruncate = Enum.TextTruncate.AtEnd
 	t1Title.TextXAlignment = Enum.TextXAlignment.Left
 	t1Title.LayoutOrder = 2
 	t1Title.Parent = t1Head
 
-	local t1Flex = Instance.new("UIFlexItem")
-	t1Flex.FlexMode = Enum.UIFlexMode.Fill
-	t1Flex.Parent = t1Title
-
-	local t1Rarity = Instance.new("TextLabel")
-	t1Rarity.Size = UDim2.new(0, 80, 1, 0)
-	t1Rarity.BackgroundTransparency = 1
-	t1Rarity.Text = "--"
-	t1Rarity.TextColor3 = THEME.GoldPrimary
-	t1Rarity.Font = Enum.Font.GothamBlack
-	t1Rarity.TextSize = 9.5
-	t1Rarity.TextXAlignment = Enum.TextXAlignment.Right
-	t1Rarity.LayoutOrder = 3
-	t1Rarity.Parent = t1Head
-
 	local t1Desc = Instance.new("TextLabel")
-	t1Desc.Size = UDim2.new(1, 0, 1, -24)
+	t1Desc.Size = UDim2.new(1, 0, 0, 24)
 	t1Desc.BackgroundTransparency = 1
-	t1Desc.Text = "Trait effects are not implemented yet. This panel shows where "
-		.. "they will appear."
+	t1Desc.Text = "Trait enhancements unlock in upcoming updates."
 	t1Desc.TextColor3 = THEME.TextMuted
 	t1Desc.Font = Enum.Font.GothamMedium
-	t1Desc.TextSize = 10
+	t1Desc.TextSize = 9.5
 	t1Desc.TextWrapped = true
 	t1Desc.TextYAlignment = Enum.TextYAlignment.Top
 	t1Desc.TextXAlignment = Enum.TextXAlignment.Left
 	t1Desc.LayoutOrder = 2
 	t1Desc.Parent = t1Container
 
-	-- Trait Slot 2 Container (42% height)
 	local t2Container = Instance.new("Frame")
 	t2Container.Name = "Trait2_Container"
-	t2Container.Size = UDim2.new(1, 0, 0.42, -4)
+	t2Container.Size = UDim2.new(1, 0, 0.44, -4)
 	t2Container.BackgroundColor3 = THEME.CardBg
 	t2Container.BorderSizePixel = 0
 	t2Container.LayoutOrder = 2
@@ -4196,23 +4190,24 @@ local function buildSlotsOverlay(
 	local t2s = Instance.new("UIStroke")
 	t2s.Color = THEME.StrokeSubtle
 	t2s.Thickness = 1
+	t2s.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
 	t2s.Parent = t2Container
 
 	local t2Pad = Instance.new("UIPadding")
 	t2Pad.PaddingLeft = UDim.new(0, 8)
 	t2Pad.PaddingRight = UDim.new(0, 8)
-	t2Pad.PaddingTop = UDim.new(0, 6)
-	t2Pad.PaddingBottom = UDim.new(0, 6)
+	t2Pad.PaddingTop = UDim.new(0, 4)
+	t2Pad.PaddingBottom = UDim.new(0, 4)
 	t2Pad.Parent = t2Container
 
 	local t2List = Instance.new("UIListLayout")
 	t2List.FillDirection = Enum.FillDirection.Vertical
 	t2List.SortOrder = Enum.SortOrder.LayoutOrder
-	t2List.Padding = UDim.new(0, 3)
+	t2List.Padding = UDim.new(0, 2)
 	t2List.Parent = t2Container
 
 	local t2Head = Instance.new("Frame")
-	t2Head.Size = UDim2.new(1, 0, 0, 20)
+	t2Head.Size = UDim2.new(1, 0, 0, 18)
 	t2Head.BackgroundTransparency = 1
 	t2Head.LayoutOrder = 1
 	t2Head.Parent = t2Container
@@ -4227,49 +4222,32 @@ local function buildSlotsOverlay(
 	createTraitEmblem(t2Head, 2, THEME.AmberFlame)
 
 	local t2Title = Instance.new("TextLabel")
-	t2Title.Size = UDim2.new(1, -110, 1, 0)
+	t2Title.Size = UDim2.new(1, -26, 1, 0)
 	t2Title.BackgroundTransparency = 1
 	t2Title.Text = "TRAIT 2: NOT YET AVAILABLE"
 	t2Title.TextColor3 = THEME.TextMuted
-	t2Title.Font = Enum.Font.GothamBlack
+	t2Title.Font = Enum.Font.GothamBold
 	t2Title.TextSize = 10.5
 	t2Title.TextTruncate = Enum.TextTruncate.AtEnd
 	t2Title.TextXAlignment = Enum.TextXAlignment.Left
 	t2Title.LayoutOrder = 2
 	t2Title.Parent = t2Head
 
-	local t2Flex = Instance.new("UIFlexItem")
-	t2Flex.FlexMode = Enum.UIFlexMode.Fill
-	t2Flex.Parent = t2Title
-
-	local t2Rarity = Instance.new("TextLabel")
-	t2Rarity.Size = UDim2.new(0, 80, 1, 0)
-	t2Rarity.BackgroundTransparency = 1
-	t2Rarity.Text = "--"
-	t2Rarity.TextColor3 = THEME.AmberFlame
-	t2Rarity.Font = Enum.Font.GothamBlack
-	t2Rarity.TextSize = 9.5
-	t2Rarity.TextXAlignment = Enum.TextXAlignment.Right
-	t2Rarity.LayoutOrder = 3
-	t2Rarity.Parent = t2Head
-
 	local t2Desc = Instance.new("TextLabel")
-	t2Desc.Size = UDim2.new(1, 0, 1, -24)
+	t2Desc.Size = UDim2.new(1, 0, 0, 24)
 	t2Desc.BackgroundTransparency = 1
-	t2Desc.Text = "Trait effects are not implemented yet. This panel shows where "
-		.. "they will appear."
+	t2Desc.Text = "Trait enhancements unlock in upcoming updates."
 	t2Desc.TextColor3 = THEME.TextMuted
 	t2Desc.Font = Enum.Font.GothamMedium
-	t2Desc.TextSize = 10
+	t2Desc.TextSize = 9.5
 	t2Desc.TextWrapped = true
 	t2Desc.TextYAlignment = Enum.TextYAlignment.Top
 	t2Desc.TextXAlignment = Enum.TextXAlignment.Left
 	t2Desc.LayoutOrder = 2
 	t2Desc.Parent = t2Container
 
-	-- Action Controls (32px height)
 	local actFooter = Instance.new("Frame")
-	actFooter.Size = UDim2.new(1, 0, 0, 32)
+	actFooter.Size = UDim2.new(1, 0, 0, 28)
 	actFooter.BackgroundTransparency = 1
 	actFooter.LayoutOrder = 3
 	actFooter.Parent = rightCol
@@ -4286,41 +4264,52 @@ local function buildSlotsOverlay(
 	keepBtn.BackgroundColor3 = THEME.ButtonDark
 	keepBtn.BorderSizePixel = 0
 	keepBtn.Text = "KEEP TRAITS"
-	keepBtn.TextColor3 = THEME.GoldPrimary
+	keepBtn.TextColor3 = THEME.TextMuted
 	keepBtn.Font = Enum.Font.GothamBold
 	keepBtn.TextSize = 11
 	keepBtn.LayoutOrder = 1
 	keepBtn.Parent = actFooter
+
 	local kbc = Instance.new("UICorner")
 	kbc.CornerRadius = UDim.new(0, 6)
 	kbc.Parent = keepBtn
-	local kbStroke = Instance.new("UIStroke")
-	kbStroke.Color = THEME.StrokeSubtle
-	kbStroke.Thickness = 1
-	kbStroke.Parent = keepBtn
+
+	local kbs = Instance.new("UIStroke")
+	kbs.Color = THEME.StrokeSubtle
+	kbs.Thickness = 1
+	kbs.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+	kbs.Parent = keepBtn
+
+	setTraitControlInert(keepBtn)
 
 	local rerollAllBtn = Instance.new("TextButton")
 	rerollAllBtn.Name = "RerollAllButton"
 	rerollAllBtn.Size = UDim2.new(0.50, -3, 1, 0)
-	rerollAllBtn.BackgroundColor3 = THEME.GoldPrimary
+	rerollAllBtn.BackgroundColor3 = THEME.ButtonDark
 	rerollAllBtn.BorderSizePixel = 0
 	rerollAllBtn.Text = "REROLL ALL"
-	rerollAllBtn.TextColor3 = THEME.TextDark
-	rerollAllBtn.Font = Enum.Font.GothamBlack
+	rerollAllBtn.TextColor3 = THEME.TextMuted
+	rerollAllBtn.Font = Enum.Font.GothamBold
 	rerollAllBtn.TextSize = 11
 	rerollAllBtn.LayoutOrder = 2
 	rerollAllBtn.Parent = actFooter
-	-- Both footer controls belong to the same unimplemented section as the
-	-- reroll button above, so neither may look actionable.
-	setTraitControlInert(keepBtn)
+
+	local rabc = Instance.new("UICorner")
+	rabc.CornerRadius = UDim.new(0, 6)
+	rabc.Parent = rerollAllBtn
+
+	local rabs = Instance.new("UIStroke")
+	rabs.Color = THEME.StrokeSubtle
+	rabs.Thickness = 1
+	rabs.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+	rabs.Parent = rerollAllBtn
+
 	setTraitControlInert(rerollAllBtn)
 
-	local rrc = Instance.new("UICorner")
-	rrc.CornerRadius = UDim.new(0, 6)
-	rrc.Parent = rerollAllBtn
+	local updateEquipButton: () -> ()
 
 	local function updateFocusedDie(shapeId: string)
-		selectedFocusedShape = shapeId
+		selectedInventoryShape = shapeId
 		focusedDieTag.Text = SLOTS_CANONICAL_NAMES[shapeId] or shapeId
 
 		for _, child in ipairs(focusedDieVpContainer:GetChildren()) do
@@ -4332,22 +4321,92 @@ local function buildSlotsOverlay(
 		pruneDeadViewportItems()
 
 		createMiniDieViewport(focusedDieVpContainer, UDim2.fromScale(1, 1), shapeId, THEME.InsetBg)
+		if updateEquipButton then
+			updateEquipButton()
+		end
 	end
 
-	updateFocusedDie("D6")
+	updateEquipButton = function()
+		local currentDie = liveEquippedDice[selectedSlotIndex]
+		local isCurrent = (currentDie ~= nil and currentDie.shape == selectedInventoryShape)
+
+		local ownedTotal = if type(playerInventory) == "table" then (tonumber(playerInventory[selectedInventoryShape]) or 0) else 0
+		local inUseCount = 0
+		for i, d in ipairs(liveEquippedDice) do
+			if i ~= selectedSlotIndex and d and d.shape == selectedInventoryShape then
+				inUseCount += 1
+			end
+		end
+		local canEquipThisShape = (inUseCount + 1 <= ownedTotal)
+
+		if currentDie == nil then
+			if canEquipThisShape then
+				equipToSlotBtn.Text = string.format("EQUIP %s TO SLOT %02d", selectedInventoryShape, selectedSlotIndex)
+				equipToSlotBtn.BackgroundColor3 = THEME.GoldPrimary
+				equipToSlotBtn.TextColor3 = THEME.TextDark
+				equipToSlotBtn.AutoButtonColor = true
+			else
+				equipToSlotBtn.Text = string.format("[ 0 %s AVAILABLE ]", selectedInventoryShape)
+				equipToSlotBtn.BackgroundColor3 = THEME.ButtonDark
+				equipToSlotBtn.TextColor3 = THEME.TextMuted
+				equipToSlotBtn.AutoButtonColor = false
+			end
+		elseif isCurrent then
+			equipToSlotBtn.Text = string.format("[ %s IN SLOT %02d ]", selectedInventoryShape, selectedSlotIndex)
+			equipToSlotBtn.BackgroundColor3 = THEME.ButtonDark
+			equipToSlotBtn.TextColor3 = THEME.Positive
+			equipToSlotBtn.AutoButtonColor = false
+		else
+			if canEquipThisShape then
+				equipToSlotBtn.Text = string.format("CHANGE TO %s (SLOT %02d)", selectedInventoryShape, selectedSlotIndex)
+				equipToSlotBtn.BackgroundColor3 = THEME.GoldPrimary
+				equipToSlotBtn.TextColor3 = THEME.TextDark
+				equipToSlotBtn.AutoButtonColor = true
+			else
+				equipToSlotBtn.Text = string.format("[ 0 %s AVAILABLE ]", selectedInventoryShape)
+				equipToSlotBtn.BackgroundColor3 = THEME.ButtonDark
+				equipToSlotBtn.TextColor3 = THEME.TextMuted
+				equipToSlotBtn.AutoButtonColor = false
+			end
+		end
+	end
+
+	local equipInFlight = false
+	equipToSlotBtn.MouseButton1Click:Connect(function()
+		if equipInFlight then return end
+		local currentDie = liveEquippedDice[selectedSlotIndex]
+		if currentDie and currentDie.shape == selectedInventoryShape then
+			return
+		end
+
+		local ownedTotal = if type(playerInventory) == "table" then (tonumber(playerInventory[selectedInventoryShape]) or 0) else 0
+		local inUseCount = 0
+		for i, d in ipairs(liveEquippedDice) do
+			if i ~= selectedSlotIndex and d and d.shape == selectedInventoryShape then
+				inUseCount += 1
+			end
+		end
+		if inUseCount + 1 > ownedTotal then
+			return
+		end
+
+		equipInFlight = true
+		equipToSlotBtn.Text = "EQUIPPING..."
+		local targetSlot = if selectedSlotIndex <= #liveEquippedDice
+			then selectedSlotIndex
+			else math.min(selectedSlotIndex, #liveEquippedDice + 1)
+
+		task.spawn(function()
+			local result = NetClient.setShape(targetSlot, selectedInventoryShape)
+			equipInFlight = false
+			updateEquipButton()
+		end)
+	end)
+
+	updateFocusedDie("D2")
 
 	local rebuildShowcaseSlots: () -> ()
 	local rebuildInventory: () -> ()
-
-	-- Closing the panel cancels a half-finished move. Otherwise the player
-	-- returns later to a card armed for a swap they no longer remember starting.
-	slotsOverlay:GetPropertyChangedSignal("Visible"):Connect(function()
-		if not slotsOverlay.Visible and pendingSwapIndex ~= nil then
-			pendingSwapIndex = nil
-			slotsSwapStatus.Text = ""
-			rebuildInventory()
-		end
-	end)
 
 	rebuildShowcaseSlots = function()
 		for _, child in ipairs(sGrid:GetChildren()) do
@@ -4356,12 +4415,12 @@ local function buildSlotsOverlay(
 			end
 		end
 
-		-- CLAMPED HERE, not only in the arrow handlers. An ascension can shrink
-		-- the slot count while the player is sitting on the last page, and the
-		-- arrows are not involved in that.
 		local pageCount = slotPageCount()
 		if currentSlotPage > pageCount then
 			currentSlotPage = pageCount
+		end
+		if currentSlotPage < 1 then
+			currentSlotPage = 1
 		end
 
 		local startIdx = (currentSlotPage - 1) * SLOTS_PER_PAGE + 1
@@ -4385,6 +4444,7 @@ local function buildSlotsOverlay(
 			local bs = Instance.new("UIStroke")
 			bs.Thickness = if isSelected then 2 else 1
 			bs.Color = if isSelected then THEME.GoldPrimary elseif isUnlocked then THEME.StrokeGold else THEME.StrokeSubtle
+			bs.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
 			bs.Parent = bay
 
 			if isUnlocked and dieInfo then
@@ -4394,109 +4454,157 @@ local function buildSlotsOverlay(
 				vpBox.Parent = bay
 				createMiniDieViewport(vpBox, UDim2.fromScale(1, 1), dieInfo.shape, THEME.InsetBg)
 
+				local removeBtn = Instance.new("TextButton")
+				removeBtn.Name = "RemoveBtn"
+				removeBtn.Size = UDim2.fromOffset(26, 26)
+				removeBtn.Position = UDim2.new(1, -30, 0, 4)
+				removeBtn.BackgroundColor3 = THEME.ButtonDark
+				removeBtn.BorderSizePixel = 0
+				removeBtn.Text = "X"
+				removeBtn.TextColor3 = if #liveEquippedDice > 1 then THEME.Negative else THEME.TextMuted
+				removeBtn.Font = Enum.Font.GothamBold
+				removeBtn.TextSize = 14
+				removeBtn.Active = (#liveEquippedDice > 1)
+				removeBtn.AutoButtonColor = (#liveEquippedDice > 1)
+				removeBtn.ZIndex = 8
+				removeBtn.Parent = bay
+
+				local rbc = Instance.new("UICorner")
+				rbc.CornerRadius = UDim.new(0, 6)
+				rbc.Parent = removeBtn
+
+				local rbs = Instance.new("UIStroke")
+				rbs.Color = if #liveEquippedDice > 1 then THEME.Negative else THEME.StrokeSubtle
+				rbs.Thickness = 1
+				rbs.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+				rbs.Parent = removeBtn
+
+				if #liveEquippedDice > 1 then
+					removeBtn.MouseButton1Click:Connect(function()
+						task.spawn(function()
+							NetClient.unequipDie(slotNum)
+						end)
+					end)
+				end
+
 				local bTitle = Instance.new("TextLabel")
-				bTitle.Size = UDim2.new(1, 0, 0, 16)
-				bTitle.Position = UDim2.new(0, 0, 0.54, 0)
+				bTitle.Size = UDim2.new(1, 0, 0, 18)
+				bTitle.Position = UDim2.new(0, 0, 0.56, 0)
 				bTitle.BackgroundTransparency = 1
 				bTitle.Text = string.format("SLOT %02d: %s", slotNum, dieInfo.shape)
 				bTitle.TextColor3 = THEME.GoldPrimary
 				bTitle.Font = Enum.Font.GothamBold
-				bTitle.TextSize = 9.5
+				bTitle.TextSize = 12
 				bTitle.Parent = bay
 
 				local bSub = Instance.new("TextLabel")
-				bSub.Size = UDim2.new(1, 0, 0, 14)
-				bSub.Position = UDim2.new(0, 0, 0.74, 0)
+				bSub.Size = UDim2.new(1, 0, 0, 16)
+				bSub.Position = UDim2.new(0, 0, 0.76, 0)
 				bSub.BackgroundTransparency = 1
-				bSub.Text = "EQUIPPED"
-				bSub.TextColor3 = THEME.Positive
-				bSub.Font = Enum.Font.Code
-				bSub.TextSize = 8.5
+				bSub.Text = if isSelected then "[ SELECTED ]" else "EQUIPPED"
+				bSub.TextColor3 = if isSelected then THEME.GoldPrimary else THEME.Positive
+				bSub.Font = Enum.Font.GothamBold
+				bSub.TextSize = 11
 				bSub.Parent = bay
+
+				local clickBtn = Instance.new("TextButton")
+				clickBtn.Size = UDim2.fromScale(1, 1)
+				clickBtn.BackgroundTransparency = 1
+				clickBtn.Text = ""
+				clickBtn.Parent = bay
+
+				clickBtn.MouseButton1Click:Connect(function()
+					selectedSlotIndex = slotNum
+					selectedInventoryShape = dieInfo.shape
+					updateFocusedDie(dieInfo.shape)
+					rebuildShowcaseSlots()
+					rebuildInventory()
+					updateEquipButton()
+				end)
 			elseif isUnlocked then
 				local bTitle = Instance.new("TextLabel")
-				bTitle.Size = UDim2.new(1, 0, 0, 16)
+				bTitle.Size = UDim2.new(1, 0, 0, 18)
 				bTitle.Position = UDim2.new(0, 0, 0.42, 0)
 				bTitle.BackgroundTransparency = 1
 				bTitle.Text = string.format("SLOT %02d (EMPTY)", slotNum)
 				bTitle.TextColor3 = THEME.TextMuted
 				bTitle.Font = Enum.Font.GothamBold
-				bTitle.TextSize = 9
+				bTitle.TextSize = 11
 				bTitle.Parent = bay
+
+				local clickBtn = Instance.new("TextButton")
+				clickBtn.Size = UDim2.fromScale(1, 1)
+				clickBtn.BackgroundTransparency = 1
+				clickBtn.Text = ""
+				clickBtn.Parent = bay
+
+				clickBtn.MouseButton1Click:Connect(function()
+					selectedSlotIndex = slotNum
+					rebuildShowcaseSlots()
+					rebuildInventory()
+					updateEquipButton()
+				end)
 			else
-				-- `dieSlotCost` RETURNS `number?`. It answers nil at the
-				-- ascension cap, meaning "there is no next slot to price" --
-				-- and this compared that nil with `>`, which throws. Reachable
-				-- simply by paging right: at zero ascensions the cap is 3, so
-				-- slot 4 onward returns nil the first time the player looks.
-				--
-				-- Nil is not "locked". Locked implies a price the player has
-				-- not met; at the cap no amount of cash opens this bay, so it
-				-- names the thing that actually would.
 				local nextCost = DiceCatalog.dieSlotCost(slotNum - 1, ascensionsCount)
-				local costStr = if nextCost ~= nil and nextCost > 0
-					then "$" .. Format.formatNumber(nextCost)
-					else "ASCEND TO UNLOCK"
+				local isNextBuyable = (slotNum == unlockedSlotsCount + 1 and nextCost ~= nil)
 
 				local lockedLbl = Instance.new("TextLabel")
 				lockedLbl.Size = UDim2.new(1, 0, 0, 16)
-				lockedLbl.Position = UDim2.new(0, 0, 0.38, 0)
+				lockedLbl.Position = UDim2.new(0, 0, 0, 6)
 				lockedLbl.BackgroundTransparency = 1
-				lockedLbl.Text = "[ LOCKED ]"
+				lockedLbl.Text = string.format("[ LOCKED SLOT %02d ]", slotNum)
 				lockedLbl.TextColor3 = THEME.TextMuted
-				lockedLbl.Font = Enum.Font.Code
-				lockedLbl.TextSize = 9.5
+				lockedLbl.Font = Enum.Font.GothamBold
+				lockedLbl.TextSize = 11
 				lockedLbl.Parent = bay
 
-				local bTitle = Instance.new("TextLabel")
-				bTitle.Size = UDim2.new(1, 0, 0, 14)
-				bTitle.Position = UDim2.new(0, 0, 0.58, 0)
-				bTitle.BackgroundTransparency = 1
-				bTitle.Text = string.format("SLOT %02d", slotNum)
-				bTitle.TextColor3 = THEME.TextMuted
-				bTitle.Font = Enum.Font.GothamBold
-				bTitle.TextSize = 9
-				bTitle.Parent = bay
+				if isNextBuyable and nextCost then
+					local unlockBtn = Instance.new("TextButton")
+					unlockBtn.Size = UDim2.new(0.85, 0, 0, 28)
+					unlockBtn.Position = UDim2.new(0.075, 0, 0.52, -14)
+					unlockBtn.BackgroundColor3 = if currentCash >= nextCost then THEME.GoldPrimary else THEME.ButtonDark
+					unlockBtn.BorderSizePixel = 0
+					unlockBtn.Text = string.format("UNLOCK ($%s)", Format.formatNumber(nextCost))
+					unlockBtn.TextColor3 = if currentCash >= nextCost then THEME.TextDark else THEME.Negative
+					unlockBtn.Font = Enum.Font.GothamBold
+					unlockBtn.TextSize = 10.5
+					unlockBtn.Parent = bay
 
-				local costLbl = Instance.new("TextLabel")
-				costLbl.Size = UDim2.new(1, 0, 0, 14)
-				costLbl.Position = UDim2.new(0, 0, 0.76, 0)
-				costLbl.BackgroundTransparency = 1
-				costLbl.Text = costStr
-				costLbl.TextColor3 = THEME.GoldBurnish
-				costLbl.Font = Enum.Font.Code
-				costLbl.TextSize = 9
-				costLbl.Parent = bay
-			end
+					local uc = Instance.new("UICorner")
+					uc.CornerRadius = UDim.new(0, 4)
+					uc.Parent = unlockBtn
 
-			local clickBtn = Instance.new("TextButton")
-			clickBtn.Size = UDim2.fromScale(1, 1)
-			clickBtn.BackgroundTransparency = 1
-			clickBtn.Text = ""
-			clickBtn.Parent = bay
-
-			clickBtn.MouseButton1Click:Connect(function()
-				selectedSlotIndex = slotNum
-				if dieInfo then
-					updateFocusedDie(dieInfo.shape)
+					local unlocking = false
+					unlockBtn.MouseButton1Click:Connect(function()
+						if unlocking or currentCash < nextCost then return end
+						unlocking = true
+						unlockBtn.Text = "UNLOCKING..."
+						task.spawn(function()
+							NetClient.addDieSlot("")
+							unlocking = false
+						end)
+					end)
+				else
+					local subLbl = Instance.new("TextLabel")
+					subLbl.Size = UDim2.new(1, 0, 0, 16)
+					subLbl.Position = UDim2.new(0, 0, 0.55, 0)
+					subLbl.BackgroundTransparency = 1
+					subLbl.Text = if nextCost == nil then "REACH ASCENSION" else "UNLOCK PREVIOUS"
+					subLbl.TextColor3 = THEME.TextMuted
+					subLbl.Font = Enum.Font.Code
+					subLbl.TextSize = 9.5
+					subLbl.Parent = bay
 				end
-				rebuildShowcaseSlots()
-			end)
+			end
 		end
 
 		if pageTagLbl then
-			-- Derived from the real counts. The page total was the literal 4 and
-			-- the last slot the literal 12, so a player with three slots was
-			-- told they had four pages and invited to walk through nine empty
-			-- bays.
-			local totalSlots = math.max(unlockedSlotsCount, #liveEquippedDice, 1)
+			local totalSlots = math.max(DiceCatalog.dieSlotCapFor(ascensionsCount), unlockedSlotsCount, #liveEquippedDice, 1)
 			local endIdx = math.min(startIdx + SLOTS_PER_PAGE - 1, totalSlots)
 			pageTagLbl.Text = string.format("SLOTS %02d - %02d  [PAGE %d/%d]",
 				startIdx, endIdx, currentSlotPage, pageCount)
 		end
 
-		-- The arrows say whether they lead anywhere, rather than silently
-		-- doing nothing at the ends.
 		lArrow.TextColor3 = if currentSlotPage > 1 then THEME.GoldPrimary else THEME.StrokeSubtle
 		rArrow.TextColor3 = if currentSlotPage < pageCount then THEME.GoldPrimary else THEME.StrokeSubtle
 	end
@@ -4515,25 +4623,6 @@ local function buildSlotsOverlay(
 		end
 	end)
 
-	-- Fires the exchange and lets the resulting snapshot repaint the panel.
-	local function commitSwap(a: number, b: number)
-		swapInFlight = true
-		rebuildInventory()
-		task.spawn(function()
-			local result = NetClient.swapDice(a, b)
-			swapInFlight = false
-			if not result.ok then
-				-- A refusal produces no snapshot, so nothing else would repaint
-				-- this panel or tell the player their click did nothing.
-				slotsSwapStatus.Text = "Could not move that die."
-				slotsSwapStatus.TextColor3 = THEME.Negative
-			else
-				slotsSwapStatus.Text = ""
-			end
-			rebuildInventory()
-		end)
-	end
-
 	rebuildInventory = function()
 		for _, child in ipairs(igFrame:GetChildren()) do
 			if child:IsA("Frame") then
@@ -4542,24 +4631,49 @@ local function buildSlotsOverlay(
 		end
 		pruneDeadViewportItems()
 
-		-- ONE CARD PER DIE THE PLAYER ACTUALLY HAS.
-		--
-		-- This used to group by SHAPE, inject every shape the diamond tree had
-		-- unlocked, fall back to a phantom D6 when it found nothing, and stop at
-		-- six. Three of those four are wrong: an unlocked shape is something the
-		-- player MAY forge, not a die they hold; the fallback drew a die that
-		-- does not exist; and the cap hid slots 7 through 12 from anyone who got
-		-- that far. `Profile.Dice` is the inventory, and its length is the count.
-		for idx, die in ipairs(liveEquippedDice) do
-			-- Selection is by SLOT, not by shape. Highlighting by shape lit up
-			-- every card sharing it, which with three D6s meant three cards
-			-- claiming to be the one selected.
-			local isSelected = (idx == selectedSlotIndex)
-			local isPending = (pendingSwapIndex == idx)
-			local item = die
+		local equippedCounts: { [string]: number } = {}
+		for _, d in ipairs(liveEquippedDice) do
+			if d and d.shape then
+				equippedCounts[d.shape] = (equippedCounts[d.shape] or 0) + 1
+			end
+		end
+
+		local invList: { { shape: string, count: number } } = {}
+		for shapeId, totalCount in pairs(playerInventory) do
+			if type(totalCount) == "number" and totalCount > 0 then
+				local inUse = equippedCounts[shapeId] or 0
+				local available = math.max(0, totalCount - inUse)
+				if available > 0 then
+					table.insert(invList, {
+						shape = shapeId,
+						count = available,
+					})
+				end
+			end
+		end
+
+		table.sort(invList, function(a, b)
+			local order = { D2=1, D3=2, D4=3, D5=4, D6=5, D7=6, D8=7, D10=8, D12=9, D14=10, D16=11, D20=12 }
+			return (order[a.shape] or 99) < (order[b.shape] or 99)
+		end)
+
+		local selectedExists = false
+		for _, item in ipairs(invList) do
+			if item.shape == selectedInventoryShape then
+				selectedExists = true
+				break
+			end
+		end
+		if not selectedExists and #invList > 0 then
+			selectedInventoryShape = invList[1].shape
+			updateFocusedDie(selectedInventoryShape)
+		end
+
+		for idx, item in ipairs(invList) do
+			local isSelected = (item.shape == selectedInventoryShape)
 
 			local c = Instance.new("Frame")
-			c.Name = "InvCard_" .. idx
+			c.Name = "InvCard_" .. item.shape
 			c.LayoutOrder = idx
 			c.BackgroundColor3 = THEME.InsetBg
 			c.BorderSizePixel = 0
@@ -4571,48 +4685,63 @@ local function buildSlotsOverlay(
 			cc.Parent = c
 
 			local cs = Instance.new("UIStroke")
-			cs.Thickness = if isPending or isSelected then 2 else 1
-			cs.Color = if isPending then THEME.AmberFlame
-				elseif isSelected then THEME.GoldPrimary
-				else THEME.StrokeSubtle
+			cs.Thickness = if isSelected then 2 else 1
+			cs.Color = if isSelected then THEME.GoldPrimary else THEME.StrokeSubtle
+			cs.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
 			cs.Parent = c
 
 			createMiniDieViewport(c, UDim2.fromScale(1, 1), item.shape, THEME.InsetBg)
 
-			-- The slot this die occupies. With one card per die rather than one
-			-- per shape, the slot number is what distinguishes two identical
-			-- dice, so it is on the card rather than in a count badge.
-			local slotTag = Instance.new("TextLabel")
-			slotTag.Name = "SlotTag"
-			slotTag.Size = UDim2.new(0, 30, 0, 15)
-			slotTag.Position = UDim2.new(1, -32, 0, 2)
-			slotTag.BackgroundColor3 = THEME.ModalBg
-			slotTag.BorderSizePixel = 0
-			slotTag.Text = string.format("%02d", idx)
-			slotTag.TextColor3 = THEME.GoldPrimary
-			slotTag.Font = Enum.Font.Code
-			slotTag.TextSize = 9.5
-			slotTag.Parent = c
+			local nameTag = Instance.new("TextLabel")
+			nameTag.Name = "ShapeTag"
+			nameTag.Size = UDim2.new(0, 36, 0, 18)
+			nameTag.Position = UDim2.new(0, 4, 0, 4)
+			nameTag.BackgroundColor3 = THEME.ModalBg
+			nameTag.BorderSizePixel = 0
+			nameTag.Text = item.shape
+			nameTag.TextColor3 = THEME.GoldPrimary
+			nameTag.Font = Enum.Font.GothamBold
+			nameTag.TextSize = 11
+			nameTag.Parent = c
 
-			local stC = Instance.new("UICorner")
-			stC.CornerRadius = UDim.new(0, 4)
-			stC.Parent = slotTag
+			local ntC = Instance.new("UICorner")
+			ntC.CornerRadius = UDim.new(0, 4)
+			ntC.Parent = nameTag
 
-			local stS = Instance.new("UIStroke")
-			stS.Color = THEME.StrokeGold
-			stS.Thickness = 1
-			stS.Parent = slotTag
+			if item.count > 1 then
+				local badge = Instance.new("TextLabel")
+				badge.Name = "CountBadge"
+				badge.Size = UDim2.new(0, 32, 0, 18)
+				badge.Position = UDim2.new(1, -36, 1, -22)
+				badge.BackgroundColor3 = THEME.ModalBg
+				badge.BorderSizePixel = 0
+				badge.Text = "x" .. item.count
+				badge.TextColor3 = THEME.GoldPrimary
+				badge.Font = Enum.Font.GothamBold
+				badge.TextSize = 11
+				badge.Parent = c
 
-			if isPending or isSelected then
+				local bc2 = Instance.new("UICorner")
+				bc2.CornerRadius = UDim.new(0, 4)
+				bc2.Parent = badge
+
+				local bs2 = Instance.new("UIStroke")
+				bs2.Color = THEME.StrokeGold
+				bs2.Thickness = 1
+				bs2.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+				bs2.Parent = badge
+			end
+
+			if isSelected then
 				local selPill = Instance.new("TextLabel")
-				selPill.Size = UDim2.new(1, 0, 0, 14)
-				selPill.Position = UDim2.new(0, 0, 1, -14)
-				selPill.BackgroundColor3 = if isPending then THEME.AmberFlame else THEME.GoldPrimary
+				selPill.Size = UDim2.new(1, 0, 0, 16)
+				selPill.Position = UDim2.new(0, 0, 1, -16)
+				selPill.BackgroundColor3 = THEME.GoldPrimary
 				selPill.BorderSizePixel = 0
-				selPill.Text = if isPending then "Move to..." else "Selected"
+				selPill.Text = "SELECTED"
 				selPill.TextColor3 = THEME.TextDark
 				selPill.Font = Enum.Font.GothamBlack
-				selPill.TextSize = 8.5
+				selPill.TextSize = 9.5
 				selPill.Parent = c
 			end
 
@@ -4622,35 +4751,22 @@ local function buildSlotsOverlay(
 			invBtn.Text = ""
 			invBtn.Parent = c
 
-			-- TWO CLICKS MOVE A DIE. First arms the card, second names the slot
-			-- to exchange with. Clicking the armed card again cancels -- the
-			-- server rejects `a == b` outright, so it must never be sent.
 			invBtn.MouseButton1Click:Connect(function()
-				if swapInFlight then
-					return
-				end
-				selectedSlotIndex = idx
+				selectedInventoryShape = item.shape
 				updateFocusedDie(item.shape)
-
-				if pendingSwapIndex == nil then
-					pendingSwapIndex = idx
-					slotsSwapStatus.Text = "Pick another die to swap slots with."
-					slotsSwapStatus.TextColor3 = THEME.TextMuted
-					rebuildInventory()
-				elseif pendingSwapIndex == idx then
-					pendingSwapIndex = nil
-					slotsSwapStatus.Text = ""
-					rebuildInventory()
-				else
-					local a = pendingSwapIndex
-					pendingSwapIndex = nil
-					commitSwap(a, idx)
-				end
+				rebuildInventory()
+				updateEquipButton()
 			end)
 		end
 	end
 
-	-- Master turntable render loop
+	rebuildOrreryChamber()
+	rebuildShowcaseSlots()
+	rebuildInventory()
+	if updateEquipButton then
+		updateEquipButton()
+	end
+
 	local conn: RBXScriptConnection? = nil
 	conn = RunService.RenderStepped:Connect(function(dt: number)
 		if not slotsOverlay.Visible then return end
@@ -4676,38 +4792,124 @@ local function buildSlotsOverlay(
 
 	local function refreshSlots(state: any)
 		if type(state) == "table" then
+			currentCash = tonumber(state.cash) or 0
 			ascensionsCount = tonumber(state.ascensions) or 0
 			unlockedSlotsCount = tonumber(state.dieSlots) or 1
 
+			if type(state.diamondTree) == "table" and type(state.diamondTree.Shapes) == "table" then
+				ownedShapesMap = state.diamondTree.Shapes
+			end
+
+			if type(state.inventory) == "table" then
+				playerInventory = state.inventory
+			elseif type(state.diamondTree) == "table" and type(state.diamondTree.Shapes) == "table" then
+				playerInventory = {}
+				for s, owned in pairs(state.diamondTree.Shapes) do
+					if owned == true then
+						playerInventory[s] = 1
+					end
+				end
+			end
+
+			liveEquippedDice = {}
 			if type(state.dice) == "table" and #state.dice > 0 then
-				liveEquippedDice = {}
-				-- THE SNAPSHOT'S KEYS ARE CAPITALISED. `StateSyncService`
-				-- sends `Shape` and `MassBudget`; this read asked for `shape`
-				-- and `mass`, missed on every die, and fell through to the
-				-- defaults -- which is why every slot in the panel reported
-				-- "D6" at mass 60 regardless of what the player owned. The
-				-- fallbacks stay, but they are defence now rather than the
-				-- path every die takes.
 				for _, d in ipairs(state.dice) do
 					table.insert(liveEquippedDice, {
-						shape = tostring(d.Shape or "D6"),
+						shape = tostring(d.Shape or "D2"),
 						mass = tonumber(d.MassBudget) or 60,
 					})
 				end
+			end
+			if #liveEquippedDice == 0 then
+				table.insert(liveEquippedDice, { shape = "D2", mass = 60 })
+			end
+
+			if selectedSlotIndex > unlockedSlotsCount then
+				selectedSlotIndex = math.max(1, unlockedSlotsCount)
+			end
+			if liveEquippedDice[selectedSlotIndex] then
+				selectedInventoryShape = liveEquippedDice[selectedSlotIndex].shape
+				updateFocusedDie(selectedInventoryShape)
 			end
 		end
 
 		rebuildOrreryChamber()
 		rebuildShowcaseSlots()
 		rebuildInventory()
+		if updateEquipButton then
+			updateEquipButton()
+		end
 	end
 
 	return refreshSlots
 end
 
---------------------------------------------------------------------------------
--- 7. LEADERBOARDS OVERLAY
---------------------------------------------------------------------------------
+-- ------------------------------
+-- 7. LEADERBOARDS OVERLAY (BRUTALIST KINETIC MONOLITH - L-065/L-066)
+-- ------------------------------
+
+local function createBoardsAvatar(parent: Instance, size: UDim2, initial: string, accentColor: Color3, isPlayer: boolean): (Frame, TextLabel)
+	local avatar = Instance.new("Frame")
+	avatar.Name = "AvatarMonogram"
+	avatar.Size = size
+	avatar.BackgroundColor3 = if isPlayer then Color3.fromRGB(38, 30, 20) else THEME.InsetBg
+	avatar.BorderSizePixel = 0
+	avatar.Parent = parent
+
+	local avCorner = Instance.new("UICorner")
+	avCorner.CornerRadius = UDim.new(0, 6)
+	avCorner.Parent = avatar
+
+	local avStroke = Instance.new("UIStroke")
+	avStroke.Color = if isPlayer then THEME.GoldPrimary else THEME.StrokeSubtle
+	avStroke.Thickness = if isPlayer then 1.5 else 1
+	avStroke.Parent = avatar
+
+	local initLbl = Instance.new("TextLabel")
+	initLbl.Name = "InitLabel"
+	initLbl.Size = UDim2.fromScale(1, 1)
+	initLbl.BackgroundTransparency = 1
+	initLbl.Text = string.sub(initial, 1, 1):upper()
+	initLbl.TextColor3 = accentColor
+	initLbl.Font = Enum.Font.GothamBold
+	initLbl.TextSize = 12
+	initLbl.Parent = avatar
+
+	return avatar, initLbl
+end
+
+local function getRankClass(rank: number, boardId: string): string
+	if rank == 1 then
+		return if boardId == "Ascensions" then "SOVEREIGN" elseif boardId == "HighestRoll" then "RECORD" else "CHAMPION"
+	elseif rank == 2 then
+		return if boardId == "Ascensions" then "IMMORTAL" elseif boardId == "HighestRoll" then "ELITE" else "GRANDMASTER"
+	elseif rank == 3 then
+		return if boardId == "Ascensions" then "ASCENDED" elseif boardId == "HighestRoll" then "ELITE" else "HIGH ROLLER"
+	elseif rank <= 5 then
+		return if boardId == "Ascensions" then "EXALTED" elseif boardId == "HighestRoll" then "EXPERT" else "MASTER"
+	elseif rank <= 8 then
+		return if boardId == "Ascensions" then "RISEN" elseif boardId == "HighestRoll" then "SHARP" else "FORGER"
+	elseif rank <= 12 then
+		return if boardId == "Ascensions" then "AWAKENED" elseif boardId == "HighestRoll" then "ROLLER" else "ADEPT"
+	elseif rank <= 20 then
+		return if boardId == "Ascensions" then "AWAKENED" elseif boardId == "HighestRoll" then "ROLLER" else "APPRENTICE"
+	else
+		return "INITIATE"
+	end
+end
+
+local function formatBoardScore(boardId: string, rawVal: number): string
+	if boardId == "NetWorth" then
+		return "$" .. Format.formatNumber(rawVal)
+	elseif boardId == "HighestRoll" then
+		return Format.formatNumber(rawVal) .. " pts"
+	elseif boardId == "Ascensions" then
+		return Format.formatNumber(rawVal) .. " Ascensions"
+	else
+		return Format.formatNumber(rawVal)
+	end
+end
+
 local function buildBoardsOverlay(
 	screenGui: ScreenGui,
 	overlays: { [string]: Frame },
@@ -4718,14 +4920,20 @@ local function buildBoardsOverlay(
 	overlays["boards"] = boardsOverlay
 	if legacyBody then legacyBody.Visible = false end
 
-	local mainShell, boardsBody = formatModalShell(boardsOverlay, "~ Global Leaderboards ~", getController)
+	local mainShell, boardsBody = formatModalShell(boardsOverlay, "GLOBAL LEADERBOARDS", getController)
 
-	local BOARD_TABS: { { id: string, label: string, prefix: string } } = {
-		{ id = "NetWorth", label = "NET WORTH", prefix = "$" },
-		{ id = "HighestRoll", label = "BEST ROLL", prefix = "$" },
-		{ id = "Ascensions", label = "ASCENSIONS", prefix = "" },
+	local BOARD_TABS: { { id: string, label: string, title: string } } = {
+		{ id = "NetWorth", label = "NET WORTH", title = "LIFETIME NET WORTH" },
+		{ id = "HighestRoll", label = "PEAK ROLL", title = "BEST SINGLE ROLL" },
+		{ id = "Ascensions", label = "ASCENSIONS", title = "TOTAL ASCENSIONS" },
 	}
 	local activeBoard = "NetWorth"
+
+	local SilverColor = Color3.fromRGB(203, 213, 225)
+	local StrokeSilver = Color3.fromRGB(148, 163, 184)
+	local BronzeColor = Color3.fromRGB(217, 119, 6)
+	local StrokeBronze = Color3.fromRGB(180, 83, 9)
+	local TextDark = Color3.fromRGB(24, 20, 18)
 
 	local boardStack = Instance.new("Frame")
 	boardStack.Name = "BoardStack"
@@ -4734,151 +4942,63 @@ local function buildBoardsOverlay(
 	boardStack.Parent = boardsBody
 
 	local bsList = Instance.new("UIListLayout")
+	bsList.FillDirection = Enum.FillDirection.Vertical
 	bsList.SortOrder = Enum.SortOrder.LayoutOrder
 	bsList.Padding = UDim.new(0, 8)
 	bsList.Parent = boardStack
 
-	-- TAB WIDTH FROM THE COUNT, never a literal fraction. A hardcoded 0.32 fits
-	-- exactly three tabs and silently pushes the fourth off the panel.
+	-- 1. BRUTALIST TAB STRIP
+	local tabStrip = Instance.new("Frame")
+	tabStrip.Name = "TabStrip"
+	tabStrip.Size = UDim2.new(1, 0, 0, 30)
+	tabStrip.BackgroundColor3 = THEME.InsetBg
+	tabStrip.BorderSizePixel = 0
+	tabStrip.LayoutOrder = 1
+	tabStrip.Parent = boardStack
+
+	local tsCorner = Instance.new("UICorner")
+	tsCorner.CornerRadius = UDim.new(0, 4)
+	tsCorner.Parent = tabStrip
+
 	local tabCount = #BOARD_TABS
 	local tabGutter = 6
 
-	local boardTabRow = Instance.new("Frame")
-	boardTabRow.Name = "BoardTabRow"
-	boardTabRow.Size = UDim2.new(1, 0, 0, 30)
-	boardTabRow.BackgroundTransparency = 1
-	boardTabRow.LayoutOrder = 1
-	boardTabRow.Parent = boardStack
+	local tsList = Instance.new("UIListLayout")
+	tsList.FillDirection = Enum.FillDirection.Horizontal
+	tsList.SortOrder = Enum.SortOrder.LayoutOrder
+	tsList.Padding = UDim.new(0, tabGutter)
+	tsList.Parent = tabStrip
 
-	local btrList = Instance.new("UIListLayout")
-	btrList.FillDirection = Enum.FillDirection.Horizontal
-	btrList.SortOrder = Enum.SortOrder.LayoutOrder
-	btrList.Padding = UDim.new(0, tabGutter)
-	btrList.Parent = boardTabRow
+	local tsPad = Instance.new("UIPadding")
+	tsPad.PaddingTop = UDim.new(0, 3)
+	tsPad.PaddingBottom = UDim.new(0, 3)
+	tsPad.PaddingLeft = UDim.new(0, 4)
+	tsPad.PaddingRight = UDim.new(0, 4)
+	tsPad.Parent = tabStrip
 
-	local boardStatus = Instance.new("TextLabel")
-	boardStatus.Name = "BoardStatus"
-	boardStatus.Size = UDim2.new(1, 0, 0, 18)
-	boardStatus.BackgroundTransparency = 1
-	boardStatus.Font = Enum.Font.GothamMedium
-	boardStatus.Text = "Leaderboards sync every 30 seconds."
-	boardStatus.TextColor3 = THEME.TextMuted
-	boardStatus.TextSize = 11
-	boardStatus.TextXAlignment = Enum.TextXAlignment.Left
-	boardStatus.LayoutOrder = 2
-	boardStatus.Parent = boardStack
-
-	local boardRowsHolder = Instance.new("Frame")
-	boardRowsHolder.Name = "BoardRows"
-	boardRowsHolder.Size = UDim2.new(1, 0, 1, -62)
-	boardRowsHolder.BackgroundTransparency = 1
-	boardRowsHolder.LayoutOrder = 3
-	boardRowsHolder.Parent = boardStack
-
-	local brhList = Instance.new("UIListLayout")
-	brhList.SortOrder = Enum.SortOrder.LayoutOrder
-	brhList.Padding = UDim.new(0, 4)
-	brhList.Parent = boardRowsHolder
-
-	-- A FIXED POOL, refilled rather than rebuilt. The board holds at most a page
-	-- of entries, and rebuilding Instances on every tab press would churn the
-	-- whole list each time.
-	local BOARD_ROW_COUNT = 10
-	type BoardRowUI = { row: Frame, rank: TextLabel, name: TextLabel, score: TextLabel }
-	local boardRows: { BoardRowUI } = {}
-
-	for i = 1, BOARD_ROW_COUNT do
-		local row = Instance.new("Frame")
-		row.Name = "BoardRow" .. tostring(i)
-		row.Size = UDim2.new(1, 0, 0, 28)
-		row.BackgroundColor3 = THEME.CardBg
-		row.BorderSizePixel = 0
-		row.LayoutOrder = i
-		row.Visible = false
-		row.Parent = boardRowsHolder
-
-		local rowC = Instance.new("UICorner")
-		rowC.CornerRadius = UDim.new(0, 6)
-		rowC.Parent = row
-
-		local rowPad = Instance.new("UIPadding")
-		rowPad.PaddingLeft = UDim.new(0, 10)
-		rowPad.PaddingRight = UDim.new(0, 10)
-		rowPad.Parent = row
-
-		local rankLbl = Instance.new("TextLabel")
-		rankLbl.Name = "Rank"
-		rankLbl.Size = UDim2.new(0.14, 0, 1, 0)
-		rankLbl.BackgroundTransparency = 1
-		rankLbl.Font = Enum.Font.Code
-		rankLbl.Text = ""
-		rankLbl.TextColor3 = THEME.GoldPrimary
-		rankLbl.TextSize = 12
-		rankLbl.TextXAlignment = Enum.TextXAlignment.Left
-		rankLbl.Parent = row
-
-		local nameLbl = Instance.new("TextLabel")
-		nameLbl.Name = "PlayerName"
-		nameLbl.Size = UDim2.new(0.52, 0, 1, 0)
-		nameLbl.Position = UDim2.new(0.14, 0, 0, 0)
-		nameLbl.BackgroundTransparency = 1
-		nameLbl.Font = Enum.Font.Gotham
-		nameLbl.Text = ""
-		nameLbl.TextColor3 = THEME.TextPrimary
-		nameLbl.TextSize = 12
-		nameLbl.TextTruncate = Enum.TextTruncate.AtEnd
-		nameLbl.TextXAlignment = Enum.TextXAlignment.Left
-		nameLbl.Parent = row
-
-		local scoreLbl = Instance.new("TextLabel")
-		scoreLbl.Name = "Score"
-		scoreLbl.Size = UDim2.new(0.34, 0, 1, 0)
-		scoreLbl.Position = UDim2.new(0.66, 0, 0, 0)
-		scoreLbl.BackgroundTransparency = 1
-		scoreLbl.Font = Enum.Font.Code
-		scoreLbl.Text = ""
-		scoreLbl.TextColor3 = THEME.Positive
-		scoreLbl.TextSize = 12
-		scoreLbl.TextXAlignment = Enum.TextXAlignment.Right
-		scoreLbl.Parent = row
-
-		table.insert(boardRows, { row = row, rank = rankLbl, name = nameLbl, score = scoreLbl })
-	end
-
-	local refreshBoards: (string) -> ()
 	local boardTabButtons: { [string]: TextButton } = {}
-
-	local function paintTabs(activeId: string)
-		for id, btn in pairs(boardTabButtons) do
-			local isActive = id == activeId
-			btn.BackgroundColor3 = if isActive then THEME.GoldPrimary else THEME.ButtonDark
-			btn.TextColor3 = if isActive then THEME.TextDark else THEME.TextMuted
-		end
-	end
+	local refreshBoards: (string) -> ()
 
 	for i, tab in ipairs(BOARD_TABS) do
 		local tBtn = Instance.new("TextButton")
 		tBtn.Name = "Tab_" .. tab.id
 		tBtn.Size = UDim2.new(1 / tabCount, -(tabGutter * (tabCount - 1)) / tabCount, 1, 0)
-		tBtn.BackgroundColor3 = THEME.ButtonDark
-		tBtn.BorderSizePixel = 0
-		tBtn.Font = Enum.Font.GothamBold
+		tBtn.BackgroundColor3 = if tab.id == activeBoard then THEME.GoldPrimary else THEME.CardBg
 		tBtn.Text = tab.label
-		tBtn.TextColor3 = THEME.TextMuted
+		tBtn.TextColor3 = if tab.id == activeBoard then TextDark else THEME.TextMuted
+		tBtn.Font = Enum.Font.GothamBlack
 		tBtn.TextSize = 11
 		tBtn.LayoutOrder = i
-		tBtn.Parent = boardTabRow
+		tBtn.Parent = tabStrip
 
-		local tC = Instance.new("UICorner")
-		tC.CornerRadius = UDim.new(0, 6)
-		tC.Parent = tBtn
+		local tbCorner = Instance.new("UICorner")
+		tbCorner.CornerRadius = UDim.new(0, 4)
+		tbCorner.Parent = tBtn
 
 		boardTabButtons[tab.id] = tBtn
 
 		tBtn.MouseButton1Click:Connect(function()
 			activeBoard = tab.id
-			-- Mirrored onto the controller so `openOverlay` reopens on the tab
-			-- the player last chose rather than resetting to the first.
 			local ctrl = getController()
 			if ctrl ~= nil then
 				ctrl.activeBoard = tab.id
@@ -4887,76 +5007,664 @@ local function buildBoardsOverlay(
 		end)
 	end
 
-	-- THE FETCH. `GetLeaderboard` reads the server CACHE and never triggers a
-	-- DataStore call of its own (T-22), so pressing a tab repeatedly is cheap --
-	-- but NetClient still throttles it, and a throttled call returns nil.
+	-- 2. MONOLITH TOP 3 PODIUMS
+	local monolithRow = Instance.new("Frame")
+	monolithRow.Name = "MonolithRow"
+	monolithRow.Size = UDim2.new(1, 0, 0, 112)
+	monolithRow.BackgroundTransparency = 1
+	monolithRow.LayoutOrder = 2
+	monolithRow.Parent = boardStack
+
+	local mList = Instance.new("UIListLayout")
+	mList.FillDirection = Enum.FillDirection.Horizontal
+	mList.SortOrder = Enum.SortOrder.LayoutOrder
+	mList.Padding = UDim.new(0, 8)
+	mList.Parent = monolithRow
+
+	type MonolithUI = {
+		card: Frame,
+		rankChip: TextLabel,
+		classTag: TextLabel,
+		avatarFrame: Frame,
+		avatarInit: TextLabel,
+		nameLabel: TextLabel,
+		scoreLabel: TextLabel,
+	}
+
+	local monolithCards: { [number]: MonolithUI } = {}
+	local cardConfigs = {
+		{ rank = 2, rankStr = "02", color = SilverColor, stroke = StrokeSilver, order = 1, width = 0.31, height = 102 },
+		{ rank = 1, rankStr = "01", color = THEME.GoldPrimary, stroke = THEME.StrokeGold, order = 2, width = 0.38, height = 112 },
+		{ rank = 3, rankStr = "03", color = BronzeColor, stroke = StrokeBronze, order = 3, width = 0.31, height = 94 },
+	}
+
+	for _, cfg in ipairs(cardConfigs) do
+		local mCard = Instance.new("Frame")
+		mCard.Name = "Monolith_" .. cfg.rank
+		mCard.Size = UDim2.new(cfg.width, -6, 0, cfg.height)
+		mCard.BackgroundColor3 = if cfg.rank == 1 then Color3.fromRGB(36, 28, 22) else THEME.CardBg
+		mCard.BorderSizePixel = 0
+		mCard.LayoutOrder = cfg.order
+		mCard.Parent = monolithRow
+
+		local mcCorner = Instance.new("UICorner")
+		mcCorner.CornerRadius = UDim.new(0, 6)
+		mcCorner.Parent = mCard
+
+		local mcStroke = Instance.new("UIStroke")
+		mcStroke.Color = cfg.stroke
+		mcStroke.Thickness = if cfg.rank == 1 then 2 else 1
+		mcStroke.Parent = mCard
+
+		local mcPad = Instance.new("UIPadding")
+		mcPad.PaddingTop = UDim.new(0, 6)
+		mcPad.PaddingBottom = UDim.new(0, 6)
+		mcPad.PaddingLeft = UDim.new(0, 8)
+		mcPad.PaddingRight = UDim.new(0, 8)
+		mcPad.Parent = mCard
+
+		local mcList = Instance.new("UIListLayout")
+		mcList.FillDirection = Enum.FillDirection.Vertical
+		mcList.SortOrder = Enum.SortOrder.LayoutOrder
+		mcList.Padding = UDim.new(0, 2)
+		mcList.HorizontalAlignment = Enum.HorizontalAlignment.Center
+		mcList.Parent = mCard
+
+		local topBar = Instance.new("Frame")
+		topBar.Size = UDim2.new(1, 0, 0, 18)
+		topBar.BackgroundTransparency = 1
+		topBar.LayoutOrder = 1
+		topBar.Parent = mCard
+
+		local rChip = Instance.new("TextLabel")
+		rChip.Size = UDim2.new(0, 32, 0, 16)
+		rChip.BackgroundColor3 = if cfg.rank == 1 then THEME.GoldPrimary else THEME.InsetBg
+		rChip.Text = cfg.rankStr
+		rChip.TextColor3 = if cfg.rank == 1 then TextDark else cfg.color
+		rChip.Font = Enum.Font.GothamBlack
+		rChip.TextSize = 10
+		rChip.Parent = topBar
+
+		local rcCorner = Instance.new("UICorner")
+		rcCorner.CornerRadius = UDim.new(0, 3)
+		rcCorner.Parent = rChip
+
+		local tTag = Instance.new("TextLabel")
+		tTag.Size = UDim2.new(1, -38, 1, 0)
+		tTag.Position = UDim2.new(0, 38, 0, 0)
+		tTag.BackgroundTransparency = 1
+		tTag.Text = if cfg.rank == 1 then "SOVEREIGN" elseif cfg.rank == 2 then "IMMORTAL" else "ASCENDED"
+		tTag.TextColor3 = cfg.color
+		tTag.Font = Enum.Font.GothamBlack
+		tTag.TextSize = 9
+		tTag.TextXAlignment = Enum.TextXAlignment.Right
+		tTag.Parent = topBar
+
+		local nRow = Instance.new("Frame")
+		nRow.Size = UDim2.new(1, 0, 0, 22)
+		nRow.BackgroundTransparency = 1
+		nRow.LayoutOrder = 2
+		nRow.Parent = mCard
+
+		local nrL = Instance.new("UIListLayout")
+		nrL.FillDirection = Enum.FillDirection.Horizontal
+		nrL.SortOrder = Enum.SortOrder.LayoutOrder
+		nrL.Padding = UDim.new(0, 6)
+		nrL.VerticalAlignment = Enum.VerticalAlignment.Center
+		nrL.Parent = nRow
+
+		local avFrame, avInit = createBoardsAvatar(nRow, UDim2.new(0, 20, 0, 20), "-", cfg.color, false)
+
+		local nLbl = Instance.new("TextLabel")
+		nLbl.Size = UDim2.new(1, -28, 1, 0)
+		nLbl.BackgroundTransparency = 1
+		nLbl.Text = "-"
+		nLbl.TextColor3 = THEME.TextPrimary
+		nLbl.Font = Enum.Font.GothamBlack
+		nLbl.TextSize = if cfg.rank == 1 then 12 else 10.5
+		nLbl.TextXAlignment = Enum.TextXAlignment.Left
+		nLbl.TextTruncate = Enum.TextTruncate.AtEnd
+		nLbl.Parent = nRow
+
+		local scBox = Instance.new("Frame")
+		scBox.Size = UDim2.new(1, 0, 0, 28)
+		scBox.BackgroundColor3 = THEME.InsetBg
+		scBox.BorderSizePixel = 0
+		scBox.LayoutOrder = 3
+		scBox.Parent = mCard
+
+		local scCorner = Instance.new("UICorner")
+		scCorner.CornerRadius = UDim.new(0, 4)
+		scCorner.Parent = scBox
+
+		local scLbl = Instance.new("TextLabel")
+		scLbl.Size = UDim2.fromScale(1, 1)
+		scLbl.BackgroundTransparency = 1
+		scLbl.Text = "-"
+		scLbl.TextColor3 = cfg.color
+		scLbl.Font = Enum.Font.GothamBlack
+		scLbl.TextSize = if cfg.rank == 1 then 13.5 else 12
+		scLbl.Parent = scBox
+
+		monolithCards[cfg.rank] = {
+			card = mCard,
+			rankChip = rChip,
+			classTag = tTag,
+			avatarFrame = avFrame,
+			avatarInit = avInit,
+			nameLabel = nLbl,
+			scoreLabel = scLbl,
+		}
+	end
+
+	-- 3. BRUTALIST DATA STREAM (SCROLLING ROWS)
+	local stream = Instance.new("Frame")
+	stream.Name = "BrutalistStream"
+	stream.Size = UDim2.new(1, 0, 1, -208)
+	stream.BackgroundColor3 = Color3.fromRGB(28, 23, 19)
+	stream.BorderSizePixel = 0
+	stream.LayoutOrder = 3
+	stream.Parent = boardStack
+
+	local stCorner = Instance.new("UICorner")
+	stCorner.CornerRadius = UDim.new(0, 6)
+	stCorner.Parent = stream
+
+	local stStroke = Instance.new("UIStroke")
+	stStroke.Color = THEME.StrokeSubtle
+	stStroke.Thickness = 1
+	stStroke.Parent = stream
+
+	local stHeader = Instance.new("Frame")
+	stHeader.Name = "StreamHeader"
+	stHeader.Size = UDim2.new(1, 0, 0, 22)
+	stHeader.BackgroundColor3 = THEME.HeaderBg
+	stHeader.BorderSizePixel = 0
+	stHeader.Parent = stream
+
+	local sthCorner = Instance.new("UICorner")
+	sthCorner.CornerRadius = UDim.new(0, 6)
+	sthCorner.Parent = stHeader
+
+	local sthPad = Instance.new("UIPadding")
+	sthPad.PaddingLeft = UDim.new(0, 10)
+	sthPad.PaddingRight = UDim.new(0, 10)
+	sthPad.Parent = stHeader
+
+	local sthRank = Instance.new("TextLabel")
+	sthRank.Size = UDim2.new(0, 44, 1, 0)
+	sthRank.BackgroundTransparency = 1
+	sthRank.Text = "TIER"
+	sthRank.TextColor3 = THEME.TextSubtle
+	sthRank.Font = Enum.Font.GothamBlack
+	sthRank.TextSize = 9.5
+	sthRank.TextXAlignment = Enum.TextXAlignment.Left
+	sthRank.Parent = stHeader
+
+	local sthUser = Instance.new("TextLabel")
+	sthUser.Size = UDim2.new(0.40, 0, 1, 0)
+	sthUser.Position = UDim2.new(0, 48, 0, 0)
+	sthUser.BackgroundTransparency = 1
+	sthUser.Text = "OPERATOR IDENT"
+	sthUser.TextColor3 = THEME.TextSubtle
+	sthUser.Font = Enum.Font.GothamBlack
+	sthUser.TextSize = 9.5
+	sthUser.TextXAlignment = Enum.TextXAlignment.Left
+	sthUser.Parent = stHeader
+
+	local sthScore = Instance.new("TextLabel")
+	sthScore.Size = UDim2.new(0.32, 0, 1, 0)
+	sthScore.Position = UDim2.new(0.48, 0, 0, 0)
+	sthScore.BackgroundTransparency = 1
+	sthScore.Text = "SCORE / VALUE"
+	sthScore.TextColor3 = THEME.TextSubtle
+	sthScore.Font = Enum.Font.GothamBlack
+	sthScore.TextSize = 9.5
+	sthScore.TextXAlignment = Enum.TextXAlignment.Right
+	sthScore.Parent = stHeader
+
+	local sthTag = Instance.new("TextLabel")
+	sthTag.Size = UDim2.new(0.18, 0, 1, 0)
+	sthTag.Position = UDim2.new(0.82, 0, 0, 0)
+	sthTag.BackgroundTransparency = 1
+	sthTag.Text = "CLASS"
+	sthTag.TextColor3 = THEME.TextSubtle
+	sthTag.Font = Enum.Font.GothamBlack
+	sthTag.TextSize = 9.5
+	sthTag.TextXAlignment = Enum.TextXAlignment.Right
+	sthTag.Parent = stHeader
+
+	local stScroll = Instance.new("ScrollingFrame")
+	stScroll.Name = "StreamScroll"
+	stScroll.Size = UDim2.new(1, 0, 1, -26)
+	stScroll.Position = UDim2.new(0, 0, 0, 24)
+	stScroll.BackgroundTransparency = 1
+	stScroll.BorderSizePixel = 0
+	stScroll.ScrollBarThickness = 4
+	stScroll.ScrollBarImageColor3 = THEME.StrokeGold
+	stScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+	stScroll.Parent = stream
+
+	local stsList = Instance.new("UIListLayout")
+	stsList.FillDirection = Enum.FillDirection.Vertical
+	stsList.SortOrder = Enum.SortOrder.LayoutOrder
+	stsList.Padding = UDim.new(0, 3)
+	stsList.Parent = stScroll
+
+	local stsPad = Instance.new("UIPadding")
+	stsPad.PaddingTop = UDim.new(0, 4)
+	stsPad.PaddingBottom = UDim.new(0, 4)
+	stsPad.PaddingLeft = UDim.new(0, 6)
+	stsPad.PaddingRight = UDim.new(0, 8)
+	stsPad.Parent = stScroll
+
+	local emptyNotice = Instance.new("TextLabel")
+	emptyNotice.Name = "EmptyNotice"
+	emptyNotice.Size = UDim2.new(1, 0, 0, 40)
+	emptyNotice.Position = UDim2.new(0, 0, 0.4, 0)
+	emptyNotice.BackgroundTransparency = 1
+	emptyNotice.Text = "Loading stream data..."
+	emptyNotice.TextColor3 = THEME.TextMuted
+	emptyNotice.Font = Enum.Font.GothamMedium
+	emptyNotice.TextSize = 12
+	emptyNotice.Visible = true
+	emptyNotice.Parent = stream
+
+	type StreamRowUI = {
+		row: Frame,
+		stroke: UIStroke,
+		rankBlock: TextLabel,
+		avatarFrame: Frame,
+		avatarInit: TextLabel,
+		nameLabel: TextLabel,
+		scoreLabel: TextLabel,
+		classPill: TextLabel,
+	}
+
+	local streamRowPool: { StreamRowUI } = {}
+	local MAX_STREAM_ROWS = 47 -- Ranks 4 to 50
+
+	for idx = 1, MAX_STREAM_ROWS do
+		local rowRank = idx + 3
+		local row = Instance.new("Frame")
+		row.Name = "StreamRow_" .. rowRank
+		row.Size = UDim2.new(1, 0, 0, 28)
+		row.BackgroundColor3 = THEME.InsetBg
+		row.BorderSizePixel = 0
+		row.LayoutOrder = rowRank
+		row.Visible = false
+		row.Parent = stScroll
+
+		local rCorner = Instance.new("UICorner")
+		rCorner.CornerRadius = UDim.new(0, 4)
+		rCorner.Parent = row
+
+		local rStroke = Instance.new("UIStroke")
+		rStroke.Color = THEME.StrokeGold
+		rStroke.Thickness = 1.5
+		rStroke.Enabled = false
+		rStroke.Parent = row
+
+		local rPad = Instance.new("UIPadding")
+		rPad.PaddingLeft = UDim.new(0, 6)
+		rPad.PaddingRight = UDim.new(0, 6)
+		rPad.Parent = row
+
+		local rBlock = Instance.new("TextLabel")
+		rBlock.Name = "RankBlock"
+		rBlock.Size = UDim2.new(0, 36, 1, 0)
+		rBlock.BackgroundTransparency = 1
+		rBlock.Text = string.format("[%02d]", rowRank)
+		rBlock.TextColor3 = THEME.TextMuted
+		rBlock.Font = Enum.Font.Code
+		rBlock.TextSize = 11
+		rBlock.TextXAlignment = Enum.TextXAlignment.Left
+		rBlock.Parent = row
+
+		local nBox = Instance.new("Frame")
+		nBox.Name = "NameBox"
+		nBox.Size = UDim2.new(0.40, 0, 1, 0)
+		nBox.Position = UDim2.new(0, 40, 0, 0)
+		nBox.BackgroundTransparency = 1
+		nBox.Parent = row
+
+		local nbList = Instance.new("UIListLayout")
+		nbList.FillDirection = Enum.FillDirection.Horizontal
+		nbList.SortOrder = Enum.SortOrder.LayoutOrder
+		nbList.Padding = UDim.new(0, 6)
+		nbList.VerticalAlignment = Enum.VerticalAlignment.Center
+		nbList.Parent = nBox
+
+		local rAvFrame, rAvInit = createBoardsAvatar(nBox, UDim2.new(0, 20, 0, 20), "-", THEME.TextMuted, false)
+
+		local uName = Instance.new("TextLabel")
+		uName.Name = "UserName"
+		uName.Size = UDim2.new(1, -28, 1, 0)
+		uName.BackgroundTransparency = 1
+		uName.Text = "-"
+		uName.TextColor3 = THEME.TextPrimary
+		uName.Font = Enum.Font.GothamBlack
+		uName.TextSize = 11
+		uName.TextXAlignment = Enum.TextXAlignment.Left
+		uName.TextTruncate = Enum.TextTruncate.AtEnd
+		uName.Parent = nBox
+
+		local uScore = Instance.new("TextLabel")
+		uScore.Name = "UserScore"
+		uScore.Size = UDim2.new(0.32, 0, 1, 0)
+		uScore.Position = UDim2.new(0.48, 0, 0, 0)
+		uScore.BackgroundTransparency = 1
+		uScore.Text = "-"
+		uScore.TextColor3 = THEME.TextPrimary
+		uScore.Font = Enum.Font.GothamBlack
+		uScore.TextSize = 11.5
+		uScore.TextXAlignment = Enum.TextXAlignment.Right
+		uScore.Parent = row
+
+		local uTag = Instance.new("TextLabel")
+		uTag.Name = "ClassTag"
+		uTag.Size = UDim2.new(0.18, 0, 0, 18)
+		uTag.Position = UDim2.new(0.82, 0, 0.5, -9)
+		uTag.BackgroundColor3 = THEME.HeaderBg
+		uTag.Text = "INITIATE"
+		uTag.TextColor3 = THEME.TextMuted
+		uTag.Font = Enum.Font.GothamBlack
+		uTag.TextSize = 8.5
+		uTag.Parent = row
+
+		local utCorner = Instance.new("UICorner")
+		utCorner.CornerRadius = UDim.new(0, 3)
+		utCorner.Parent = uTag
+
+		table.insert(streamRowPool, {
+			row = row,
+			stroke = rStroke,
+			rankBlock = rBlock,
+			avatarFrame = rAvFrame,
+			avatarInit = rAvInit,
+			nameLabel = uName,
+			scoreLabel = uScore,
+			classPill = uTag,
+		})
+	end
+
+	-- 4. PINNED ILLUMINATED OPERATOR CONSOLE
+	local console = Instance.new("Frame")
+	console.Name = "IlluminatedConsole"
+	console.Size = UDim2.new(1, 0, 0, 44)
+	console.BackgroundColor3 = Color3.fromRGB(36, 28, 22)
+	console.BorderSizePixel = 0
+	console.LayoutOrder = 4
+	console.Parent = boardStack
+
+	local cCorner = Instance.new("UICorner")
+	cCorner.CornerRadius = UDim.new(0, 6)
+	cCorner.Parent = console
+
+	local cStroke = Instance.new("UIStroke")
+	cStroke.Color = THEME.GoldPrimary
+	cStroke.Thickness = 1.5
+	cStroke.Parent = console
+
+	local cPad = Instance.new("UIPadding")
+	cPad.PaddingLeft = UDim.new(0, 10)
+	cPad.PaddingRight = UDim.new(0, 10)
+	cPad.Parent = console
+
+	local cLeft = Instance.new("Frame")
+	cLeft.Name = "ConsoleLeft"
+	cLeft.Size = UDim2.new(0.38, 0, 1, 0)
+	cLeft.BackgroundTransparency = 1
+	cLeft.Parent = console
+
+	local clList = Instance.new("UIListLayout")
+	clList.FillDirection = Enum.FillDirection.Horizontal
+	clList.SortOrder = Enum.SortOrder.LayoutOrder
+	clList.Padding = UDim.new(0, 8)
+	clList.VerticalAlignment = Enum.VerticalAlignment.Center
+	clList.Parent = cLeft
+
+	local localPlayer = Players.LocalPlayer
+	local localName = if localPlayer then localPlayer.Name else "Player"
+	local myAvFrame, myAvInit = createBoardsAvatar(cLeft, UDim2.new(0, 28, 0, 28), localName, THEME.GoldPrimary, true)
+
+	local clText = Instance.new("Frame")
+	clText.Size = UDim2.new(1, -38, 0, 30)
+	clText.BackgroundTransparency = 1
+	clText.Parent = cLeft
+
+	local cltList = Instance.new("UIListLayout")
+	cltList.FillDirection = Enum.FillDirection.Vertical
+	cltList.SortOrder = Enum.SortOrder.LayoutOrder
+	cltList.Padding = UDim.new(0, 1)
+	cltList.Parent = clText
+
+	local cName = Instance.new("TextLabel")
+	cName.Size = UDim2.new(1, 0, 0, 15)
+	cName.BackgroundTransparency = 1
+	cName.Text = localName .. " (Operator)"
+	cName.TextColor3 = THEME.GoldPrimary
+	cName.Font = Enum.Font.GothamBlack
+	cName.TextSize = 11.5
+	cName.TextXAlignment = Enum.TextXAlignment.Left
+	cName.Parent = clText
+
+	local cRank = Instance.new("TextLabel")
+	cRank.Size = UDim2.new(1, 0, 0, 13)
+	cRank.BackgroundTransparency = 1
+	cRank.Text = "STANDBY: FETCHING STANDING..."
+	cRank.TextColor3 = THEME.TextMuted
+	cRank.Font = Enum.Font.GothamBold
+	cRank.TextSize = 9
+	cRank.TextXAlignment = Enum.TextXAlignment.Left
+	cRank.Parent = clText
+
+	local cMid = Instance.new("Frame")
+	cMid.Name = "ConsoleMid"
+	cMid.Size = UDim2.new(0.30, 0, 1, 0)
+	cMid.Position = UDim2.new(0.38, 0, 0, 0)
+	cMid.BackgroundTransparency = 1
+	cMid.Parent = console
+
+	local cmLbl = Instance.new("TextLabel")
+	cmLbl.Name = "MetricLabel"
+	cmLbl.Size = UDim2.new(1, 0, 0, 14)
+	cmLbl.Position = UDim2.new(0, 0, 0, 6)
+	cmLbl.BackgroundTransparency = 1
+	cmLbl.Text = "LIFETIME NET WORTH"
+	cmLbl.TextColor3 = THEME.TextSubtle
+	cmLbl.Font = Enum.Font.GothamBlack
+	cmLbl.TextSize = 8.5
+	cmLbl.TextXAlignment = Enum.TextXAlignment.Center
+	cmLbl.Parent = cMid
+
+	local cmVal = Instance.new("TextLabel")
+	cmVal.Name = "MetricValue"
+	cmVal.Size = UDim2.new(1, 0, 0, 18)
+	cmVal.Position = UDim2.new(0, 0, 0, 20)
+	cmVal.BackgroundTransparency = 1
+	cmVal.Text = "-"
+	cmVal.TextColor3 = THEME.GoldPrimary
+	cmVal.Font = Enum.Font.GothamBlack
+	cmVal.TextSize = 13.5
+	cmVal.TextXAlignment = Enum.TextXAlignment.Center
+	cmVal.Parent = cMid
+
+	local cRight = Instance.new("Frame")
+	cRight.Name = "ConsoleRight"
+	cRight.Size = UDim2.new(0.30, 0, 1, 0)
+	cRight.Position = UDim2.new(0.70, 0, 0, 0)
+	cRight.BackgroundTransparency = 1
+	cRight.Parent = console
+
+	local crLbl = Instance.new("TextLabel")
+	crLbl.Name = "TargetLabel"
+	crLbl.Size = UDim2.new(1, 0, 1, 0)
+	crLbl.BackgroundTransparency = 1
+	crLbl.Text = "Synchronizing metrics..."
+	crLbl.TextColor3 = THEME.AmberFlame
+	crLbl.Font = Enum.Font.GothamBold
+	crLbl.TextSize = 9.5
+	crLbl.TextXAlignment = Enum.TextXAlignment.Right
+	crLbl.Parent = cRight
+
+	local function paintTabs(activeId: string)
+		for id, btn in pairs(boardTabButtons) do
+			local isActive = id == activeId
+			btn.BackgroundColor3 = if isActive then THEME.GoldPrimary else THEME.CardBg
+			btn.TextColor3 = if isActive then TextDark else THEME.TextMuted
+		end
+
+		for _, t in ipairs(BOARD_TABS) do
+			if t.id == activeId then
+				cmLbl.Text = t.title
+				break
+			end
+		end
+	end
+
+	-- 5. LIVE REFRESH DISPATCHER
 	refreshBoards = function(boardId: string)
 		activeBoard = boardId
 		paintTabs(boardId)
 
-		local def
-		for _, t in ipairs(BOARD_TABS) do
-			if t.id == boardId then
-				def = t
-			end
-		end
-		if def == nil then
-			return
-		end
-
-		boardStatus.Text = "Loading..."
-		boardStatus.TextColor3 = THEME.TextMuted
+		emptyNotice.Text = "Loading stream data..."
+		emptyNotice.TextColor3 = THEME.TextMuted
+		emptyNotice.Visible = true
 
 		task.spawn(function()
 			local entries, myRank = NetClient.getLeaderboard(boardId)
-			-- STILL THE ACTIVE TAB? A player switching quickly must not have an
-			-- older response paint over a newer one.
+
 			if activeBoard ~= boardId then
 				return
 			end
 
 			if type(entries) ~= "table" then
-				for _, ui in ipairs(boardRows) do
+				for _, m in pairs(monolithCards) do
+					m.nameLabel.Text = "-"
+					m.scoreLabel.Text = "-"
+					m.avatarInit.Text = "-"
+				end
+				for _, ui in ipairs(streamRowPool) do
 					ui.row.Visible = false
 				end
-				boardStatus.Text = "Could not load the board. Try again shortly."
-				boardStatus.TextColor3 = THEME.Negative
+				stScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+				emptyNotice.Text = "Could not load stream. Try again shortly."
+				emptyNotice.TextColor3 = THEME.Negative
+				emptyNotice.Visible = true
+				cRank.Text = "ERROR: STREAM OFFLINE"
+				cRank.TextColor3 = THEME.Negative
 				return
 			end
 
-			local shown = 0
-			for i, ui in ipairs(boardRows) do
-				local e = entries[i]
-				if type(e) ~= "table" then
-					ui.row.Visible = false
-				else
-					shown += 1
-					ui.row.Visible = true
-					ui.rank.Text = "#" .. tostring(e.rank or i)
-					ui.name.Text = tostring(e.name or "?")
-					ui.score.Text = def.prefix .. Format.formatNumber(tonumber(e.rawVal) or 0)
-					-- The player own row, highlighted so they can find
-					-- themselves without reading every line.
-					local isMe = myRank ~= nil and e.rank == myRank
-					ui.name.TextColor3 = if isMe then THEME.GoldPrimary else THEME.TextPrimary
+			local count = #entries
+
+			for rankNum = 1, 3 do
+				local mUI = monolithCards[rankNum]
+				if mUI then
+					local e = entries[rankNum]
+					if type(e) == "table" then
+						local entryName = tostring(e.name or "?")
+						local entryRaw = tonumber(e.rawVal) or tonumber(e.score) or 0
+						mUI.nameLabel.Text = entryName
+						mUI.scoreLabel.Text = formatBoardScore(boardId, entryRaw)
+						mUI.avatarInit.Text = string.sub(entryName, 1, 1):upper()
+						mUI.classTag.Text = getRankClass(rankNum, boardId)
+					else
+						mUI.nameLabel.Text = "VACANT"
+						mUI.scoreLabel.Text = "---"
+						mUI.avatarInit.Text = "-"
+						mUI.classTag.Text = "OPEN"
+					end
 				end
 			end
 
-			if shown == 0 then
-				-- AN EMPTY BOARD IS A REAL STATE, not an error. A fresh universe
-				-- has nobody on it, and saying so beats a spinner or a
-				-- fabricated top three.
-				boardStatus.Text = "No one is on this board yet -- be the first."
-				boardStatus.TextColor3 = THEME.TextMuted
-			elseif myRank ~= nil then
-				boardStatus.Text = string.format("You are ranked #%d.", myRank)
-				boardStatus.TextColor3 = THEME.Positive
+			local streamRowsActive = 0
+			for idx, ui in ipairs(streamRowPool) do
+				local entryIndex = idx + 3
+				local e = entries[entryIndex]
+				if type(e) == "table" then
+					streamRowsActive += 1
+					ui.row.Visible = true
+					local rankVal = tonumber(e.rank) or entryIndex
+					local eName = tostring(e.name or "?")
+					local eRaw = tonumber(e.rawVal) or tonumber(e.score) or 0
+					local isMe = myRank ~= nil and rankVal == myRank
+
+					ui.rankBlock.Text = string.format("[%02d]", rankVal)
+					ui.rankBlock.TextColor3 = if isMe then THEME.GoldPrimary else THEME.TextMuted
+					ui.avatarInit.Text = string.sub(eName, 1, 1):upper()
+					ui.nameLabel.Text = eName .. (if isMe then " (YOU)" else "")
+					ui.nameLabel.TextColor3 = if isMe then THEME.GoldPrimary else THEME.TextPrimary
+					ui.scoreLabel.Text = formatBoardScore(boardId, eRaw)
+					ui.scoreLabel.TextColor3 = if isMe then THEME.GoldPrimary else THEME.TextPrimary
+					ui.classPill.Text = getRankClass(rankVal, boardId)
+					ui.classPill.BackgroundColor3 = if isMe then THEME.GoldPrimary else THEME.HeaderBg
+					ui.classPill.TextColor3 = if isMe then TextDark else THEME.TextMuted
+					ui.stroke.Enabled = isMe
+					ui.row.BackgroundColor3 = if isMe then Color3.fromRGB(38, 30, 22) else THEME.InsetBg
+				else
+					ui.row.Visible = false
+				end
+			end
+
+			stScroll.CanvasSize = UDim2.new(0, 0, 0, streamRowsActive * 31 + 8)
+
+			if count == 0 then
+				emptyNotice.Text = "No records recorded yet -- be the first."
+				emptyNotice.TextColor3 = THEME.TextMuted
+				emptyNotice.Visible = true
 			else
-				-- Honest about the limit rather than inventing a number: the
-				-- server sends the top page only, so outside it the rank is
-				-- genuinely unknown here.
-				boardStatus.Text = "You are not in the top " .. tostring(shown) .. " yet."
-				boardStatus.TextColor3 = THEME.TextMuted
+				emptyNotice.Visible = false
+			end
+
+			local myEntry = nil
+			if myRank ~= nil and myRank >= 1 and myRank <= count then
+				myEntry = entries[myRank]
+			end
+
+			if myRank ~= nil then
+				cRank.Text = string.format("RANK #%d / 50 • TOP %.0f%%", myRank, math.clamp((myRank / math.max(count, 50)) * 100, 1, 100))
+				cRank.TextColor3 = THEME.GoldPrimary
+
+				if myEntry then
+					local myScore = tonumber(myEntry.rawVal) or tonumber(myEntry.score) or 0
+					cmVal.Text = formatBoardScore(boardId, myScore)
+
+					if myRank > 1 then
+						local prevEntry = entries[myRank - 1]
+						if prevEntry then
+							local prevScore = tonumber(prevEntry.rawVal) or tonumber(prevEntry.score) or 0
+							local delta = math.max(0, prevScore - myScore)
+							crLbl.Text = string.format("Next Rank (#%d):\n+%s Needed", myRank - 1, formatBoardScore(boardId, delta))
+							crLbl.TextColor3 = THEME.AmberFlame
+						else
+							crLbl.Text = "Maintaining Rank position"
+							crLbl.TextColor3 = THEME.Positive
+						end
+					else
+						crLbl.Text = "WORLD CHAMPION\nDefending Throne"
+						crLbl.TextColor3 = THEME.GoldPrimary
+					end
+				else
+					cmVal.Text = "Active"
+					crLbl.Text = "Ranked In Stream"
+					crLbl.TextColor3 = THEME.Positive
+				end
+			else
+				cRank.Text = string.format("STATUS: UNRANKED (Outside Top %d)", count)
+				cRank.TextColor3 = THEME.AmberFlame
+
+				if count > 0 then
+					local cutoffEntry = entries[count]
+					local cutoffScore = if cutoffEntry then (tonumber(cutoffEntry.rawVal) or tonumber(cutoffEntry.score) or 0) else 0
+					crLbl.Text = string.format("Qualify Top 50:\nReach %s+", formatBoardScore(boardId, cutoffScore))
+					crLbl.TextColor3 = THEME.TextMuted
+				else
+					crLbl.Text = "Qualify Top 50:\nSubmit First Score"
+					crLbl.TextColor3 = THEME.TextMuted
+				end
+				cmVal.Text = "Unranked"
 			end
 		end)
 	end
@@ -4966,305 +5674,29 @@ local function buildBoardsOverlay(
 	return refreshBoards
 end
 
---------------------------------------------------------------------------------
+-- ------------------------------
 -- 8. OFFLINE VAULT OVERLAY
---------------------------------------------------------------------------------
-local function buildVaultOverlay(
-	screenGui: ScreenGui,
-	overlays: { [string]: Frame },
-	getController: () -> any
-): (any) -> ()
-	local vaultOverlay, legacyBody = UITheme.overlay("Offline Vault")
-	vaultOverlay.Parent = screenGui
-	overlays["vault"] = vaultOverlay
-	if legacyBody then legacyBody.Visible = false end
+-- ------------------------------
+local buildVaultOverlay = require(script.Parent:WaitForChild("V7VaultOverlay"))
 
-	local mainShell, vaultBody = formatModalShell(vaultOverlay, "~ Offline Treasury Vault ~", getController)
-
-	local function formatDuration(seconds: number): string
-		local s = math.max(0, math.floor(seconds))
-		local h = math.floor(s / 3600)
-		local m = math.floor((s % 3600) / 60)
-		if h > 0 then
-			return string.format("%dh %dm", h, m)
-		end
-		if m > 0 then
-			return string.format("%dm", m)
-		end
-		return string.format("%ds", s)
-	end
-
-	local vaultStack = Instance.new("Frame")
-	vaultStack.Name = "VaultStack"
-	vaultStack.Size = UDim2.fromScale(1, 1)
-	vaultStack.BackgroundTransparency = 1
-	vaultStack.Parent = vaultBody
-
-	local vsList = Instance.new("UIListLayout")
-	vsList.SortOrder = Enum.SortOrder.LayoutOrder
-	vsList.Padding = UDim.new(0, 10)
-	vsList.Parent = vaultStack
-
-	-- THE ACCRUED AMOUNT, in the size it deserves. This is the number the player
-	-- opened the panel to see.
-	local vaultAmount = Instance.new("TextLabel")
-	vaultAmount.Name = "VaultAmount"
-	vaultAmount.Size = UDim2.new(1, 0, 0, 42)
-	vaultAmount.BackgroundTransparency = 1
-	vaultAmount.Font = Enum.Font.GothamBold
-	vaultAmount.Text = "--"
-	vaultAmount.TextColor3 = THEME.TextMuted
-	vaultAmount.TextSize = 32
-	vaultAmount.TextXAlignment = Enum.TextXAlignment.Left
-	vaultAmount.LayoutOrder = 1
-	vaultAmount.Parent = vaultStack
-
-	local vaultTier = Instance.new("TextLabel")
-	vaultTier.Name = "VaultTier"
-	vaultTier.Size = UDim2.new(1, 0, 0, 16)
-	vaultTier.BackgroundTransparency = 1
-	vaultTier.Font = Enum.Font.Code
-	vaultTier.Text = ""
-	vaultTier.TextColor3 = THEME.GoldPrimary
-	vaultTier.TextSize = 11
-	vaultTier.TextXAlignment = Enum.TextXAlignment.Left
-	vaultTier.LayoutOrder = 2
-	vaultTier.Parent = vaultStack
-
-	-- Capacity as a bar. Time is easier to read as a proportion than as two
-	-- numbers the player has to divide.
-	local vaultBarTrack = Instance.new("Frame")
-	vaultBarTrack.Name = "VaultBarTrack"
-	vaultBarTrack.Size = UDim2.new(1, 0, 0, 10)
-	vaultBarTrack.BackgroundColor3 = THEME.InsetBg
-	vaultBarTrack.BorderSizePixel = 0
-	vaultBarTrack.LayoutOrder = 3
-	vaultBarTrack.Parent = vaultStack
-
-	local vbtC = Instance.new("UICorner")
-	vbtC.CornerRadius = UDim.new(0, 5)
-	vbtC.Parent = vaultBarTrack
-
-	local vaultBarFill = Instance.new("Frame")
-	vaultBarFill.Name = "VaultBarFill"
-	vaultBarFill.Size = UDim2.fromScale(0, 1)
-	vaultBarFill.BackgroundColor3 = THEME.Positive
-	vaultBarFill.BorderSizePixel = 0
-	vaultBarFill.Parent = vaultBarTrack
-
-	local vbfC = Instance.new("UICorner")
-	vbfC.CornerRadius = UDim.new(0, 5)
-	vbfC.Parent = vaultBarFill
-
-	local vaultInfo = Instance.new("TextLabel")
-	vaultInfo.Name = "VaultInfo"
-	vaultInfo.Size = UDim2.new(1, 0, 0, 0)
-	vaultInfo.AutomaticSize = Enum.AutomaticSize.Y
-	vaultInfo.BackgroundTransparency = 1
-	vaultInfo.Font = Enum.Font.Gotham
-	vaultInfo.Text = "Waiting for your vault figures..."
-	vaultInfo.TextColor3 = THEME.TextMuted
-	vaultInfo.TextSize = 12
-	vaultInfo.TextWrapped = true
-	vaultInfo.TextXAlignment = Enum.TextXAlignment.Left
-	vaultInfo.TextYAlignment = Enum.TextYAlignment.Top
-	vaultInfo.LayoutOrder = 4
-	vaultInfo.Parent = vaultStack
-
-	local vaultActions = Instance.new("Frame")
-	vaultActions.Name = "VaultActions"
-	vaultActions.Size = UDim2.new(1, 0, 0, 40)
-	vaultActions.BackgroundTransparency = 1
-	vaultActions.LayoutOrder = 5
-	vaultActions.Parent = vaultStack
-
-	local vaList = Instance.new("UIListLayout")
-	vaList.FillDirection = Enum.FillDirection.Horizontal
-	vaList.SortOrder = Enum.SortOrder.LayoutOrder
-	vaList.Padding = UDim.new(0, 10)
-	vaList.Parent = vaultActions
-
-	local function makeVaultButton(order: number, text: string, bg: Color3): TextButton
-		local b = Instance.new("TextButton")
-		b.Size = UDim2.new(0.5, -5, 1, 0)
-		b.BackgroundColor3 = bg
-		b.BorderSizePixel = 0
-		b.Font = Enum.Font.GothamBold
-		b.Text = text
-		b.TextColor3 = THEME.TextDark
-		b.TextSize = 12
-		b.LayoutOrder = order
-		b.Parent = vaultActions
-		local c = Instance.new("UICorner")
-		c.CornerRadius = UDim.new(0, 6)
-		c.Parent = b
-		return b
-	end
-
-	local claimVaultBtn = makeVaultButton(1, "CLAIM", THEME.GoldPrimary)
-	claimVaultBtn.Name = "ClaimVaultButton"
-	local buyHoursBtn = makeVaultButton(2, "+1 HOUR", THEME.ButtonDark)
-	buyHoursBtn.Name = "BuyHoursButton"
-
-	local vaultBusy = false
-
-	local function setVaultButton(btn: TextButton, label: string, enabled: boolean)
-		btn.Text = label
-		btn.Active = enabled
-		btn.AutoButtonColor = enabled
-		btn.BackgroundColor3 = if enabled then THEME.GoldPrimary else THEME.ButtonDark
-		btn.TextColor3 = if enabled then THEME.TextDark else THEME.TextMuted
-	end
-
-	claimVaultBtn.MouseButton1Click:Connect(function()
-		if vaultBusy or not claimVaultBtn.Active then
-			return
-		end
-		vaultBusy = true
-		task.spawn(function()
-			local result = NetClient.claimVault(false)
-			vaultBusy = false
-			if not result.ok then
-				vaultInfo.Text = "Could not collect the vault just now."
-			end
-		end)
-	end)
-
-	buyHoursBtn.MouseButton1Click:Connect(function()
-		if vaultBusy or not buyHoursBtn.Active then
-			return
-		end
-		vaultBusy = true
-		task.spawn(function()
-			local result = NetClient.buyVaultHours(1)
-			vaultBusy = false
-			if not result.ok then
-				vaultInfo.Text = "Could not buy capacity just now."
-			end
-		end)
-	end)
-
-	local function refreshVault(state: any)
-		-- THE REAL FIGURES, from the snapshot's `vault` block. Was an empty stub
-		-- after the revamp, so this panel showed one static sentence forever.
-		--
-		-- `vault` is ABSENT rather than zeroed when the server has not reported,
-		-- which is deliberate: it keeps "unknown" and "empty" distinguishable.
-		-- Painting "$0" for an absent block would state a balance the client
-		-- does not actually know.
-		local v = if type(state) == "table" then state.vault else nil
-		if type(v) ~= "table" then
-			vaultAmount.Text = "--"
-			vaultAmount.TextColor3 = THEME.TextMuted
-			vaultBarFill.Size = UDim2.fromScale(0, 1)
-			vaultInfo.Text = "Waiting for your vault figures..."
-			vaultTier.Text = ""
-			setVaultButton(claimVaultBtn, "CLAIM", false)
-			setVaultButton(buyHoursBtn, "+1 HOUR", false)
-			return
-		end
-
-		local ownedHours = tonumber(v.purchasedHours) or 0
-		local maxHours = tonumber(v.maxPurchasedHours) or 0
-		local gems = if type(state) == "table" then tonumber(state.gems) or 0 else 0
-		local hourCost = VaultCatalog.gemCostForHours(1) or 0
-		-- How many more hours would ACTUALLY raise capacity -- not how many are
-		-- left under the cap. The two differ for a VIP player whose floor
-		-- already exceeds every other source combined.
-		local buyable = tonumber(v.buyableHours) or 0
-		local atPurchaseCap = maxHours > 0 and ownedHours >= maxHours
-
-		if atPurchaseCap then
-			setVaultButton(buyHoursBtn, string.format("MAX (+%dh)", math.floor(maxHours)), false)
-		elseif buyable <= 0 then
-			-- Nothing to sell. "INCLUDED" rather than an unexplained grey button
-			-- is the difference between a player thinking the game is broken and
-			-- understanding they already have the benefit.
-			setVaultButton(buyHoursBtn, "INCLUDED", false)
-		else
-			setVaultButton(buyHoursBtn,
-				string.format("+1 HOUR  %d\u{25C6}", hourCost), gems >= hourCost)
-		end
-
-		vaultTier.Text = VaultCatalog.describeTier(
-			tonumber(v.efficiency) or VaultCatalog.BASE_EFFICIENCY,
-			v.hasVip == true, v.hasPremium == true)
-
-		local unclaimed = tonumber(v.unclaimed) or 0
-		local claimable = tonumber(v.claimableSeconds) or 0
-		local capacity = tonumber(v.capacitySeconds) or 0
-		local rate = tonumber(v.ratePerSec) or 0
-
-		vaultAmount.Text = "$" .. Format.formatNumber(unclaimed)
-		vaultAmount.TextColor3 = if unclaimed > 0 then THEME.Positive else THEME.TextMuted
-
-		local frac = if capacity > 0 then math.clamp(claimable / capacity, 0, 1) else 0
-		vaultBarFill.Size = UDim2.fromScale(frac, 1)
-		vaultBarFill.BackgroundColor3 = if v.atCapacity == true
-			then THEME.Negative else THEME.Positive
-
-		if rate <= 0 then
-			-- An honest empty state. The vault pays at the recent average rate,
-			-- so someone who has not rolled yet has no rate and would otherwise
-			-- stare at $0 with no explanation.
-			vaultInfo.Text = string.format(
-				"Roll a few times to set an earning rate -- your vault fills at your"
-				.. " recent average.\n\nHolds up to %s.", formatDuration(capacity))
-		elseif v.atCapacity == true then
-			vaultInfo.Text = string.format(
-				"FULL -- %s of %s stored, and it has stopped earning.\n\n"
-				.. "Collect it to start filling again.",
-				formatDuration(claimable), formatDuration(capacity))
-		else
-			vaultInfo.Text = string.format("%s of %s stored, still filling.",
-				formatDuration(claimable), formatDuration(capacity))
-		end
-
-		-- WHAT THE GEMS ACTUALLY BOUGHT -- which is not always what was paid for.
-		--
-		-- `buyable <= 0` has TWO causes meaning opposite things: the player is at
-		-- the purchase cap (their Gems worked, there is simply no more to buy),
-		-- or a floor is absorbing the purchase (their Gems did nothing). The cap
-		-- case is tested FIRST because it is the one that means success --
-		-- reading it as only the second told a player with a working +8h that it
-		-- was "not adding to it", which was false.
-		if ownedHours > 0 then
-			if not atPurchaseCap and buyable <= 0 and v.hasVip == true then
-				vaultInfo.Text ..= string.format(
-					"\n\nYour VIP floor of %s already covers more than every other"
-					.. " source combined, so your %dh of Gem-bought capacity is not"
-					.. " adding to it.",
-					formatDuration(VaultCatalog.VIP_CAPACITY_SEC), math.floor(ownedHours))
-			else
-				vaultInfo.Text ..= string.format(
-					"\n\n+%dh of that is Gem-bought, out of a possible +%dh.",
-					math.floor(ownedHours), math.floor(maxHours))
-			end
-		elseif buyable <= 0 and v.hasVip == true then
-			vaultInfo.Text ..= string.format(
-				"\n\nYour VIP floor of %s already covers more than every other"
-				.. " source combined, so extra capacity is not worth buying.",
-				formatDuration(VaultCatalog.VIP_CAPACITY_SEC))
-		end
-
-		setVaultButton(claimVaultBtn, if unclaimed > 0 then "CLAIM" else "EMPTY", unclaimed > 0)
-	end
-
-	return refreshVault
-end
-
---------------------------------------------------------------------------------
+-- ------------------------------
 -- CONSTRUCTOR
---------------------------------------------------------------------------------
-function V7MenuPanel.new(): V7MenuController
+-- ------------------------------
+function V7MenuPanel.new(customParent: Instance?): V7MenuController
 	local player = Players.LocalPlayer
-	local playerGui = player:WaitForChild("PlayerGui")
+	local parentGui: Instance? = customParent
+	if not parentGui and player then
+		parentGui = player:WaitForChild("PlayerGui", 5)
+	end
+
 	local screenGui = Instance.new("ScreenGui")
 	screenGui.Name = "V7MenuGui"
 	screenGui.ResetOnSpawn = false
 	screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 	screenGui.DisplayOrder = 50
-	screenGui.Parent = playerGui
+	if parentGui then
+		screenGui.Parent = parentGui
+	end
 
 	local overlays: { [string]: Frame } = {}
 	local controller: V7MenuController
@@ -5273,13 +5705,12 @@ function V7MenuPanel.new(): V7MenuController
 		return controller
 	end
 
-	-- Instantiate each overlay
 	local shapeRefresh = buildShapesOverlay(screenGui, overlays, getController)
 	local questRefresh = buildQuestsOverlay(screenGui, overlays, getController)
 	local shopRefresh = buildShopOverlay(screenGui, overlays, getController)
 	local boardsRefresh = buildBoardsOverlay(screenGui, overlays, getController)
 	local ascendRefresh = buildAscendOverlay(screenGui, overlays, getController)
-	local vaultRefresh = buildVaultOverlay(screenGui, overlays, getController)
+	local vaultRefresh = buildVaultOverlay(screenGui, overlays, getController, formatModalShell)
 	local settingsRefresh = buildSettingsOverlay(screenGui, overlays, getController)
 	local slotsRefresh = buildSlotsOverlay(screenGui, overlays, getController)
 
@@ -5294,8 +5725,6 @@ function V7MenuPanel.new(): V7MenuController
 		overlays = overlays,
 		shopRefresh = shopRefresh,
 		boardsRefresh = boardsRefresh,
-		-- The board the tabs open on. Regressed to nil during the revamp, which
-		-- left the first open with no tab highlighted and nothing fetched.
 		activeBoard = "NetWorth",
 		ascendRefresh = ascendRefresh,
 		shapeRefresh = shapeRefresh,
@@ -5314,12 +5743,6 @@ function V7MenuPanel.new(): V7MenuController
 				self:applyState(self.lastState)
 			end
 
-			-- BOARDS IS PULL, NOT PUSH. Every other panel rides the StateSync
-			-- snapshot, but leaderboards are global rather than per-player, so
-			-- they are fetched on demand -- and only when the panel is actually
-			-- opened, so a player who never looks at them never costs the server
-			-- a request. This is also why `boardsRefresh` is absent from the
-			-- fan-out below: its parameter is a board id, not a snapshot.
 			if name == "boards" and type(self.boardsRefresh) == "function" then
 				local ok, err = pcall(self.boardsRefresh, self.activeBoard or "NetWorth")
 				if not ok then
@@ -5340,23 +5763,6 @@ function V7MenuPanel.new(): V7MenuController
 			end
 			self.lastState = state
 
-			-- ITERATED BY NAME, WITH EVERY CALL ISOLATED. Restored after the UI
-			-- revamp replaced it with a bare `if` chain that had neither.
-			--
-			-- Two separate protections live here, and the project has paid for
-			-- both. FIRST, a nil entry is skipped and REPORTED rather than
-			-- ending the sweep: the original defect (L-057) was `ipairs` over a
-			-- list literal whose FIRST element was nil, which terminated the
-			-- loop and left six unrelated panels dead with nothing logged.
-			-- SECOND, each call is pcall-wrapped, because `applyState` is
-			-- invoked from inside the StateSync handler -- an unguarded throw
-			-- here does not merely lose one panel, it escapes the handler and
-			-- takes the forge's snapshot down with it.
-			--
-			-- A stub is a PRESENT function, so the missing-refresher warning
-			-- below would not have caught the four empty refreshers the revamp
-			-- left behind. It catches a lost assignment, which is a different
-			-- failure; do not read a silent console as proof a panel is live.
 			local refreshers: { { name: string, fn: any } } = {
 				{ name = "shop", fn = self.shopRefresh },
 				{ name = "shapes", fn = self.shapeRefresh },
@@ -5380,10 +5786,6 @@ function V7MenuPanel.new(): V7MenuController
 			end
 		end,
 
-		-- Declares whether a client capability is present, from the composition
-		-- root. Repaints immediately from the last snapshot so the answer takes
-		-- effect without waiting for the next StateSync -- otherwise the audio
-		-- rows in Settings sit stale from boot until a roll happens to arrive.
 		setCapability = function(self: V7MenuController, name: string, present: boolean)
 			self._capabilities[name] = present
 			local last = self.lastState

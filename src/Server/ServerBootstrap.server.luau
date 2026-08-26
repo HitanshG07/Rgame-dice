@@ -400,6 +400,46 @@ RemoteGateway.register("BuyDiamondNode", announcing(function(player: Player, nod
 	return true, nil
 end))
 
+-- BUYS ADDITIONAL INSTANCE OF AN UNLOCKED SHAPE INTO THE PLAYER'S DICE INVENTORY (UNLIMITED)
+RemoteGateway.register("BuyDieInstance", announcing(function(player: Player, shapeId: string)
+	local data = PlayerProfile.get(player)
+	if not data then
+		return false, Remotes.Notice.ProfileUnavailable
+	end
+
+	if type(shapeId) ~= "string" then
+		return false, Remotes.Notice.InvalidRequest
+	end
+	local okShape, shapeReason = RemoteGateway.V.boundedString(shapeId, RemoteGateway.MAX_STRING_ID)
+	if not okShape then
+		return false, shapeReason
+	end
+	if data.Diamond.Shapes[shapeId] ~= true then
+		return false, Remotes.Notice.NotUnlocked
+	end
+	if DiceCatalog.getShape(shapeId) == nil then
+		return false, Remotes.Notice.InvalidRequest
+	end
+
+	local shapeCost = DiceCatalog.getUnlockCost(shapeId) :: number
+	if not EconomyService.canAfford(player, "Cash", shapeCost) then
+		return false, Remotes.Notice.InsufficientFunds
+	end
+	local spent = EconomyService.spend(player, "Cash", shapeCost, "buy_die_instance")
+	if not spent then
+		return false, Remotes.Notice.InsufficientFunds
+	end
+
+	PlayerProfile.mutate(player, function(d)
+		if type(d.Inventory) ~= "table" then
+			d.Inventory = {}
+		end
+		d.Inventory[shapeId] = (d.Inventory[shapeId] or 0) + 1
+	end)
+
+	return true, nil
+end))
+
 -- BUYS ANOTHER DIE, optionally of a chosen shape.
 --
 -- `shapeId` is OPTIONAL (operator decision, 2026-08-13: "in shape we need to add
@@ -589,6 +629,27 @@ RemoteGateway.register("SwapDice", announcing(function(player: Player, a: number
 			return
 		end
 		d.Dice[a], d.Dice[b] = d.Dice[b], d.Dice[a]
+	end)
+	return wrote, if wrote then nil else Remotes.Notice.ProfileUnavailable
+end))
+
+RemoteGateway.register("UnequipDie", announcing(function(player: Player, dieIndex: number)
+	local data = PlayerProfile.get(player)
+	if not data then
+		return false, Remotes.Notice.ProfileUnavailable
+	end
+	if #data.Dice <= 1 then
+		return false, Remotes.Notice.InvalidRequest
+	end
+	local okIdx, reasonIdx = RemoteGateway.V.integerInRange(dieIndex, 1, #data.Dice)
+	if not okIdx then
+		return false, reasonIdx
+	end
+	local wrote = PlayerProfile.mutate(player, function(d)
+		if #d.Dice <= 1 or dieIndex < 1 or dieIndex > #d.Dice then
+			return
+		end
+		table.remove(d.Dice, dieIndex)
 	end)
 	return wrote, if wrote then nil else Remotes.Notice.ProfileUnavailable
 end))

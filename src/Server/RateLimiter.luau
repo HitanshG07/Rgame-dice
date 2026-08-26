@@ -44,6 +44,8 @@ local LIMITS: { [string]: Limit } = {
 	-- generous. It moves no value -- the same dice in a different order -- so a
 	-- high rate costs nothing but a profile write.
 	SwapDice = { sustained = 4, burst = 8 },
+	UnequipDie = { sustained = 4, burst = 8 },
+	BuyDieInstance = { sustained = 4, burst = 8 },
 }
 
 local DEFAULT_LIMIT: Limit = { sustained = 2, burst = 5 }

@@ -61,6 +61,7 @@ local MIN_INTERVAL: { [string]: number } = {
 	GetLeaderboard = 2.0,
 	SetSetting = 0.15,
 	SwapDice = 0.2,
+	BuyDieInstance = 0.2,
 }
 local DEFAULT_INTERVAL = 0.25
 
@@ -215,6 +216,14 @@ end
 -- the board slot, so this is how a player chooses which die sits where.
 function NetClient.swapDice(a: number, b: number): Result
 	return call("SwapDice", a, b)
+end
+
+function NetClient.unequipDie(dieIndex: number): Result
+	return call("UnequipDie", dieIndex)
+end
+
+function NetClient.buyDieInstance(shapeId: string): Result
+	return call("BuyDieInstance", shapeId)
 end
 
 -- Reads the server's cache; never triggers a fetch (threat T-22). Returns the

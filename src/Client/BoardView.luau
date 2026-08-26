@@ -608,9 +608,11 @@ local function build(): (ScreenGui, Frame, ViewportFrame, Folder)
 	-- the table, and a 3D label would tumble with the perspective.
 	local resultBar = Instance.new("Frame")
 	resultBar.Name = "ResultBar"
-	resultBar.Size = UDim2.fromScale(0.96, 0.065)
-	resultBar.Position = UDim2.fromScale(0.02, 0.915)
-	resultBar.BackgroundColor3 = Color3.fromRGB(24, 19, 16)
+	resultBar.Size = UDim2.new(0.94, 0, 0, 36)
+	resultBar.Position = UDim2.new(0.5, 0, 0.945, 0)
+	resultBar.AnchorPoint = Vector2.new(0.5, 0.5)
+	resultBar.BackgroundColor3 = Color3.fromRGB(18, 14, 12)
+	resultBar.BackgroundTransparency = 0.2
 	resultBar.ZIndex = 5
 	-- HIDDEN UNTIL THERE IS A RESULT TO SHOW. It defaulted to visible, so a
 	-- player who had just joined and not yet rolled was shown an empty black
@@ -620,20 +622,27 @@ local function build(): (ScreenGui, Frame, ViewportFrame, Folder)
 	resultBar.Parent = interior
 
 	local rbCorner = Instance.new("UICorner")
-	rbCorner.CornerRadius = UDim.new(0.4, 0)
+	rbCorner.CornerRadius = UDim.new(0, 18)
 	rbCorner.Parent = resultBar
 
 	local rbStroke = Instance.new("UIStroke")
-	rbStroke.Color = Color3.fromRGB(52, 42, 36)
-	rbStroke.Thickness = 1
+	rbStroke.Color = Color3.fromRGB(48, 38, 32)
+	rbStroke.Thickness = 1.2
 	rbStroke.Parent = resultBar
+
+	local rbPad = Instance.new("UIPadding")
+	rbPad.PaddingLeft = UDim.new(0, 8)
+	rbPad.PaddingRight = UDim.new(0, 8)
+	rbPad.PaddingTop = UDim.new(0, 4)
+	rbPad.PaddingBottom = UDim.new(0, 4)
+	rbPad.Parent = resultBar
 
 	local rbLayout = Instance.new("UIListLayout")
 	rbLayout.Name = "Layout"
 	rbLayout.FillDirection = Enum.FillDirection.Horizontal
 	rbLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
 	rbLayout.VerticalAlignment = Enum.VerticalAlignment.Center
-	rbLayout.Padding = UDim.new(0.01, 0)
+	rbLayout.Padding = UDim.new(0, 8)
 	rbLayout.Parent = resultBar
 
 	-- Built last so it sits above the scene in sibling ZIndex order, and parented
@@ -988,6 +997,7 @@ local diceColorsByShape = {
 	D2 = Color3.fromRGB(240, 180, 50),
 	D3 = Color3.fromRGB(230, 120, 60),
 	D4 = Color3.fromRGB(150, 80, 220),
+	D5 = Color3.fromRGB(190, 190, 200),
 	D6 = Color3.fromRGB(50, 160, 220),
 	D8 = Color3.fromRGB(60, 190, 120),
 	D10 = Color3.fromRGB(230, 140, 40),
@@ -1018,6 +1028,7 @@ function BoardView.updateResultSummary(rollResults: { { shape: string, value: nu
 	-- Group results by shape type
 	local grouped: { [string]: { count: number, sum: number } } = {}
 	local shapeOrder: { string } = {}
+	local grandTotal = 0
 
 	for _, res in ipairs(rollResults) do
 		local s = res.shape or "D6"
@@ -1028,44 +1039,133 @@ function BoardView.updateResultSummary(rollResults: { { shape: string, value: nu
 		end
 		grouped[s].count += 1
 		grouped[s].sum += v
+		grandTotal += v
 	end
 
-	local totalItems = #shapeOrder
-	local itemWidth = math.min(0.18, 0.90 / math.max(1, totalItems))
+	local totalItems = #shapeOrder + 1 -- include Total chip
 
 	for _, shapeName in ipairs(shapeOrder) do
 		local info = grouped[shapeName]
-		local item = Instance.new("Frame")
-		item.Name = "Result_" .. shapeName
-		item.Size = UDim2.fromScale(itemWidth, 0.76)
-		item.BackgroundColor3 = Color3.fromRGB(16, 13, 11)
-		item.ZIndex = 6
-		item.Parent = resultBar
+		local color = diceColorsByShape[shapeName] or Color3.fromRGB(200, 200, 200)
 
-		local iCorner = Instance.new("UICorner")
-		iCorner.CornerRadius = UDim.new(0.3, 0)
-		iCorner.Parent = item
+		local chit = Instance.new("Frame")
+		chit.Name = "Result_" .. shapeName
+		if totalItems <= 4 then
+			chit.Size = UDim2.new(0, 130, 1, 0)
+		else
+			chit.Size = UDim2.new(1 / totalItems, -8, 1, 0)
+		end
+		chit.BackgroundColor3 = Color3.fromRGB(16, 13, 11)
+		chit.BorderSizePixel = 0
+		chit.ZIndex = 6
+		chit.Parent = resultBar
 
-		local iStroke = Instance.new("UIStroke")
-		iStroke.Color = diceColorsByShape[shapeName] or Color3.fromRGB(200, 200, 200)
-		iStroke.Thickness = 1.2
-		iStroke.Parent = item
+		local cCorner = Instance.new("UICorner")
+		cCorner.CornerRadius = UDim.new(0, 14)
+		cCorner.Parent = chit
 
-		local displayText = if info.count == 1
-			then string.format("%s: %d", shapeName, info.sum)
-			else string.format("%dx %s (SUM: %d)", info.count, shapeName, info.sum)
+		local cStroke = Instance.new("UIStroke")
+		cStroke.Color = color
+		cStroke.Thickness = 1.2
+		cStroke.Parent = chit
 
-		local lbl = Instance.new("TextLabel")
-		lbl.Name = "Label"
-		lbl.Size = UDim2.fromScale(1, 1)
-		lbl.BackgroundTransparency = 1
-		lbl.Font = UITheme.FontHeading
-		lbl.Text = displayText
-		lbl.TextColor3 = UITheme.Colors.TextPrimary
-		lbl.TextScaled = true
-		lbl.ZIndex = 7
-		lbl.Parent = item
+		local cLayout = Instance.new("UIListLayout")
+		cLayout.FillDirection = Enum.FillDirection.Horizontal
+		cLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+		cLayout.VerticalAlignment = Enum.VerticalAlignment.Center
+		cLayout.Padding = UDim.new(0, 5)
+		cLayout.Parent = chit
+
+		-- Glowing Pip
+		local pip = Instance.new("Frame")
+		pip.Size = UDim2.new(0, 6, 0, 6)
+		pip.BackgroundColor3 = color
+		pip.BorderSizePixel = 0
+		pip.ZIndex = 7
+		pip.Parent = chit
+		local pC = Instance.new("UICorner")
+		pC.CornerRadius = UDim.new(1, 0)
+		pC.Parent = pip
+
+		-- Shape + Count
+		local shapeTag = if info.count > 1
+			then string.format("%s ×%d", shapeName, info.count)
+			else shapeName
+
+		local sLbl = Instance.new("TextLabel")
+		sLbl.AutomaticSize = Enum.AutomaticSize.X
+		sLbl.Size = UDim2.new(0, 0, 1, 0)
+		sLbl.BackgroundTransparency = 1
+		sLbl.Font = Enum.Font.GothamBold
+		sLbl.Text = shapeTag
+		sLbl.TextColor3 = UITheme.Colors.TextPrimary
+		sLbl.TextSize = 12
+		sLbl.ZIndex = 7
+		sLbl.Parent = chit
+
+		-- Arrow divider
+		local arr = Instance.new("TextLabel")
+		arr.AutomaticSize = Enum.AutomaticSize.X
+		arr.Size = UDim2.new(0, 0, 1, 0)
+		arr.BackgroundTransparency = 1
+		arr.Font = Enum.Font.GothamBold
+		arr.Text = "→"
+		arr.TextColor3 = color
+		arr.TextSize = 11
+		arr.ZIndex = 7
+		arr.Parent = chit
+
+		-- Value
+		local vLbl = Instance.new("TextLabel")
+		vLbl.AutomaticSize = Enum.AutomaticSize.X
+		vLbl.Size = UDim2.new(0, 0, 1, 0)
+		vLbl.BackgroundTransparency = 1
+		vLbl.Font = Enum.Font.GothamBlack
+		vLbl.Text = tostring(info.sum)
+		vLbl.TextColor3 = color
+		vLbl.TextSize = 13
+		vLbl.ZIndex = 7
+		vLbl.Parent = chit
 	end
+
+	-- Total Chit
+	local totalChit = Instance.new("Frame")
+	totalChit.Name = "Result_Total"
+	if totalItems <= 4 then
+		totalChit.Size = UDim2.new(0, 130, 1, 0)
+	else
+		totalChit.Size = UDim2.new(1 / totalItems, -8, 1, 0)
+	end
+	totalChit.BackgroundColor3 = Color3.fromRGB(28, 22, 16)
+	totalChit.BorderSizePixel = 0
+	totalChit.ZIndex = 6
+	totalChit.Parent = resultBar
+
+	local tcCorner = Instance.new("UICorner")
+	tcCorner.CornerRadius = UDim.new(0, 14)
+	tcCorner.Parent = totalChit
+
+	local tcStroke = Instance.new("UIStroke")
+	tcStroke.Color = Color3.fromRGB(234, 179, 8)
+	tcStroke.Thickness = 1.4
+	tcStroke.Parent = totalChit
+
+	local tcLayout = Instance.new("UIListLayout")
+	tcLayout.FillDirection = Enum.FillDirection.Horizontal
+	tcLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+	tcLayout.VerticalAlignment = Enum.VerticalAlignment.Center
+	tcLayout.Parent = totalChit
+
+	local tcLbl = Instance.new("TextLabel")
+	tcLbl.AutomaticSize = Enum.AutomaticSize.X
+	tcLbl.Size = UDim2.new(0, 0, 1, 0)
+	tcLbl.BackgroundTransparency = 1
+	tcLbl.Font = Enum.Font.GothamBlack
+	tcLbl.Text = "★ TOTAL: " .. tostring(grandTotal)
+	tcLbl.TextColor3 = Color3.fromRGB(250, 204, 21)
+	tcLbl.TextSize = 12
+	tcLbl.ZIndex = 7
+	tcLbl.Parent = totalChit
 end
 
 -- Symmetry with every other view module. Without it the board is a permanent

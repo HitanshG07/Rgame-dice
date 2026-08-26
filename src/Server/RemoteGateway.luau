@@ -79,6 +79,8 @@ local ARITY: { [string]: number } = {
 	-- checked at the handler against `VaultCatalog.MAX_PURCHASE_HOURS_PER_CALL`;
 	-- this only fixes the SHAPE of the call.
 	BuyVaultHours = 1,
+	UnequipDie = 1,
+	BuyDieInstance = 1,
 }
 
 -- Returns the declared arity, or nil if the remote is not declared. A remote

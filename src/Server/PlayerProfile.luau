@@ -91,6 +91,7 @@ export type Profile = {
 	LastSpin: number,
 	GroupClaimed: boolean,
 	Settings: { [string]: boolean },
+	Inventory: { [string]: number },
 }
 
 -- API_DATA_CONTRACT.md §3. Every field has a default, so no load path can
@@ -158,6 +159,7 @@ local TEMPLATE: Profile = {
 	LastSpin = 0,
 	GroupClaimed = false,
 	Settings = { Particles = true, MotionBlur = true, Music = true, SFX = true },
+	Inventory = { D2 = 1 },
 }
 
 -- GRANTS DIE SLOTS AND THE DICE TO FILL THEM, together.
@@ -310,8 +312,8 @@ function PlayerProfile._reconcile(raw: any): Profile
 	-- short array (see above), and by the same reasoning a legitimately larger
 	-- array must not be confiscated by a constant that has since moved.
 	local slotCeiling = math.max(DiceCatalog.MAX_DIE_SLOTS, #data.Dice)
-	data.DieSlots = math.clamp(math.floor(data.DieSlots), #data.Dice, slotCeiling)
-	for _ = #data.Dice + 1, data.DieSlots do
+	data.DieSlots = math.clamp(math.floor(data.DieSlots), math.max(1, #data.Dice), slotCeiling)
+	if #data.Dice == 0 then
 		table.insert(data.Dice, deepCopy(TEMPLATE.Dice[1]))
 	end
 
@@ -378,6 +380,25 @@ function PlayerProfile._reconcile(raw: any): Profile
 		if type(die) == "table" and type(die.Shape) == "string" then
 			data.Diamond.ShapesEquipped[die.Shape] = true
 		end
+	end
+
+	-- PERSISTENT DICE INVENTORY RECONCILIATION
+	if type(data.Inventory) ~= "table" then
+		data.Inventory = {}
+	end
+	local activeCounts: { [string]: number } = {}
+	for _, die in ipairs(data.Dice) do
+		if type(die) == "table" and type(die.Shape) == "string" then
+			activeCounts[die.Shape] = (activeCounts[die.Shape] or 0) + 1
+		end
+	end
+	for shape, count in pairs(activeCounts) do
+		if (data.Inventory[shape] or 0) < count then
+			data.Inventory[shape] = count
+		end
+	end
+	if (data.Inventory.D2 or 0) < 1 then
+		data.Inventory.D2 = 1
 	end
 
 	return (data :: any) :: Profile

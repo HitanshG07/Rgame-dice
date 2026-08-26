@@ -23,7 +23,7 @@ export type FunctionName =
 	"Roll" | "Forge" | "SetElement" | "SetShape" | "BuyUpgrade" | "AddDieSlot"
 	| "Ascend" | "BuyDiamondNode" | "SetAutoRoll" | "ClaimVault" | "ClaimQuest"
 	| "ClaimChest" | "DailySpin" | "RedeemCode" | "ClaimGroupReward" | "GetLeaderboard"
-	| "SetSetting" | "SwapDice" | "BuyVaultHours"
+	| "SetSetting" | "SwapDice" | "BuyVaultHours" | "UnequipDie" | "BuyDieInstance"
 
 -- Outbound: server fires, client listens. RemoteEvent. Display only.
 export type EventName =
@@ -55,6 +55,8 @@ local FN: { [string]: FunctionName } = {
 	-- the same dice, in a different order.
 	SwapDice = "SwapDice",
 	BuyVaultHours = "BuyVaultHours",
+	UnequipDie = "UnequipDie",
+	BuyDieInstance = "BuyDieInstance",
 }
 Remotes.Fn = FN
 

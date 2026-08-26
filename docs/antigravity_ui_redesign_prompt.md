@@ -20,9 +20,7 @@ marked DONE.
 
 Ask it plainly, like this:
 
-> Which panel would you like to revamp? Remaining: **BOARDS**, **VAULT**,
-> **SLOTS**, **FORGE**, **HUD**. (ASCEND, SHAPES, QUESTS, SHOP and SETTINGS are
-> already done.)
+> Which panel would you like to revamp? Remaining: **VAULT**, **FORGE**, **HUD**. (ASCEND, SHAPES, QUESTS, SHOP, SETTINGS, SLOTS, and BOARDS are already done.)
 
 If I name a panel that is marked DONE, say so and ask me to confirm before you
 touch it — I may have a reason, but it should be deliberate rather than
@@ -41,9 +39,9 @@ finished. Do not redesign them, do not offer them in the question above, do not
 | SHAPES — specimen stage + 12-dice scaling | **DONE, live** | `SPECIMEN_SCALE_MAP` ~line 505 |
 | SHOP — Shop & Exchange | **DONE, live** | `overlay("Shop & Exchange")`, mocha panel + gold stroke |
 | SETTINGS | **DONE, live** | `overlay("Settings")`, mocha panel + gold stroke |
-| **BOARDS — Leaderboards** | **REMAINING** | still the three-tab prose-commented build |
-| **VAULT — Offline Vault** | **REMAINING** | still `UITheme.label` + `UDim2.fromScale` positioning |
-| **SLOTS — Die Slots** | **REMAINING** | still the composed `verticalStack` panel |
+| SLOTS — Die Slots | **DONE, live** | 4-quadrant layout, Trait Forge, 3x2 stacked inventory |
+| BOARDS — Global Leaderboards | **DONE, live** | `buildBoardsOverlay` (Variant C Brutalist Kinetic Monolith) |
+| VAULT — Offline Treasury Vault | **DONE, live** | `src/Client/V7VaultOverlay.luau` (B1+B2 Master Hybrid) |
 | **FORGE** | **REMAINING** | `V7ForgePanel.luau`, never started |
 | **HUD** | **REMAINING** | `V7HUD.luau`, never started |
 

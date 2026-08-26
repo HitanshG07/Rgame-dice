@@ -295,6 +295,8 @@ local function run(): (boolean, string?, number)
 		"a shape that does not exist must be refused")
 
 	data.Diamond.Shapes.D20 = true
+	data.Inventory.D20 = 1
+	data.Inventory.D6 = 1
 
 	-- THE FIRST EQUIP OF A SHAPE IS FREE (operator decision, 2026-08-11), so an
 	-- unaffordable FIRST equip is not a refusal -- it is the discount working.
@@ -405,6 +407,38 @@ local function run(): (boolean, string?, number)
 		"the die must be forgeable immediately after a shape change, got '%s'", tostring(reforgeReason)))
 
 	----------------------------------------------------------------------------
+	-- Strict Die Ownership Quota: cannot equip more copies than owned in inventory
+	----------------------------------------------------------------------------
+	PlayerProfile.mutate(player, function(d)
+		d.Inventory.D8 = 0
+		d.Diamond.Shapes.D8 = true
+		d.DieSlots = 2
+	end)
+	local zeroOwnedOk = ForgeService.performSetShape(player, 1, "D8")
+	e = e or check(not zeroOwnedOk, "equipping a shape with 0 owned in inventory must be refused")
+
+	PlayerProfile.mutate(player, function(d)
+		d.Inventory.D8 = 1
+	end)
+	local oneOwnedOk = ForgeService.performSetShape(player, 1, "D8")
+	e = e or check(oneOwnedOk, "equipping a shape with 1 owned into slot 1 must succeed")
+
+	local secondSlotOverQuotaOk = ForgeService.performSetShape(player, 2, "D8")
+	e = e or check(not secondSlotOverQuotaOk, "equipping a second D8 when only 1 is owned must be refused by quota")
+
+	PlayerProfile.mutate(player, function(d)
+		d.Inventory.D8 = 2
+	end)
+	local secondSlotWithQuotaOk = ForgeService.performSetShape(player, 2, "D8")
+	e = e or check(secondSlotWithQuotaOk, "equipping a second D8 once 2 are owned in inventory must succeed")
+
+	-- Clean up slot 2
+	PlayerProfile.mutate(player, function(d)
+		d.Dice = { d.Dice[1] }
+		d.DieSlots = 1
+	end)
+
+	----------------------------------------------------------------------------
 	-- F-AD-1: a shape change must never MANUFACTURE budget
 	----------------------------------------------------------------------------
 
@@ -465,6 +499,7 @@ local function run(): (boolean, string?, number)
 			-- Unlock D4: a locked shape is refused, and a refused call would
 			-- leave the die untouched and make the assertions below meaningless.
 			d.Diamond.Shapes.D4 = true
+			d.Inventory.D4 = 1
 		end)
 		local downOk = ForgeService.performSetShape(player, 1, "D4")
 		e = e or check(downOk, "D6 -> D4 should succeed once D4 is unlocked")
@@ -504,6 +539,9 @@ local function run(): (boolean, string?, number)
 		d.Diamond.Shapes.D4 = true
 		d.Diamond.Shapes.D6 = true
 		d.Diamond.Shapes.D20 = true
+		d.Inventory.D4 = 1
+		d.Inventory.D6 = 1
+		d.Inventory.D20 = 1
 	end)
 	EconomyService.credit(player, "Diamonds", 500, "test_setup")
 
@@ -636,6 +674,7 @@ local function run(): (boolean, string?, number)
 	PlayerProfile.mutate(player, function(d)
 		for _, id in ipairs({ "D4", "D6", "D8", "D12", "D20" }) do
 			d.Diamond.Shapes[id] = true
+			d.Inventory[id] = 1
 		end
 	end)
 	EconomyService.credit(player, "Diamonds", 2000, "test_setup")

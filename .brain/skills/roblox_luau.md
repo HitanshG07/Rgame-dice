@@ -115,3 +115,12 @@ Dice Forge's `performSetShape` was wrong three times in three different directio
 - **Top-level `require` cycles between ModuleScripts cause silent module loading failures.** In Luau, requiring Module A which requires Module B which requires Module A causes `require` to throw "Requested module experienced an error while loading", failing every dependent module and test suite.
 - **Enforce a strict Directed Acyclic Graph (DAG) for top-level requires.** High-level orchestration services require lower-level authority modules; lower-level modules must never require their orchestrators at top-level scope.
 - **Lazy-require inside function bodies when cross-references are unavoidable.** If Service A needs a method from Service B and Service B needs Service A, defer the `require` into the function scope where it is actually called rather than declaring it at module level.
+
+## 11. RESPONSIVE UI MODAL BOUNDS & VIEWPORT ENVELOPE STANDARDS
+*(Promoted 2026-08-21 from V7 Menu Panel Refactor; see ledger L-065 & L-066)*
+
+- **Never override modal dialog dimensions with fixed static pixel sizes.** Static pixel frames (e.g. 920x580) fail to clear dynamic HUD flanking panels (outer 12% columns) on compact or high-DPI screens.
+- **Enforce canonical modal envelope:** Modal frames must use `UDim2.new(0.74, 0, 0.74, 0)` centered at `(0.5, 0.5)` with `AnchorPoint = Vector2.new(0.5, 0.5)` and `UISizeConstraint(MinSize: 680x420, MaxSize: 940x580)` to guarantee safe clearance above side button columns, topbar currency stats, and bottom action bars.
+- **Header & Canvas Partitioning:** Maintain a fixed `50px` header at `UDim2.new(0, 12, 0, 8)` with `32x32px` close button, and a body canvas at `UDim2.new(1, -24, 1, -68)` positioned at `UDim2.new(0, 12, 0, 60)`.
+- **Z-Index & Backdrop Dimming:** Always configure `ScreenGui.DisplayOrder = 50` on menu overlay guis and include a full-screen semi-transparent backdrop scrim (`BackgroundTransparency = 0.45`, `BackgroundColor3 = Color3.fromRGB(0, 0, 0)`) to prevent background HUD bleed and unintended click-through.
+

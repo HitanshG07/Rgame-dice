@@ -563,7 +563,8 @@ function ForgeService.performSetShape(player: Player, dieIndex: number, shapeId:
 	end
 
 	local v = RemoteGateway.validate
-	local okIdx, rIdx = v.integerInRange(dieIndex, 1, #data.Dice)
+	local maxAllowedIndex = math.min(data.DieSlots, #data.Dice + 1)
+	local okIdx, rIdx = v.integerInRange(dieIndex, 1, maxAllowedIndex)
 	if not okIdx then
 		return false, rIdx
 	end
@@ -575,6 +576,34 @@ function ForgeService.performSetShape(player: Player, dieIndex: number, shapeId:
 
 	if not data.Diamond.Shapes[shapeId] then
 		return false, Remotes.Notice.InvalidRequest
+	end
+
+	-- Quota check: player must own enough purchased instances of shapeId
+	local ownedCount = if type(data.Inventory) == "table" then (tonumber(data.Inventory[shapeId]) or 0) else 0
+	local inUseCount = 0
+	for i, d in ipairs(data.Dice) do
+		if i ~= dieIndex and type(d) == "table" and d.Shape == shapeId then
+			inUseCount += 1
+		end
+	end
+	if inUseCount + 1 > ownedCount then
+		return false, Remotes.Notice.InsufficientFunds
+	end
+
+	-- If equipping to the next empty unlocked slot
+	if dieIndex == #data.Dice + 1 then
+		local newDie = DiceCatalog.newDie(shapeId)
+		if not newDie then
+			return false, Remotes.Notice.ServerError
+		end
+		local applied, applyReason = PlayerProfile.mutate(player, function(d)
+			table.insert(d.Dice, newDie)
+			d.Diamond.ShapesEquipped[shapeId] = true
+		end)
+		if not applied then
+			return false, Remotes.Notice.ProfileUnavailable
+		end
+		return true, nil
 	end
 
 	-- Changing to the shape already equipped is a no-op, and a no-op must never

@@ -115,6 +115,7 @@ function AscensionService.ascend(player: Player): (boolean, string?, number)
 		if fresh ~= nil then
 			d.Dice = { fresh :: any }
 			d.DieSlots = 1
+			d.Inventory = { D2 = 1 }
 		end
 	end)
 

@@ -428,3 +428,100 @@ LEDGER GOVERNANCE LAWS
 - **Encountered State:** Dice Shapes & Master Catalog UI Redesign, 2026-08-20. Vertically stacking a 3D turntable above 4 caliper telemetry rows inside a ~285px container squished the 3D viewport to 68px and caused text-bar collisions on win/loss rate labels (`83.3% WIN • 16.7% LOSE` overlapping progress bar tracks).
 - **Root Cause Breakdown:** Squeezing metric name, progress bar, and value readout on a single horizontal row inside a <200px column leaves insufficient width for both a 60px bar and a 100px formatted string, causing text clipping and overlap. Furthermore, vertical stacking squandered horizontal space while starving the 3D viewport of vertical height.
 - **Definitive Fix Action:** Restructure dense specimen inspection pods into a horizontal `Display | Stats` split row (e.g. 40% width for a 132x183px dedicated 3D turntable, 60% width for telemetry). Inside the telemetry column, use two-tier metric rows: Tier 1 (top) places the Metric Label on the left and Value Readout on the right with zero collision risk; Tier 2 (bottom) places a full-width 4px progress bar track. Position primary action buttons full-width at the bottom of the container. -- Last Verified: 2026-08-20
+
+### L-065: Unified Modal Viewport Bounding Envelope and HUD Clearance Standard
+- **Encountered State:** Revamped UI Modals (Die Slots, Shapes, Shop, Quests, Ascend, Settings), 2026-08-21. Modal dialogs at 0.86 scale covered the side HUD button columns (left: ASCEND, FORGE, SHAPE, SLOTS; right: BOARDS, QUESTS, SHOP, VAULT) and encroached on the topbar currency and bottom roll button bars.
+- **Root Cause Breakdown:** Sizing modal containers with `UDim2.new(0.86, 0, 0.86, -30)` and `UISizeConstraint(Min: 840x540, Max: 1120x740)` resulted in a shell too wide and tall for viewports where side HUD buttons occupy the outer 12% on each flank.
+- **Definitive Fix Action:** All revamped modal overlays (`UITheme.overlay` and all menus in `V7MenuPanel.luau`) MUST adhere strictly to the canonical HUD-clearing bounding envelope:
+  - **Panel Size**: `UDim2.new(0.74, 0, 0.74, 0)` centered at `(0.5, 0.5)` with `AnchorPoint = Vector2.new(0.5, 0.5)`.
+  - **UISizeConstraint**: `MinSize = Vector2.new(680, 420)`, `MaxSize = Vector2.new(940, 580)`.
+  - **Header Bar**: Standard `50px` height, `12px` padding, `32x32px` close button at `UDim2.new(1, -24, 0, 50)` positioned at `UDim2.new(0, 12, 0, 8)`.
+  - **Body Canvas**: `UDim2.new(1, -24, 1, -68)` positioned at `UDim2.new(0, 12, 0, 60)`.
+  - This guarantees that every revamped modal fits comfortably within the central screen stage, completely clearing the left HUD column, right HUD column, topbar currency bar, and bottom roll bar across all desktop, laptop, and tablet resolutions. -- Last Verified: 2026-08-21
+
+### L-066: Unified Dark Luxury Casino Theme Tokens & Internal Ratio Standardization
+- **Encountered State:** Full V7 Menu Overlays Polish & Integration (Slots, Shapes, Shop, Quests, Ascend, Settings), 2026-08-21.
+- **Root Cause Breakdown:** Individual menu panels previously used slightly varying shades of mocha, gold, stroke thicknesses, and inconsistent internal component heights (e.g. 68px vs 52px reward rows, 120px vs 90px promo cards), resulting in visual inconsistency, text collisions, and bottom-edge clipping on compact viewports.
+- **Definitive Fix Action:** Standardized all 6 modal overlays to the canonical `UITheme.Theme` design system:
+  - **Color Palette**: `ModalBg = Color3.fromRGB(24, 20, 18)` (Dark Espresso), `HeaderBg = Color3.fromRGB(34, 28, 24)`, `CardBg = Color3.fromRGB(32, 26, 22)`, `InsetBg = Color3.fromRGB(18, 15, 13)`, `GoldPrimary = Color3.fromRGB(234, 179, 8)` (`#EAB308`), `StrokeGold = Color3.fromRGB(212, 165, 40)`, `StrokeSubtle = Color3.fromRGB(60, 50, 42)`, `TextPrimary = Color3.fromRGB(245, 240, 235)`, `Positive = Color3.fromRGB(34, 197, 94)`, `Negative = Color3.fromRGB(239, 68, 68)`.
+  - **Layering & Scrim**: Set `ScreenGui.DisplayOrder = 50` on `V7MenuGui` with a full-screen `0.45` black backdrop scrim to cleanly isolate open modals above gameplay HUD buttons.
+  - **Internal Proportions**: Quests playtime tier rows (52px), Ascend metric cards (136px with 24px rows and 42px button), Settings toggle rows (58px with 36px buttons), Shapes specimen stage split (40% viewport, 60% two-tier calipers with 26px action buttons), Slots Trait Forge (40% die turntable, 22% dual boosts, 38% shard deck with 28px roll button). -- Last Verified: 2026-08-21
+
+### L-067: Brutalist Kinetic Monolith Leaderboard & Live Telemetry Architecture
+- **Encountered State:** Global Leaderboards (BOARDS) UI Redesign & Live Port, 2026-08-22. Replaced legacy flat 10-row leaderboard with Variant C (Brutalist Kinetic Monolith) featuring elevated top-3 champion podiums, high-density stream scrolling, full-width responsive tabs, and illuminated operator console.
+- **Root Cause Breakdown:** Legacy leaderboard suffered from low information density (only 10 rows visible), missing player standing percentile/milestone targets, static tabular presentation without visual hierarchy for podium ranks, and telemetry labels taking up tab bar space.
+- **Definitive Fix Action:**
+  1. **Tab Strip Geometry:** Eliminate non-interactive trailing tags from tab strips to allow category buttons to span 100% of the container with equal fractional widths (`1 / #TABS`, `-(tabGutter * (tabCount - 1)) / tabCount`) and 4-6px gutters.
+  2. **Top-3 Monolith Podiums:** Center #1 Gold Sovereign pod flanked by #2 Silver Immortal and #3 Bronze Ascended with distinct geometric class pills and empty state fallbacks (`VACANT`, `OPEN`, `---`).
+  3. **Brutalist Data Stream:** Dedicated scrolling container with stream headers (`TIER`, `OPERATOR IDENT`, `SCORE / VALUE`, `CLASS`) and gold-highlighted local player row (`isMe`).
+  4. **Pinned Illuminated Console:** 44px bottom console displaying operator ident, percentile standing, active score metric, and next-rank delta target (`+X Needed`).
+  5. **Network Resilience:** Bind to `NetClient.getLeaderboard(boardId)` with race condition guards, honest unranked reporting, and 0-error graceful degradation. -- Last Verified: 2026-08-22
+
+### L-068: Fail-Closed Gateway Binding Requires Explicit Registration in Arity and Rate Limiter Sets
+- **Encountered State:** Die Instance Purchasing & Slots Quota Integration, 2026-08-22. Introducing new RemoteFunction `BuyDieInstance` caused server bootstrap to throw during startup in `RemoteGateway.bind()`, halting player admission and breaking the client-server connection entirely.
+- **Root Cause Breakdown:** `RemoteGateway.luau` enforces a fail-closed architectural safety invariant: every remote registered in `Remotes.Functions` or `Remotes.Events` MUST have an explicitly declared argument arity in `RemoteGateway.ARITY` and a declared rate limit quota in `RateLimiter.LIMITS`. If any remote is missing from either dictionary, `RemoteGateway.bind()` throws an error at initialization to prevent unvalidated/unmetered endpoints from running in production.
+- **Definitive Fix Action:** Whenever introducing a new remote endpoint (function or event):
+  1. Add the expected argument count to `RemoteGateway.ARITY[remoteName] = N` in `src/Server/RemoteGateway.luau`.
+  2. Add the sustained/burst rate limit config to `RateLimiter.LIMITS[remoteName] = { sustained = S, burst = B }` in `src/Server/RateLimiter.luau`.
+  3. Bind the server handler in `ServerBootstrap.server.luau` inside `RemoteGateway.bind()`.
+  - Never declare a remote in `src/Shared/Remotes.luau` without simultaneously declaring its arity and rate limit entries. -- Last Verified: 2026-08-22
+
+### L-069: Catalog Progression Unlocks vs Physical Inventory Quota Invariants
+- **Encountered State:** Die Instance Purchasing & Slots Quota Integration, 2026-08-22. Unlocking shapes in the Diamond Progression Tree previously granted a free physical die instance, and players could equip unlimited copies of any unlocked shape across slots.
+- **Root Cause Breakdown:** Conflating two distinct concepts: (1) Unlocking a shape recipe in the catalog (`data.Diamond.Shapes[shapeId] = true`), and (2) Purchasing physical die instances (`data.Inventory[shapeId] = count`). Without a strict invariant check, equipping into active slots (`data.Dice`) allowed infinite duplication of high-tier dice with 0 purchases.
+- **Definitive Fix Action:**
+  1. Unlocking a shape node in `BuyDiamondNode` ONLY latches `data.Diamond.Shapes[nodeId] = true` with 0 initial inventory.
+  2. Buying a physical die in `BuyDieInstance` increments `data.Inventory[shapeId] += 1` with Cash deduction.
+  3. In `performSetShape`, enforce the strict quota invariant: `(count of shapeId in data.Dice across other slots) + 1 <= (data.Inventory[shapeId] or 0)`.
+  4. On Ascension (`performAscension`), reset `data.Inventory` back to `{ D2 = 1 }` alongside starting dice `{ newStartingDie() }` and `DieSlots = 1`, preserving unlocked recipes in `Diamond.Shapes`.
+  5. In Client UI (`V7MenuPanel.luau`), compute `availableCount = ownedTotal - inUseCount`. Filter unequipped inventory to only show items where `availableCount > 0` with `x<availableCount>` badging. -- Last Verified: 2026-08-22
+
+### L-070: Heterogeneous Model/Shape Extraction in ViewportFrame Collections
+- **Encountered State:** Slots & Orrery Multi-Die Chamber Integration, 2026-08-22. Opening `Overlay_slots` with multiple equipped dice threw runtime error: `argument #1 expects a string, but table was passed` in `createOrreryChamber`.
+- **Root Cause Breakdown:** `liveEquippedDice` contains tables of die state (`{ { shape = "D2", mass = 60 }, ... }`), while `createOrreryChamber` assumed a homogeneous array of shape string IDs (`{ "D2", "D4" }`). Calling `folder:FindFirstChild(shapeId)` with a table passed to string parameter caused engine error.
+- **Definitive Fix Action:** UI helper functions accepting shape lists must defensively extract the shape ID: `local shapeId = if type(rawItem) == "table" then tostring((rawItem :: any).shape or "D2") else tostring(rawItem)`. Callers passing equipped dice arrays should map directly to string IDs (`table.insert(shapes, d.shape)`). -- Last Verified: 2026-08-22
+
+### L-071: TextButton Contextual UIStroke Font Halo vs ApplyStrokeMode.Border
+- **Encountered State:** Offline Treasury Vault UI Redesign, 2026-08-22. Action buttons (`AUTHORIZE & SETTLE CERTIFICATE`, `+1 HOUR EXTENSION`) rendered with a blurry/glowing halo effect around each individual text letter glyph.
+- **Root Cause Breakdown:** In Roblox UI, adding a `UIStroke` directly to a `TextButton` or `TextLabel` defaults `ApplyStrokeMode` to `Enum.ApplyStrokeMode.Contextual`, which outlines each font glyph (producing text blurring/halo artifacts) rather than the button's rectangular boundary.
+- **Definitive Fix Action:** Explicitly set `stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border` on all `TextButton`, `TextLabel`, and `Frame` stroke instances. This confines the stroke strictly to the outer perimeter border, guaranteeing crisp, flat, readable typography with 0 glowing artifacts. -- Last Verified: 2026-08-22
+
+### L-072: Modular Sub-Overlay Architecture for Reflection API Source Length Limits
+- **Encountered State:** Offline Treasury Vault UI Integration, 2026-08-22. Direct monolithic expansion of `V7MenuPanel.luau` approached the 200,000-byte property limit of the Roblox Studio reflection API (`script.Source = str`).
+- **Root Cause Breakdown:** Large monolithic UI controllers containing 8+ complex overlays with high-density layouts exceed 200kb, causing Studio HTTP sync scripts and reflection tools to reject source string assignments.
+- **Definitive Fix Action:** Modularize self-contained modal overlays into dedicated sibling client modules (e.g. `src/Client/V7VaultOverlay.luau`), required directly by `V7MenuPanel.luau`. This keeps `V7MenuPanel.luau` safely below 190kb and isolates register/source allocation per subsystem. -- Last Verified: 2026-08-22
+
+### L-073: Modal Body Height Sizing and Vacant Bottom Margin Calibration
+- **Encountered State:** Settings & Offline Vault UI Redesign, 2026-08-22. Modal contents rendered with 50–100px of dead/vacant empty space at the bottom of the dialog.
+- **Root Cause Breakdown:** Setting items with fixed low pixel heights (e.g., 58px rows, 210px split deck) left remainder space in the 512px `BodyCanvas`.
+- **Definitive Fix Action:** Calibrate card heights, row heights (e.g., 80px settings rows, 242px split deck, 126px promo cards), and internal padding (10-12px) to match the canonical `(1, -24, 1, -68)` `BodyCanvas` geometry, ensuring balanced margins top and bottom. -- Last Verified: 2026-08-22
+
+### L-074: Default UIListLayout SortOrder on Alphanumerically Named Elements
+- **Encountered State:** Forge UI Specimen Calibration Redesign, 2026-08-23. Face row items (`FaceRow_1`, `FaceRow_2`, ..., `FaceRow_10`, `FaceRow_11`) sorted out of order, rendering `F10, F11, F12` ahead of `F2`.
+- **Root Cause Breakdown:** `UIListLayout.SortOrder` defaults to `Enum.SortOrder.Name`. String sorting evaluates `"FaceRow_10"` lexicographically before `"FaceRow_2"`, breaking numerical ascending order on lists with >9 elements.
+- **Definitive Fix Action:** Whenever a `UIListLayout` organizes numbered lists, explicitly set `layout.SortOrder = Enum.SortOrder.LayoutOrder` and assign each child `child.LayoutOrder = index`. Never rely on default string name sorting. -- Last Verified: 2026-08-26
+
+### L-075: Fullscreen Scrim Inset & Coordinate Alignment (IgnoreGuiInset & DisplayOrder)
+- **Encountered State:** Forge UI Specimen Calibration Redesign, 2026-08-26. A dark horizontal dividing line cut across the screen underneath the currency bar, and the top border of the 3D dice board tray bled through as a floating shadow box hovering right above the modal header.
+- **Root Cause Breakdown:** The overlay ScreenGui had `IgnoreGuiInset = false` and `DisplayOrder = 30` (while `V7MenuGui` is at 50). Because coordinate Y=0 started below the Roblox topbar (Y=36), the backdrop scrim failed to cover the top of the viewport, creating a sharp seam. Furthermore, semi-transparent backdrop opacity (`0.35`) allowed the underlying 3D board tray (located at Y=47) to bleed through as a phantom floating rectangle.
+- **Definitive Fix Action:** Modal overlays must declare `screenGui.IgnoreGuiInset = true` and uniform `screenGui.DisplayOrder = 50`. Use a deep, uniform scrim (`Color3.fromRGB(0, 0, 0)` with `0.55+` opacity) so underlying 3D geometry and HUD seams are completely covered. Always bind a full-screen transparent button (`scrimBtn`) to dismiss the modal on background click. -- Last Verified: 2026-08-26
+
+### L-076: Seamless Inventory Die Swapping vs Legacy Diamond Morphing Fees in Active Slots
+- **Encountered State:** Slots & Trait Forge Integration, 2026-08-23. Changing an equipped die in an active slot (e.g. D7 to D6) failed with `InsufficientFunds` when the player possessed <10 Diamonds, forcing the player to unequip the die first.
+- **Root Cause Breakdown:** `ForgeService.performSetShape` applied legacy shape morphing logic that charged `SHAPE_CHANGE_DIAMOND_COST = 10` on any slot change unless `data.Diamond.ShapesEquipped[shapeId]` was false. However, equipping an owned physical die from `data.Inventory` is an equipment action, not a shape morph. Unequipping made the slot empty, and subsequent equipping to an empty slot was free (0 Diamonds).
+- **Definitive Fix Action:** In `ForgeService.performSetShape`, evaluate `local hasInventoryInstance = ownedCount >= 1`. If the player owns physical inventory instances of the shape, set `switchCost = 0`. Swapping and equipping owned dice must always be free. -- Last Verified: 2026-08-26
+
+### L-077: Single-Face Primary Hazard Designation vs Multi-Face Display Ambiguity
+- **Encountered State:** Forge UI Specimen Calibration Redesign, 2026-08-26. In concentrated mass presets (Jackpot), multiple faces sat at mass floor (mass = 1), but only `F2` showed `STARVED ($0)` while `F3, F4, F5` showed `$1`, appearing to players as an inconsistent rendering glitch.
+- **Root Cause Breakdown:** By mathematical design (SRS FR-5.2 / `ForgeMath.isVoidFace`), only the single lightest face index (`faceIndex == lightest`) is designated as the Void/Streak-Breaker hazard to prevent extreme 99% roll wipeout rates. The remaining floor-mass faces pay standard base value ($1) and do not break streaks. Because the UI simply labeled it "STARVED ($0)", players expected all mass-1 faces to behave identically.
+- **Definitive Fix Action:** Explicitly label the void face as `PRIMARY HAZARD ($0)` and `STREAK BREAKER [0x]`. Clarify in the rules callout that only the lightest starved face becomes the Primary Hazard. Never display ambiguous identical-state rows with different outcomes without explicit primary/secondary designation. -- Last Verified: 2026-08-26
+
+### L-078: Viewport-Clamped Horizontal Scrolling Strips & Multi-Slot Tab Affordances
+- **Encountered State:** Forge UI Specimen Calibration Redesign, 2026-08-26. On a 10-slot layout, tabs `SLOT 05` to `SLOT 10` were hidden beyond the Card 1 boundary, and players missed that additional slots existed due to subtle 3px scrollbars.
+- **Root Cause Breakdown:** Horizontal scrolling strips inside fixed-width cards (e.g. 349px) can only fit 3–4 tabs at once. Relying solely on thin scrollbars lacks visual affordance for desktop mouse users.
+- **Definitive Fix Action:** When items exceed the visible container width (`itemCount > 4`), dynamically reveal `<` and `>` scroll affordance buttons on the ends of the navigation row, sizing the scrolling frame to sit between them. Connect button clicks to programmatic step scrolling (`CanvasPosition += (TAB_WIDTH + TAB_GAP)`), and call `revealTab(index)` on tab switch to keep the active item in view. -- Last Verified: 2026-08-26
+
+### L-079: Dice Roll Result Bar Proportional Full-Width Micro-Chits vs TextScaled Distortion
+- **Encountered State:** BoardView Dice Roll Summary Bar Redesign, 2026-08-26. Result summary pills exhibited severe typography distortion: short labels (`D12: 2`) scaled up to massive 22pt font while grouped dice labels (`2x D10 (SUM: 8)`) shrunk down to ~10pt. The redundant `(SUM: X)` text consumed unnecessary horizontal space, and the bar left wide awkward gaps across the bottom of the table.
+- **Root Cause Breakdown:** `BoardView.updateResultSummary` relied on `TextScaled = true` with fixed percentage widths (`itemWidth = math.min(0.18, 0.90 / totalItems)`) without a uniform text size constraint or adaptive layout. As character count varied between 6 and 16 characters, `TextScaled` scaled fonts inversely to string length, producing jarring font disparities between adjacent chips.
+- **Definitive Fix Action:** Replaced `(SUM: X)` with compact `● Shape ×Count → Value` micro-chits with glowing circular pips (6px) in each die shape's accent color (`diceColorsByShape`). Bounded typography to uniform non-scaling sizes (`GothamBold` 12px for shape tags, `GothamBlack` 13px for values). For layout, distributed chits proportionally across the full 94% tray width (`UDim2.new(1 / totalItems, -8, 1, 0)`) when `totalItems > 4`, and centered 130px fixed chits when `totalItems <= 4`. Appended an integrated `★ TOTAL: [Sum]` gold anchor chip at the right end of the breakdown. -- Last Verified: 2026-08-26
