@@ -11,6 +11,20 @@ tell what an item means, that is a defect in this document — fix it.
 
 ---
 
+## 0. READ §12 FIRST
+
+**A full-repository bug sweep on 2026-08-27 found defects more urgent than
+anything in the phases below.** Five are CRITICAL — two destroy things players
+paid Robux for, one permanently kills a progression path, one mints currency, and
+one poisons a balance beyond in-game recovery. Three whole shipped features turn
+out to be inert.
+
+**Phase 1 should not start until §12.2 is triaged.** The phases in this document
+were planned against a picture of the codebase that the sweep has since
+corrected.
+
+---
+
 ## 1. WHERE THE GAME ACTUALLY IS
 
 The UI revamp is finished. All eight menu panels are redesigned, connected to
@@ -177,8 +191,9 @@ transaction that does not deliver.
 **The fix is smaller than it sounds.** The hook already exists and is already
 guarded against bad values:
 
-- `src/Server/RollService.luau:302` reads `cfg.coinBonus` into the payout line.
-- `src/Server/RollService.luau:458` — the call site — passes a hardcoded `1`.
+- `src/Server/RollService.luau:303` reads `cfg.coinBonus` into the payout line.
+- `src/Server/RollService.luau:473` — the call site — **now feeds the real
+  multiplier** (was a hardcoded `1` at `:458` before the line numbers moved).
 
 Feed the real boost multiplier in at `:458` instead of `1`. Offline 2x hooks the
 equivalent point in `OfflineService`'s claim path.
@@ -423,7 +438,7 @@ Connect the control from 1b to the working backend. Small.
 
 The largest single item, and it needs **no new UI at all** — the panel is fully
 drawn in the Slots overlay, and one central switch
-(`setTraitControlInert`, `src/Client/V7MenuPanel.luau:3938`) currently disables
+(`setTraitControlInert`, `src/Client/V7MenuPanel.luau:4133`) currently disables
 every control in it. Un-inerting is therefore centralised in one place.
 
 **Today it is pure decoration.** There is no trait or shard concept anywhere in
@@ -441,8 +456,10 @@ put there. Expect it, and do not read the occupied slot as a mistake.
 
 **Build order:**
 
-1. **`src/Shared/TraitCatalog.luau`** — copy `ElementCatalog`'s structure exactly
-   (id union, definition table, accessors, `math.huge` cost sentinel).
+1. **`src/Shared/TraitCatalog.luau`** — copy `ElementCatalog`'s structure for the id union, definition table and
+   accessors — but **NOT its cost model, because it has none.** `ElementCatalog`
+   carries no cost, ladder, prerequisite or currency at all. The `math.huge`
+   sentinel is in `UpgradeCatalog.luau:118`; copy it from there (§12.5).
    **Must be in `src/Shared/`, not server-only.** The client reads trait names,
    rarities and costs from it directly, because sending those over the wire would
    break the no-figures-on-the-wire rule (NFR-5).
@@ -677,13 +694,253 @@ where it was corrected. The record of a mistake is worth more than a tidy list �
 
 | File | Why it matters here |
 |---|---|
-| `src/Server/RollService.luau` | The payout seam — `coinBonus` at `:302`, hardcoded `1` at `:458` |
+| `src/Server/RollService.luau` | The payout seam — `coinBonus` read at `:303`, fed from `BoostService` at `:473` (**DONE**) |
 | `src/Server/EconomyService.luau` | Currency branches; mind the Diamonds fallthrough |
 | `src/Server/PlayerProfile.luau` | Schema and the per-die reconcile loop at `:325` |
 | `src/Server/ServerBootstrap.server.luau` | Remote handlers; the shape-unlock branch to copy at `:348-379` |
 | `src/Server/ForgeService.luau` | Element read side already waiting at `:506` |
 | `src/Client/V7ForgePanel.luau` | Element chips already built; reads unlocks at `:1379` |
-| `src/Client/V7MenuPanel.luau` | REDEEM at `:3351`; trait inert-switch at `:3938` |
+| `src/Client/V7MenuPanel.luau` | REDEEM at `:3372` (**DONE**); trait inert-switch at `:4133` |
 | `src/Shared/TraitCatalog.luau` | New — model it on `ElementCatalog.luau` |
 | `tests/RemoteContract.test.luau` | Fails by design on a half-added remote |
 | `docs/antigravity_ui_redesign_prompt.md` | The prompt Antigravity runs; keep its status register current |
+
+---
+
+## 12. THE BUG REGISTER (swept 2026-08-27)
+
+Two operator reports ("risk not working dynamically", "streak has no usecase")
+turned out to be real, and a full-repository sweep behind them found a great deal
+more. **Nothing in this section is fixed unless it says so.**
+
+Method: three parallel sweeps (server + shared, client, persistence + future-work
+hazards), each finding independently re-derived rather than taken on trust, plus
+live stress testing in a running game that static reading cannot do. A second,
+deeper round was started and **deferred by the operator** — see §12.6.
+
+### 12.0 What is already fixed
+
+| Item | Fix |
+|---|---|
+| **OfflineX2 consumed without being applied** | `67c8e84` — see below. This was a regression introduced by `6cb6aa1` earlier the same day |
+
+**It is recorded here rather than quietly closed, because it is the most
+instructive defect of the session.** The original `ClaimVault` bug gave 2× away
+free to anyone who asked. My fix gated the *multiply* on the client's `doubled`
+flag but gated the *consume* on `boostMult > 1.0` — and the only shipped caller
+(`V7VaultOverlay.luau:671`) passes `false`. So the multiply never ran and the
+consume always did: **a player bought a real-Robux product, collected 1×, and the
+boost was destroyed.** Worse than the exploit it replaced, because that one gave
+value away and this one took money and gave nothing.
+
+The rule now written at the site: **apply and consume must share one condition.**
+The tests missed it because they only ever claimed with `doubled = true` — the
+one value no real caller uses. Testing the convenient case is what hid it.
+
+---
+
+### 12.1 The two operator reports — both confirmed
+
+#### R-1 — RISK reads only die 1, and understates real risk by up to 66 points
+
+`src/Client/ClientBootstrap.client.luau:219` — `local die = state.dice[1]`.
+
+**Two defects in one line.** It never looks past the first die, so forging dice
+2…N does not move the number — that is the "not dynamic" the operator saw. And it
+is *mathematically the wrong quantity*: FR-5.1 breaks the streak when **any** die
+lands Void, so the real figure is `1 − Π(1 − pᵢ)`, not `p₁`.
+
+Measured with the game's own maths at a typical 33% per-die Void chance:
+
+| Dice | HUD shows | Real risk | Understated by |
+|---|---|---|---|
+| 1 | 33.0% | 33.0% | — |
+| 3 | 33.0% | 69.9% | **36.9 pts** |
+| 7 | 33.0% | 93.9% | **60.9 pts** |
+| 12 | 33.0% | 99.2% | **66.2 pts** |
+
+At the 12-slot cap the HUD reports "33% risk" while the streak is **99.2% certain
+to break**. Players build their entire mass strategy on this number.
+
+*Fix:* compute across every die in `state.dice`. The per-die call is already
+correct — only the aggregation is missing.
+
+#### R-2 — The streak does nothing at all until a Diamond node is bought
+
+Working **as specified** (FR-5.4 makes `b` a player investment), but the
+consequence is worth stating plainly: `b = StreakStrength × 0.01`, and
+`StreakStrength` defaults to **0**, so `(1+0)^streak = 1` forever.
+
+The HUD is honest about it — it shows `--` and `LOCKED` rather than a fake
+`×1.00` — but a counter still ticks upward next to it doing nothing.
+
+| Level | `b` | Diamonds (cumulative) | ×at streak 10 | ×at streak 50 |
+|---|---|---|---|---|
+| 1 | 0.01 | 10 | 1.10 | 1.64 |
+| 5 | 0.05 | 130 | 1.63 | 11.5 |
+| 10 | 0.10 | 1,128 | 2.59 | 117 |
+| **15** | **0.15** | **8,730** | 4.05 | 1,084 |
+| 20 | 0.20 | 66,474 | 6.19 | 9,100 |
+
+Diamonds come only from ascension: $1M → 1, $1B → 31, $1T → 1,000.
+
+**Level 15 is the cliff the pre-code simulation found** — the point that splits
+players into sniper and grinder builds, and the reason the mechanic exists at
+all (L-016). It costs **8,730 Diamonds ≈ 9 trillion-dollar ascensions.** The
+design's own centrepiece is effectively unreachable.
+
+Streak is not *entirely* inert: two quests read it (`streak5` → $750,
+`streak15` → 30 Gems). But its payout effect is locked for the whole first run.
+
+*Not a code defect — a balance decision for the operator.* Options: lower the
+`StreakStrength` cost curve, raise `B_PER_LEVEL`, or grant level 1 at the first
+ascension so the mechanic switches on when the player first meets it.
+
+#### R-3 — `B_PER_LEVEL` is duplicated, client and server
+
+`src/Client/ClientBootstrap.client.luau:267` hardcodes `0.01`; the server owns
+`RollService.B_PER_LEVEL`. Retune one and the HUD silently lies about the
+multiplier. The catalog pattern (L-025 — ask the shared module, never restate the
+rule) exists precisely for this.
+
+---
+
+### 12.2 CRITICAL — real money or unrecoverable loss
+
+| # | Defect | Where | Why it matters |
+|---|---|---|---|
+| **B-1** | **Ascension deletes Gems, which are bought with Robux** | `AscensionService.luau:66` (`d.Gems = 0`) | FR-9.1 lists what ascension resets — Gems are **not** on it, and FR-9.2 protects Diamonds without mentioning Gems because Gems were never meant to reset. `GemsLarge` sells 650 Gems for Robux. Press ASCEND and they vanish, with no warning on the confirm screen FR-9.4 requires |
+| **B-2** | **`+2 Die Slots` gamepass grants 4 slots** | `PurchaseService.luau:504-509` | The mid-session grant never writes `PassSlotsGranted`, and `applyPassSlotGrant` (every join) is idempotent only through that counter. Buy in-session → +2; rejoin → +2 again, plus 4 free dice. Bypasses the ascension cap; each slot is otherwise worth up to $1.02M |
+| **B-3** | **Ascension permanently kills the Cash mass-budget path** | `AscensionService.luau:76-79` vs `:114-119` | Ascension resets four upgrades but **not `MassBudget`**, while resetting dice to a 60 budget. `MassBudget` applies only at purchase time, so a maxed player ascends and `BuyUpgrade("MassBudget")` refuses forever at max level. **The entire Cash half of FR-3.6 is dead from the first ascension onward, for the life of the account** |
+| **B-4** | **Login reward mints on repeat when writes fail** | `ProgressionService.luau:471-482` | The streak write is unchecked *and* the credit runs unconditionally. If the write is refused the reward is paid anyway and the streak does not advance — every rejoin re-credits it |
+| **B-5** | **NaN permanently poisons a balance** | `EconomyService.luau:81-87`, `PlayerProfile._reconcile` | No `_reconcile` guard repairs a non-number `Cash`/`Gems`/`Diamonds`. `current + amount` stays NaN, `next > MAX_CURRENCY` is false, and NaN is written back. Unrecoverable in-game. `BundleExpiry` is the only scalar with a NaN guard |
+
+### 12.3 HIGH — a shipped feature is inert, or a paid path can fail silently
+
+| # | Defect | Where |
+|---|---|---|
+| **H-1** | **All three leaderboards are permanently empty.** `updatePlayer`/`submitScore` have **zero** production callers. The HLD specifies writes "on player exit and on the periodic auto-save" — neither hook exists. Every player's competitive record is lost, and the BOARDS panel renders empty forever | `LeaderboardService.luau:245-254` |
+| **H-2** | **Currency fallthrough → Diamonds.** `readBalance` and `writeBalance` have no `else → refuse`; an unrecognised currency **reads and writes the Diamonds balance**. `PurchaseService:81-83` does guard this; the chokepoint module does not. Two live vectors already defeat the type checker (`DiceCatalog.UNLOCK_CURRENCY` is plain `string`; `ProgressionService:79` casts `:: any`) | `EconomyService.luau:80-97` |
+| **H-3** | **`Upgrades.Luck` is sold for ~$23.7M and read by nothing** | `UpgradeCatalog.luau:71-77` |
+| **H-4** | **Four paid handlers spend, then discard the write result and report success.** If the profile is released between the two, currency is gone and goods are not delivered. `ForgeService` does this correctly with refunds; `ServerBootstrap` does not | `ServerBootstrap.server.luau:280`, `:393`, `:467`, `:553` |
+| **H-5** | **Once-only rewards consumed by unchecked credits** — daily spin burns 24h, a promo code is spent forever, a quest is marked claimed, each without confirming payment landed | `ProgressionService.luau:71-80`, `:111-120`, `:323-346` |
+| **H-6** | **Payload ceiling is documented, tested, and never called.** `checkPayloadSize` has zero production callers, so past ~4MB the profile silently stops persisting with no warn, no kick, no telemetry. `recordPurchase` also returns `ceiling_reached_all_live` **without evicting**, so `PurchaseOrder` grows unbounded | `PlayerProfile.luau:681`, `:590-599` |
+| **H-7** | **Vault accrual is consumed before the credit lands.** Ordering is mutate → zero the window → credit → check. A failed credit loses the player's entire offline accrual, and `getMultiplier` has no finiteness guard on the stored multiplier to prevent one | `OfflineService.luau:354-375`, `BoostService.luau:58-59` |
+| **H-8** | **`_reconcile` can replace a whole dice collection with the template.** `if #data.Dice == 0 then data.Dice = deepCopy(TEMPLATE.Dice)` — and a DataStore round-trip turns a holed array into a *dictionary*, on which `#` is 0. Latent today (all writers use `table.remove`), but the repair is a total wipe | `PlayerProfile.luau:275-277` |
+| **H-9** | **Seven profile fields have no type guard in `_reconcile`.** A wrong-typed `Vault` throws inside `admitPlayer`, so the roll session, the bundle stamp and the **first snapshot** never run — the player sits in a live session with a blank UI, and the stranded-player sweep will not re-admit them | `PlayerProfile._reconcile` |
+
+### 12.4 MEDIUM and LOW
+
+**Medium:** `buyVaultHours` charges for hours the VIP floor already covers
+(`OfflineService.luau:428-434`) · `GetLeaderboard` yields inside the handler with
+a thundering-herd window, contradicting the contract's "never triggers a fetch"
+(`LeaderboardService.luau:163-221`) · `AddDieSlot` mints inventory that
+`BuyDieInstance` charges up to $4.2M for, and `_reconcile` retroactively legitimises
+it (`ServerBootstrap.server.luau:463` vs `:546`) · `PurchaseService.grantCurrency`
+bypasses `EconomyService` entirely, so no `MAX_CURRENCY` clamp and no
+`LifetimeCash` update (`:77-94`) · **boost multipliers ship to the client** in the
+generic `upgrades` map, defeating the NFR-5 protection the curated `boosts` map
+three lines earlier exists to provide (`StateSyncService.luau:134-137`) ·
+`recordPurchase` writes the receipt idempotency ledger **without an `IsActive()`
+check**, bypassing `mutate` (`PlayerProfile.luau:582-602`) · server shutdown races
+`BindToClose` against `PlayerRemoving`, so `Vault.LastSeen` may not be stamped ·
+`_reconcile` runs **before** `_migrate` and its return value is discarded, making
+any "field absent" migration dead on arrival.
+
+**Low:** `BuyDieInstance("D2")` is free and unbounded (a zero-cost debit returns
+`true`) · `SetElement` charges 50 Cash for a no-op · `Vault.AccrualId` is written
+and never read · `starterBundle` / `shapesEquipped` / `forgivenessLeft` are
+emitted with no consumer — which means **FR-12.5's entire once-only Starter Bundle
+offer is computed on every push and rendered nowhere** · roll credits, quest
+progress and streak advance all commit *before* the credit check · a corrupt die
+repairs to **D6, not the D2 starting shape**, and `_reconcile` then latches a free
+first-equip · `BadRollShield` is simultaneously a 5,000-Cash upgrade and a Robux
+gamepass, and two files state opposite intent.
+
+---
+
+### 12.5 LANDMINES IN THE PLANNED WORK
+
+These are not bugs today. They are what will break when Phases 1–3 are built, and
+they are the reason those phases need more than the roadmap's own estimates.
+
+**A new currency (Shards, Phase 2c) touches 23 sites, not one.** The Diamond
+fallthrough exists in **two** files (`EconomyService` *and*
+`PurchaseService.luau:85-93`), plus a bundle loop with no `else` at all
+(`:126-132`) that would silently skip a Shard part after the player paid. The
+sharpest fact: **because reward tables are typed `EconomyService.Currency`,
+widening the union makes the broken fallthroughs compile silently.** The type
+system will hide this, not catch it. No test pins the union — add one first.
+
+**A new per-die field (traits) must be added in six places, and three of them
+*delete* it rather than fail to create it.** Beyond the reconcile loop the
+roadmap names, `performSetShape` (`ForgeService.luau:716-733`) and `repairDie`
+(`:213-250`) both rebuild the die as a fresh **four-field literal** — so every
+shape change and every join-time repair silently strips traits. Detection is
+asymmetric and that is what makes it dangerous: the reconcile gap fails on the
+first reload and is obvious, while these two fail only *after* a shape change —
+a player forges traits, uses them a week, switches D6 → D8, and they are gone.
+`StateSyncService.luau:117-132` builds the dice payload field-by-field too, so
+traits would never reach the client and the cause would look like a UI bug.
+
+**The "six files must agree" rule for a new remote currently holds for five.**
+`SwapDice`, `UnequipDie` and `BuyDieInstance` are all fully wired and **absent
+from `API_DATA_CONTRACT.md` §1.1**. `RemoteContract.test.luau` cannot read files
+from disk, so the doc is unenforced by construction. Also: `RateLimiter` silently
+falls back to a permissive default for an unlisted remote — fine for most, wrong
+for a value-bearing random action like `RerollTraits`.
+
+**Element unlocks (Phase 2a) cannot copy what the roadmap says to copy.**
+`ElementCatalog` has **no cost table, no ladder, no prerequisite and no
+currency** — all three must be authored. The roadmap's instruction to copy
+`ElementCatalog`'s `math.huge` cost sentinel is wrong; that sentinel is in
+`UpgradeCatalog.luau:118`. And **ordering in `BuyDiamondNode` is load-bearing**:
+placed after the generic node path, an element id writes `Diamond.Fire = 1` — a
+number at the top level instead of into `Diamond.Elements` — invisibly, while the
+player is charged. That is L-027 reproduced one field over.
+
+**Daily Spin (Phase 1b/2b) is not "connect a button to a working backend".** The
+snapshot carries **no spin state at all**, so the button cannot be greyed or show
+a cooldown; and the handler discards the outcome (`ok, reason, _, _`), so a wheel
+cannot be told what it landed on. Both need server work the roadmap does not
+budget. Shipping the *amount* would violate NFR-5; an `outcomeId` would not —
+that decision is unmade.
+
+**Phase 3 deletions are safer than feared.** The L-028 sweep was run: none of the
+four files touches `Workspace`, `Lighting`, `CurrentCamera`, `Terrain` or
+`Atmosphere`, and no other module looks up their GUIs. The `ArenaView` failure
+does not repeat. The only real coupling is `tests/ClientContract.test.luau`
+(already recorded in §7).
+
+**Stale line references in this document**, found while verifying:
+`setTraitControlInert` is at `V7MenuPanel.luau:4133`, not `:3938` (195 lines off);
+`coinBonus` is at `RollService.luau:303`/`:473`, not `:302`/`:458`. Most other
+citations verified exact.
+
+**`API_DATA_CONTRACT.md` is a seventh place** a new profile or snapshot field must
+be recorded, and it is already stale in eight ways (starting shape listed as D6
+when the code uses D2, plus seven omitted fields).
+
+---
+
+### 12.6 What is NOT yet covered
+
+- **The client sweep was still running** when this was written. Its findings will
+  append here.
+- **Round 2 was started and deferred by the operator.** It was to independently
+  re-verify every claim above and dig into four areas the first pass
+  under-covered: element resolution across dice, forge mass validation under
+  legal-operation sequences, auto-roll lifecycle, and rate-limiter token maths.
+- **P-1 static analysis has never been run** on any of this. Still the standing
+  operator blocker.
+
+### 12.7 What the sweep found CLEAN
+
+Worth recording so it is not re-swept: every `RemoteGateway.register` handler was
+walked for client-influenced economic arguments and — apart from the `ClaimVault`
+flag, now fixed — **none reaches a payout, cost or grant unverified.** No
+division-by-zero or `nil` arithmetic reaches a stored value. Fan-out loops are
+`pcall`-guarded. And live stress testing held completely: 45 junk inputs across
+five remotes produced **zero throws and zero false successes**, every economic
+boundary refused correctly, and repeat vault claims correctly report
+`vault_empty`.

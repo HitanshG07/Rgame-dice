@@ -1,6 +1,11 @@
 # Handoff 8 — the panels work, and we now know what is left
 
 **Written:** 2026-08-23, end of session. **HEAD: `0f7a3c7`.**
+> **§8 WAS APPENDED 2026-08-27 and supersedes the state described below.**
+> Phase 0 shipped, and a full-repository sweep found five CRITICAL defects
+> that the rest of this document predates — two of them destroy things
+> players paid Robux for. **Read §8 before acting on §1–§7.**
+
 Tree clean. **Supersedes `docs/handoff-7.md`** — not only its open items; §4 below
 voids two of its factual claims as well.
 
@@ -238,3 +243,161 @@ real `GROUP_ID`.
 
 Constants are already at shipping values: `ASCEND_MIN_LIFETIME_CASH` at `1e6`,
 `PLAYTEST_DIE_COUNT` at `0`, `MAX_DIE_SLOTS` at 12.
+
+---
+
+## 8. SESSION 2026-08-26/27 — PHASE 0 SHIPPED, AND A SWEEP THAT CHANGED THE PICTURE
+
+Appended after the original document. HEAD at writing: `67c8e84`.
+
+### 8.1 What shipped
+
+| Commit | What |
+|---|---|
+| `aec44c0` | Spec amendment: FR-1.1 said 1–7 dice, the game ships 12. Two more rows carried the same stale 7 |
+| `a31dda3` | **Phase 0c** — REDEEM button works |
+| `6cb6aa1` | **Phase 0a** — boosts reach a number; a free-2× vault exploit closed |
+| `daac879` | **Phase 0b** — Diamond nodes do something. **Phase 0 complete** |
+| `67c8e84` | Fix for a real-money regression `6cb6aa1` introduced |
+
+**23 suites, 0 failed, 3,642 assertions** (from 3,569).
+
+### 8.2 The REDEEM button cost three audit rounds and tripped the breaker
+
+The smallest item in the roadmap — one click handler — took **three Gate 2/3
+rejections and eight defects**, and tripped the circuit breaker at
+`AI_WORKSPACE_RULES.md:24`. The operator authorised completion.
+
+**Two of the three rounds failed on evidence currency, not code quality.** That
+is the part worth carrying forward:
+
+- **I validated a reason map producer-outward, twice, and it was wrong twice.**
+  Round 1 missed `profile_released`; round 2 missed the gateway's own dispatch
+  wrapper. Walking outward from functions you already know about structurally
+  cannot see a producer you are not thinking of. It is now built
+  **consumer-inward** — enumerate everything that can arrive on the wire, then
+  account for each — and `TEST_PLAN.md` P-3 enforces it from disk.
+- **I captured gate artifacts mid-edit and reasoned forward arithmetically.** An
+  artifact certifies the code that existed when it was captured and nothing
+  later. The 3,574 figure in round 3 was derived (46+5), never observed.
+- **A test whose assertions are its own literals cannot fail.** Eleven such
+  assertions inflated the count while covering nothing. Deleting them moved the
+  total *down*, which was the correct direction.
+- **Sizing a child to fit its own contents is half a layout check.** The card fix
+  made the card fit its contents and pushed it 9px outside the panel.
+
+### 8.3 A free-2× vault exploit, and then a worse regression
+
+`ClaimVault` took a boolean from the client, validated only that it *was* a
+boolean, and doubled the payout. **Anyone sending `true` took 2× their vault
+cash, free, every claim** — and what was being given away is exactly what
+`OfflineX2` sells for Robux.
+
+**My fix for it introduced something worse.** It gated the multiply on the
+client's flag but the consume on the boost, and the only shipped caller passes
+`false`. So a player bought the product, collected 1×, and **the boost was
+destroyed**. The exploit gave value away; the regression took money and gave
+nothing. Caught by the sweep the same day, fixed at `67c8e84`.
+
+The rule now written at the site: **apply and consume must share one condition.**
+The tests missed it because they only claimed with `doubled = true` — the one
+value no real caller uses.
+
+`OfflineX2` also had no `durationSeconds`, so it fell back to 900 seconds: buy
+"double your next offline collection", go offline eight hours, return to a boost
+that expired fifteen minutes after purchase. **It could not have paid out once.**
+
+### 8.4 THE SWEEP — the picture the roadmap was planned against was wrong
+
+Two operator reports ("risk not working dynamically", "streak has no usecase")
+were both correct, and the sweep behind them found far more. **Full register with
+file:line and failure scenarios is `docs/ROADMAP.md` §12.** Headlines:
+
+**Five CRITICAL:**
+
+1. **Ascension deletes Gems**, which are sold for Robux. Not on FR-9.1's reset
+   list, not mentioned on the confirm screen FR-9.4 requires.
+2. **The `+2 Die Slots` gamepass grants 4** — the mid-session path never writes
+   the idempotency counter the join-time grant relies on.
+3. **Ascension permanently kills the Cash mass-budget path.** `MassBudget` is not
+   reset while the dice are, so after one ascension the upgrade refuses forever
+   at max level. The entire Cash half of FR-3.6 is dead for the life of the
+   account.
+4. **The login reward mints on repeat** when profile writes fail — the credit runs
+   unconditionally after an unchecked write.
+5. **NaN permanently poisons a balance.** No reconcile guard repairs a
+   non-number currency field, and NaN passes every downstream check.
+
+**Three shipped features are inert:**
+
+- **All three leaderboards are permanently empty.** `updatePlayer` has zero
+  production callers. The BOARDS panel — documented as done and live — renders
+  empty to every player, forever, and every competitive record is lost.
+- **`Upgrades.Luck`** is sold for ~$23.7M and read by nothing.
+- **The Starter Bundle** is computed on every snapshot and rendered nowhere.
+
+**The two operator reports, quantified:**
+
+- **RISK** reads `state.dice[1]` only — so forging any other die never moves it,
+  *and* it is the wrong quantity. The streak breaks if **any** die voids, so at
+  the 12-slot cap the HUD says "33%" while the real risk is **99.2%**.
+- **The streak** is inert until `StreakStrength` is bought, and the design's own
+  cliff (`b ≈ 0.15`, the point the pre-code simulation was built around) costs
+  **8,730 Diamonds ≈ 9 trillion-dollar ascensions.** Not a code defect — a
+  balance decision.
+
+**Landmines for the planned phases**, which change the estimates:
+
+- A **new currency** touches **23 sites**, and because reward tables are typed
+  `EconomyService.Currency`, widening the union makes the broken Diamond
+  fallthroughs **compile silently**. The type system will hide this.
+- A **new per-die field** must be added in six places, and **three of them delete
+  it** — `performSetShape` and `repairDie` rebuild the die as a four-field
+  literal, so traits would survive until a player's first shape change.
+- **Element unlocks cannot copy what the roadmap says to copy** —
+  `ElementCatalog` has no cost, ladder, prerequisite or currency at all.
+- **Daily Spin needs server work** the roadmap does not budget: the snapshot
+  carries no spin state and the handler discards the outcome.
+
+### 8.5 Corrections to this document's own earlier sections
+
+- **§1 said 3,565 assertions.** The live figure was **3,569** and the scoreboard
+  independently said so. Corrected. This matters because the assertion count is
+  the project's staleness canary — a baseline four low disarms it.
+- **§3 item 10 said the dead files are "required by nothing."** False:
+  `tests/ClientContract.test.luau` requires three of the four in two places, and
+  deleting them without editing it turns the suite red.
+
+### 8.6 What is still open
+
+**Everything in `docs/ROADMAP.md` §12**, none of which is fixed except the
+`67c8e84` regression.
+
+**Not yet swept:** the client sweep was still running when this was written, and
+a deeper round 2 was started and **deferred by the operator**. Round 2 was to
+independently re-verify every claim and dig into element resolution across dice,
+forge mass validation, auto-roll lifecycle, and rate-limiter token maths.
+
+**Still blocked on the operator, unchanged:**
+
+- **P-1 static analysis** — never produced for any change this session. No Luau
+  analyzer on PATH, pane not script-readable. `TEST_PLAN.md:45` makes a missing
+  P-1 a rejected gate, so **Gate 2 is not clean on any Phase 0 item** — recorded
+  on the scoreboard rather than waived.
+- The `Vendor/ProfileStore.luau` warning policy, 9 audio IDs, a real `GROUP_ID`.
+
+### 8.7 Notes for whoever is next
+
+- **`execute_luau` holds its own module cache (L-022).** A Server-context script
+  cannot see the live player's profile. Several things this session could only be
+  proven by unit test plus a source check of the running server, not by watching
+  the game — and that limit was stated rather than papered over.
+- **Rojo detached silently for the whole first half of the session** and
+  reconnected later. Every file was hashed on both sides before every run. It
+  also **cannot inject a *new* file while Play is running** — the first run of a
+  new suite reported nothing at all, because an absent suite is silent rather
+  than failing.
+- **A green suite is not proof.** Two of this session's worst defects — the
+  `doubled=false` regression and the tautological test — passed a green suite.
+- **When a number and a screenshot disagree, the screenshot wins.** Still true;
+  the layout overflow was found by measuring the live game, not by arithmetic.
