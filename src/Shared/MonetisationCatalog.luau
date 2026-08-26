@@ -196,17 +196,32 @@ MonetisationCatalog.Products = {
 	-- ---------------------------------------------------------------------
 	-- The remaining FR-12.2 products. Created by the operator 2026-08-09.
 	--
-	-- RESOLVED BUT NOT YET GRANTABLE. Unlike the passes above, these three need
-	-- server systems that do not exist: timed boosts and an offline-earnings
-	-- accrual. `applyGrant` refuses them with `not_implemented_boosts`, which
-	-- answers NotProcessedYet -- so a purchase is never consumed and the
-	-- platform keeps retrying until the feature ships. See PurchaseService.
+	-- GRANTABLE AND WIRED as of 2026-08-27. This block used to say these needed
+	-- "server systems that do not exist" and were refused with
+	-- `not_implemented_boosts`. Both halves went stale: `PurchaseService` grants
+	-- them through `BoostService.addBoost`, and the reason string no longer
+	-- exists anywhere in the codebase.
+	--
+	-- The dangerous stretch was in between: the purchase granted and stored an
+	-- expiry, the HUD drew a countdown from it, and NOTHING READ THE MULTIPLIER
+	-- -- so these took real Robux and changed nothing at all. Now wired at
+	-- `RollService` (payout line) and `OfflineService.claimVault`.
 	-- ---------------------------------------------------------------------
 	LuckBoost = {
 		key = "LuckBoost",
 		assetId = 3655545836,
 		name = "2x Luck Boost",
-		blurb = "Heavy faces bite less, for a while.",
+		-- BLURB CORRECTED 2026-08-27. It read "Heavy faces bite less, for a
+		-- while", which describes changing landing ODDS. This boost cannot work
+		-- that way: biasing the sampling would break FR-3.4, because the forge
+		-- preview must show exactly the maths that pays you, and a paying
+		-- player whose odds diverged from the published `ForgeMath` would be
+		-- reading a preview that lies. It is a payout multiplier, and this now
+		-- says so -- a real-money product must not be sold on a false claim.
+		--
+		-- The name on the Roblox purchase prompt comes from the product page,
+		-- not from here. Operator advised to review it there.
+		blurb = "Doubles every roll payout while it lasts.",
 		kind = "Boost" :: GrantKind,
 		amount = 2,
 		durationSeconds = 15 * 60,
@@ -218,6 +233,14 @@ MonetisationCatalog.Products = {
 		blurb = "Double your next offline collection.",
 		kind = "Boost" :: GrantKind,
 		amount = 2,
+		-- ONE-SHOT, NOT A TIMER -- spent by the claim, not by the clock.
+		-- This field was ABSENT, so `PurchaseService` fell back to its 900-second
+		-- default: a player bought "double your next offline collection", went
+		-- offline for eight hours, and came back to a boost that had expired
+		-- fifteen minutes after purchase. It could not have delivered once.
+		-- Seven days is the window in which the claim must happen;
+		-- `BoostService.consumeBoost` is what actually ends it.
+		durationSeconds = 7 * 24 * 60 * 60,
 	},
 	TimeSkip24 = {
 		key = "TimeSkip24",

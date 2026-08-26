@@ -28,6 +28,7 @@ local Remotes = require(Shared:WaitForChild("Remotes"))
 
 local PlayerProfile = require(script.Parent:WaitForChild("PlayerProfile"))
 local PurchaseService = require(script.Parent:WaitForChild("PurchaseService"))
+local BoostService = require(script.Parent:WaitForChild("BoostService"))
 local EconomyService = require(script.Parent:WaitForChild("EconomyService"))
 
 local RollService = {}
@@ -455,7 +456,21 @@ function RollService.performRoll(player: Player): (boolean, string?)
 		streakStrengthLevel = data.Diamond.StreakStrength,
 		hasShield = hasShield,
 		shieldReady = shieldReady,
-		coinBonus = 1,
+		-- WAS HARDCODED `1`, which is why 2x Luck Boost took real Robux and
+		-- changed nothing. `BoostService` was built, correct, and called by
+		-- NOTHING: the purchase granted, the profile stored an expiry, the HUD
+		-- drew a countdown, and the payout line never asked. The seam was
+		-- already here and already guarded (finite, > 0, checked at :302).
+		--
+		-- It is a PAYOUT multiplier, not a luck one. Biasing the sampling would
+		-- break FR-3.4: the forge preview must show exactly the maths that pays
+		-- you, and a paying player whose odds silently diverged from the
+		-- published `ForgeMath` would make the preview a lie. Operator-approved
+		-- 2026-08-27; the shop blurb was corrected to match.
+		--
+		-- Server-clocked and read fresh every throw, so it expires on the
+		-- server's clock (T-20) and a client cannot extend it.
+		coinBonus = BoostService.getMultiplier(player, "LuckBoost"),
 		-- Consumes the Freeze set by the previous throw (SRS FR-4.4).
 		frozenDie = session.frozenDie,
 	})

@@ -1,0 +1,86 @@
+Phase 0a (boost multipliers + ClaimVault exploit) -- verification.
+Captured 2026-08-27 AFTER the last edit to every file it certifies.
+
+SYNC PROOF. The Rojo plugin RECONNECTED this session (it had been detached for
+0c), so files reached Studio automatically -- but they were hashed on both sides
+anyway rather than assumed, because "Rojo is running" is not the same claim as
+"this file arrived" (L-019/L-020):
+  src/Server/RollService.luau         len=24902  hash=796292668   disk == Studio
+  src/Server/OfflineService.luau      len=19533  hash=131843527   disk == Studio
+  src/Server/BoostService.luau        len=3525   hash=63344658    disk == Studio
+  src/Shared/MonetisationCatalog.luau len=12471  hash=160693252   disk == Studio
+  tests/BoostEffects.test.luau        len=9176   hash=930037445   disk == Studio
+
+=== DICE FORGE TEST SUITE ===
+[PASS] UT-14 Balance (4 assertions)
+[PASS] BoostEffects.test (26 assertions)          <-- NEW
+[PASS] UT-13 ClientContract (51 assertions)
+[PASS] UT-5 Elements (32 assertions)
+[PASS] UT-12 ForgeService (369 assertions)
+[PASS] UT-1 ForgeMath (43 assertions)
+[PASS] UT-2 ForgeValidation (52 assertions)
+[PASS] IT-5 Integration_Ascension (19 assertions)
+[PASS] IT-4 Integration_Authority (4 assertions)
+[PASS] IT-2 Integration_Forge (15 assertions)
+[PASS] IT-1 Integration_RollLoop (9 assertions)
+[PASS] IT-3 Integration_SessionLock (11 assertions)
+[PASS] Leaderboard.test (8 assertions)
+[PASS] PassEffects.test (10 assertions)
+[PASS] UT-4 Payout (77 assertions)
+[PASS] UT-8 ProfileLifecycle (38 assertions)
+[PASS] UT-7 ProfileSchema (72 assertions)
+[PASS] UT-6 RateLimit (40 assertions)
+[PASS] UT-15 RemoteContract (16 assertions)
+[PASS] UT-3 Sampling (2627 assertions)
+[PASS] UT-16 Settings (62 assertions)
+[PASS] Vault.test (15 assertions)
+total assertions: 3600
+=== SUITE COMPLETE: 22 passed, 0 failed ===
+
+ASSERTION LINEAGE: 3574 -> 3600, all +26 from BoostEffects.test. 22 suites, up
+from 21.
+
+THE NEW SUITE FAILED ON ITS FIRST RUN, recorded because a test that has never
+failed has not been shown to work:
+  [FAIL] BoostEffects.test: run() errored: the vault must have accrued something
+The cause was in the TEST, not the code (L-017): `beginSession` SNAPSHOTS the
+elapsed window from `Vault.LastSeen` at the moment it is called and freezes it
+for the session, so seeding `LastSeen` afterwards changed nothing. Reordered to
+seed first, then open the session. The assertion was not weakened to make it
+pass.
+
+WHAT THE 26 ASSERTIONS PIN, all driven through the REAL consumer rather than
+through BoostService in isolation -- the module was never the broken part, the
+wiring was:
+  * an absent boost reads exactly 1.0, not nil and not 0
+  * a granted 2x boost reads 2.0        <-- the read no code performed
+  * granting one kind does not activate another (shared key prefix)
+  * an expired boost reads 1.0, enforced on read, server-clocked (T-20)
+  * a stored NEGATIVE multiplier clamps to 1.0 and cannot invert a payout
+  * consumeBoost reports false with nothing to spend, true when it spends,
+    and cannot spend the same boost twice
+  * claimVault(player, true) with NO boost pays EXACTLY 1x    <-- the exploit
+  * claimVault(player, true) WITH the boost pays exactly 2x   <-- the product
+  * the boost is consumed by the claim that used it
+
+LIVE VERIFICATION IN THE RUNNING SERVER (all six wiring markers read back from
+the running datamodel, not from disk):
+  requires BoostService      true
+  coinBonus wired            true
+  hardcoded `coinBonus = 1`  GONE
+  vault uses boostMult       true
+  vault free `* 2`           GONE
+  consume after credit       true
+Rolls still pay with no regression: HUD CASH $664.11K -> $694.76K over 5 rolls.
+Console clean, no errors or warnings.
+
+NOT OBSERVED LIVE: the 2x roll payout could not be measured end to end from
+here. `execute_luau` holds its own module cache (L-022), so a Server-context
+script cannot see the live player profile to grant a boost and compare totals.
+The roll path is therefore proven by (a) the unit test showing getMultiplier
+returns 2.0 and (b) the running server containing the wiring, NOT by observing a
+doubled payout in a live session. Stated plainly rather than implied.
+The VAULT path IS proven end to end -- the test drives the real `claimVault`.
+
+*** STILL NOT VERIFIED: P-1 STATIC ANALYSIS. *** Unchanged standing operator
+blocker: no Luau analyzer on PATH, pane not script-readable.

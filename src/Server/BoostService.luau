@@ -63,4 +63,29 @@ function BoostService.isBoostActive(player: Player, kind: string): boolean
 	return BoostService.getMultiplier(player, kind) > 1.0
 end
 
+-- SPENDS a boost, for the ones that are one-shot rather than timed.
+--
+-- `OfflineX2` is sold as "double your NEXT offline collection". A pure timer
+-- cannot express that: the player buys it, goes offline for eight hours, and
+-- comes back to a boost that expired while they were away -- the product would
+-- take real Robux and never once deliver. So the window only has to be long
+-- enough to reach the next collection, and the CLAIM is what ends it.
+--
+-- Returns whether a boost was actually spent, so a caller can tell "consumed"
+-- from "there was nothing to consume" rather than assuming.
+--
+-- THE CALLER MUST CONSUME ONLY AFTER THE PAYOUT IS SAFELY CREDITED. Consuming
+-- first and crediting second would burn the boost on a failed credit, which is
+-- the same order-of-operations rule `buyVaultHours` states for Gems.
+function BoostService.consumeBoost(player: Player, kind: string): boolean
+	if BoostService.getMultiplier(player, kind) <= 1.0 then
+		return false
+	end
+	local ok = PlayerProfile.mutate(player, function(d)
+		d.Upgrades["Boost_" .. kind .. "_Expiry"] = 0
+		d.Upgrades["Boost_" .. kind .. "_Mult"] = 100
+	end)
+	return ok
+end
+
 return BoostService

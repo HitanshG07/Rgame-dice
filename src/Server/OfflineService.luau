@@ -10,6 +10,7 @@ local ForgeMath = require(Shared:WaitForChild("ForgeMath"))
 local VaultCatalog = require(Shared:WaitForChild("VaultCatalog"))
 
 local PlayerProfile = require(script.Parent:WaitForChild("PlayerProfile"))
+local BoostService = require(script.Parent:WaitForChild("BoostService"))
 local EconomyService = require(script.Parent:WaitForChild("EconomyService"))
 
 local OfflineService = {}
@@ -328,9 +329,26 @@ function OfflineService.claimVault(player: Player, doubled: boolean): (boolean, 
 		return false, "vault_empty", 0
 	end
 
+	-- THE CLIENT'S `doubled` FLAG IS NO LONGER TRUSTED, AND THIS WAS A LIVE
+	-- EXPLOIT. It arrived from the client, was checked only for being a BOOLEAN,
+	-- and then doubled the payout -- so anyone sending `ClaimVault(true)` took
+	-- 2x their vault cash, free, every time. That is the client determining an
+	-- economic outcome, the exact class the whole authority model exists to
+	-- prevent (NFR-5: client sends INTENT, server sends TRUTH).
+	--
+	-- What made it worse: the free 2x was precisely what `OfflineX2` SELLS for
+	-- real Robux. The paid product did nothing while the same benefit was
+	-- available to anyone who asked for it.
+	--
+	-- Both are one bug and get one fix. The flag is now read as a REQUEST -- "I
+	-- would like my offline boost applied" -- and the server decides what it is
+	-- worth by asking `BoostService`, which reads a server-clocked expiry the
+	-- client cannot influence (T-20). A player without the boost gets 1.0 no
+	-- matter what they send.
+	local boostMult = BoostService.getMultiplier(player, "OfflineX2")
 	local payout = status.unclaimedEarnings
 	if doubled then
-		payout = payout * 2
+		payout = payout * boostMult
 	end
 
 	-- ATOMIC MUTATION: consume vault accrual and update LastSeen synchronously.
@@ -354,6 +372,14 @@ function OfflineService.claimVault(player: Player, doubled: boolean): (boolean, 
 	local credited, creditReason = EconomyService.credit(player, "Cash", payout, "vault_claim")
 	if not credited then
 		return false, creditReason or "credit_failed", 0
+	end
+
+	-- SPENT ONLY NOW, after the money is safely in. Consuming before the credit
+	-- would burn a real-money purchase on a failed payout -- the same ordering
+	-- rule `buyVaultHours` states for Gems, applied to a boost instead.
+	-- Guarded on `boostMult` so a claim without a boost cannot spend one.
+	if boostMult > 1.0 then
+		BoostService.consumeBoost(player, "OfflineX2")
 	end
 
 	return true, nil, payout
