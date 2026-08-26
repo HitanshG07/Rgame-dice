@@ -1,9 +1,26 @@
 # PROJECT HANDOFF — Dice Forge Incremental
 
-**For an AI assistant continuing this project with zero prior context.**
-Written 2026-08-06. Repo: `C:\RGame` → https://github.com/HitanshG07/Rgame-dice (**private**). HEAD: `176d0e3`.
+**The descriptive project document. For an operator or an AI assistant picking
+this up with zero prior context.**
 
-Read top to bottom before touching anything. **Section 14 tells you exactly what to do first.**
+Written 2026-08-06, **substantially rewritten 2026-08-26** after 129 commits had
+made the status sections false. Repo: `C:\RGame` →
+https://github.com/HitanshG07/Rgame-dice (**private**). HEAD: `0f7a3c7`.
+
+Read top to bottom before touching anything. **Section 14 tells you exactly what
+to do first.**
+
+**How this document relates to the others.** This is the wide view — what the
+game is, how it is built, and where it stands. Four companions go deeper:
+
+| Document | Answers |
+|---|---|
+| `docs/blueprint/` (6 files) | *What must be true.* The binding spec, written before the code |
+| `docs/ROADMAP.md` | *What happens next.* The plan to launch, in four phases |
+| `docs/handoff-8.md` | *What happened last.* The most recent session record |
+| `.brain/LEDGER.md` | *What has already gone wrong.* L-001…L-079, with root causes |
+
+When this document and `docs/blueprint/` disagree, **the blueprint wins** — see §5.
 
 ---
 
@@ -54,12 +71,13 @@ A feature that cannot be expressed that way is **rejected at design time**, not 
 ```
 C:\RGame\
 ├── default.project.json          Rojo mapping (below)
-├── HANDOFF.md                    this file
+├── HANDOFF.md                    this file — the descriptive project document
 ├── AI_WORKSPACE_RULES.md         governance bootloader — read before modifying files
 ├── CLAUDE.md / AGENTS.md / GEMINI.md   per-tool shims pointing at the bootloader
 │
 ├── .brain/                       ← PROJECT MEMORY. See §13.
-│   ├── LEDGER.md                 L-001..L-020. READ THIS FIRST.
+│   ├── BOOT_DIGEST.md            read FIRST every session
+│   ├── LEDGER.md                 L-001..L-079. The accumulated lessons
 │   ├── SCOREBOARD.md             every pipeline run, its rejections and defects
 │   ├── PIPELINE.md               the 7 quality gates
 │   ├── PERSONAS.md               the 5 role personas
@@ -67,28 +85,31 @@ C:\RGame\
 │   ├── skills/roblox_luau.md     Roblox rules; §6 = Luau syntax traps
 │   └── modes/                    behavioural modes (brainstormer, honest_advisor, …)
 │
-├── docs/blueprint/               ← THE SPEC. Binding. See §5.
-│   ├── THREAT_MODEL.md           T-1..T-29 + T-30, mitigations, risks R-1..R-8
-│   ├── SRS.md                    FR-1..FR-14, NFR-1..NFR-8
-│   ├── HLD.md                    architecture, authority model, module list
-│   ├── API_DATA_CONTRACT.md      every remote + the ProfileStore profile schema
-│   ├── TEST_PLAN.md              UT-1..UT-11, IT-1..IT-5, procedures P-1..P-4
-│   └── DEVOPS_RECORD.md          10 ops decisions + dependency register
+├── docs/
+│   ├── blueprint/                ← THE SPEC. Binding. See §5.
+│   │   ├── THREAT_MODEL.md       T-1..T-30, mitigations, risks R-1..R-8
+│   │   ├── SRS.md                FR-1..FR-14, NFR-1..NFR-8
+│   │   ├── HLD.md                architecture, authority model, module list
+│   │   ├── API_DATA_CONTRACT.md  every remote + the profile schema
+│   │   ├── TEST_PLAN.md          UT-1..UT-11, IT-1..IT-5, procedures P-1..P-4
+│   │   └── DEVOPS_RECORD.md      ops decisions + dependency register
+│   ├── ROADMAP.md                ← THE PLAN TO LAUNCH. Phases 0–3
+│   ├── handoff-1..8.md           session records, newest = most authoritative
+│   ├── GOVERNANCE_AUDIT.md       governance self-audit
+│   └── antigravity_ui_redesign_prompt.md   the external UI-agent brief
 │
 ├── deliveries/                   audit trail
 │   ├── plans/                    Gate 0 plan artifacts
 │   ├── audit-briefs/             enumerated Gate 3-4 briefs
 │   └── evidence/                 verbatim test output + audit verdicts
 │
-├── src/
-│   ├── Shared/     ForgeMath.luau  Remotes.luau  ElementCatalog.luau
-│   ├── Server/     PlayerProfile.luau  RemoteGateway.luau  EconomyService.luau
-│   │               RollService.luau
-│   │   └── Vendor/ ProfileStore.luau   (2242 lines, pinned, DO NOT EDIT)
-│   └── Client/     EMPTY — nothing built yet
+├── src/                          ~28,900 lines of our Luau + 2,242 vendored
+│   ├── Shared/   (3,518)  pure data + pure functions, safe to replicate
+│   ├── Server/   (5,936)  sole authority
+│   │   └── Vendor/ProfileStore.luau   (2,242 lines, pinned, DO NOT EDIT)
+│   └── Client/   (19,407) presentation only — now the largest area by far
 │
-├── tests/          RunAll.server.luau  ForgeMath.test  ForgeValidation.test
-│                   Sampling.test  Payout.test
+├── tests/        (5,102)  22 suites + RunAll.server.luau
 └── tools/rojo.exe
 ```
 
@@ -99,6 +120,11 @@ src/Server  → ServerScriptService.Server
 src/Client  → StarterPlayer.StarterPlayerScripts.Client
 tests       → ServerScriptService.Tests
 ```
+
+**Note the shape of it.** The client is roughly three times the server. That is
+normal for this design and not a smell: the server holds no rigid-body state and
+does almost nothing but sample, validate and credit, while the client carries the
+entire 3D arena, the dice renderer, and seven UI panels.
 
 ---
 
@@ -114,7 +140,9 @@ Each document opens with `CONSUMED-BY: Gate X / Matrix Y` naming the gate that r
 
 ## 6. FILES, AND WHAT EACH DOES
 
-**2,514 lines of our Luau** across 7 modules and 5 test files, plus 2,242 vendored.
+**~28,900 lines of our Luau** across three areas and 22 test suites, plus 2,242
+vendored. The entries below go deepest on the modules that carry the most risk;
+the rest are tabulated after them.
 
 ### `src/Shared/ForgeMath.luau` (251) — the mathematical heart
 Pure. No state, no side effects, no authority. **Shared by client and server on purpose** so the preview a player optimises against is exactly the maths that pays them; safe because pure — a tampered client can only lie to its own preview.
@@ -164,10 +192,69 @@ Constants: `STREAK_CAP = 50` · `B_PER_LEVEL = 0.01` · `MAX_STREAK_MULTIPLIER =
 **Payout:** `(baseTotal + additive) × multiplicativeFactor × streakMultiplier × coinBonus`
 **Cash is credited BEFORE `RollResult` fires**, so a dropped event never costs the player money (FR-2.6).
 
-### `tests/`
-`RunAll.server.luau` is a **Script**, not a ModuleScript. A module that fails to `require` is reported as a **FAILURE, never skipped**; zero discovered suites is also a failure. Terminates with `=== SUITE COMPLETE: X passed, Y failed ===`.
+### The rest of `src/Server/` — built since the original draft
 
-Each suite returns `{ name, run = function(): (boolean, string?, number) }` — passed, failureMessage, assertionCount.
+| Module | Lines | What it does |
+|---|---|---|
+| `ServerBootstrap.server.luau` | 950 | Constructs services in dependency order, wires player lifecycle, starts the tick, registers `BindToClose`. Also holds the **shape-unlock branch at `:348-379`** — the working template for the element-unlock work in the roadmap |
+| `ForgeService.luau` | 764 | Validates and applies mass redistribution as a **closed system**; applies element assignment and shape changes. Reads `diamondTree.Elements` at `:506` to gate which elements a player may assign — **that field is never written**, which is roadmap item 2 |
+| `PurchaseService.luau` | 519 | The single `ProcessReceipt` assignment (T-17) and all gamepass entitlement checks |
+| `ProgressionService.luau` | 485 | Quests, login streak, playtime chests, daily spin, codes, group rewards. **Daily spin and codes both work end to end** — they are missing only a button |
+| `OfflineService.luau` | 457 | Rolling income-rate average, vault accrual, atomic claim. Rate floored at a 60s window (T-30) |
+| `StateSyncService.luau` | 379 | Builds the periodic snapshot every client panel renders from. **Nothing may be added here carrying a price, balance or reward** (NFR-5) |
+| `LeaderboardService.luau` | 256 | Log-scaled publication and cached retrieval |
+| `AscensionService.luau` | 129 | Prestige reset and Diamond-tree purchases |
+| `RateLimiter.luau` | 113 | Per-player per-remote token buckets |
+| `BoostService.luau` | 66 | Owns boost timers. **`getMultiplier` is never called by anything** — roadmap item 4, and the one that involves real money |
+
+### The rest of `src/Shared/`
+
+`DiceMeshBuilder` (1,209) builds the dice geometry · `DiceCatalog` (490) per-shape
+face counts, mass floors, budget caps, and the shipping constants
+(`MAX_DIE_SLOTS = 12`, `ASCEND_MIN_LIFETIME_CASH = 1e6`) · `MonetisationCatalog`
+(312) the fourteen purchasable entries — **carries no price on purpose**, because
+Roblox owns pricing and a client-side figure would be contradicted by the
+platform's own prompt · `GearMeshBuilder` · `VaultCatalog` · `SettingsCatalog` ·
+`UpgradeCatalog` · `Format` (suffix ladder, precision-safe to 1e300).
+
+### `src/Client/` — the live UI is the `V7` set
+
+| Module | Lines | Status |
+|---|---|---|
+| `V7MenuPanel.luau` | 5,804 | **The big one.** Shop, ascend, vault, boards, slots, shapes, quests, settings. All seven refreshers fan out from `applyState` |
+| `DiceRenderer.luau` | 1,501 | Tumble-to-target animation and instance pooling |
+| `V7ForgePanel.luau` | 1,454 | The core screen — live preview via `ForgeMath`, one element chip per face |
+| `UITheme.luau` | 1,401 | Shared theme, the `UIScale` typography system, and the overlay factory |
+| `BoardView.luau` | 1,215 | Leaderboards |
+| `V7HUD.luau` | 1,113 | Roll button, currency readouts, streak |
+| `V7VaultOverlay.luau` | 806 | Offline earnings |
+| `UIMockPreview.luau` | 721 | The external UI agent's scratch canvas. **Overwritten wholesale on each agent run** — never put anything load-bearing here |
+| `AudioDirector.luau` | 423 | 9 `DUMMY_ID_*` placeholders; fails closed, Settings shows Music/SFX as LOCKED |
+| `NetClient.luau` | 314 | The sole outbound wrapper |
+| `ClientBootstrap.client.luau` | 375 | Loads and wires the V7 panels |
+| `FeedbackFX.luau` | 618 | Payout-scaled feedback |
+| **`ForgePanel` / `MenuPanel` / `HUD` / `CurrencyModels`** | **3,662** | **DEAD.** Superseded by the V7 set, required by nothing. Deletion is roadmap item 10 |
+
+**`applyState` is the single most important function in the client.** It fans out
+one state snapshot to all seven refreshers, each wrapped in its own `pcall` with a
+warn on a missing refresher. That structure is not decoration — an unguarded throw
+in the first refresher escapes into the StateSync handler and takes the other six
+panels *and* the forge with it. That is **L-057**, and it has already killed seven
+panels once.
+
+### `tests/` — 22 suites
+
+`RunAll.server.luau` is a **Script**, not a ModuleScript. A module that fails to
+`require` is reported as a **FAILURE, never skipped**; zero discovered suites is
+also a failure. Terminates with `=== SUITE COMPLETE: X passed, Y failed ===`.
+
+Each suite returns `{ name, run = function(): (boolean, string?, number) }` —
+passed, failureMessage, assertionCount.
+
+`RemoteContract.test.luau` deserves a specific mention: **six files must agree for
+a new remote to exist**, and that suite fails loudly if any one is missed. When it
+fails during remote work, it is doing its job — it is not an obstacle to route
+around.
 
 ---
 
@@ -206,34 +293,120 @@ Scripts are **not** in the repo — run in a scratch directory, now gone. To ret
 
 ---
 
-## 9. CURRENT IMPLEMENTATION STATUS
+## 9. THE GAME AS A PLAYER MEETS IT
+
+The spec describes requirements. This section describes the experience, because
+no other document does.
+
+### The loop, in one minute
+
+You spawn over a low-poly pit. You press **ROLL**. Dice tumble in, land, and a
+number floats up. That number is Cash. You press ROLL again.
+
+Within a few minutes you have enough Cash to open the **Forge** — and this is the
+moment the game either lands or does not. The forge shows your die as a ring of
+faces, each with a mass. You drag mass from one face onto another. Every number on
+the screen moves as you drag: the face's payout, its landing chance, your expected
+value per roll, and your Void chance.
+
+**You never gain mass. You only move it.** Making face 6 pay four times more makes
+it land less often, and drains the faces you took from. There is no "buy the
+upgrade" button in the forge — only a trade.
+
+### What opens up, roughly in order
+
+| Stage | What appears | The decision it introduces |
+|---|---|---|
+| First minutes | Roll, Cash, the Forge | Where does mass go? |
+| Early | **Void faces** and the **streak** | A face at the floor pays nothing and lands *most* often. Concentrating mass buys power with streak risk |
+| Early-mid | **More dice** (up to 12 slots) | Dice interact. A second die is not 2× — it is a partner |
+| Mid | **Elements** — Fire, Gold, Freeze, Multiplier | Gold pays **only if another die also lands Gold**. Now your dice have *roles* |
+| Mid | **Shapes** — D4…D20 | Not a ladder. D4 is a volatile sniper (~33% Void), D20 a steady grinder (~5%) |
+| Mid-late | **Ascension** — reset for Diamonds | Give up Cash and dice to buy permanent tree nodes |
+| Late | **Streak Strength** in the Diamond tree | The deepest lever in the game — see below |
+| Throughout | Vault (offline earnings), quests, boards, shop | The idle-game scaffolding |
+
+### Why Streak Strength is the point
+
+The streak multiplier is `(1 + b)^streak`, and **`b` is bought by the player** in
+the Diamond tree rather than being a global constant.
+
+Simulation before any code was written found a **cliff at `b ≈ 0.15`**. Below it,
+few faces win: concentrate mass, accept Voids, take the big hits. Above it, many
+faces win: spread mass, never break the streak, grind.
+
+So two players with the same dice and the same Cash, who invested differently in
+one tree node, have **genuinely different optimal builds**. That is the whole
+design bet: the game produces *decisions* rather than purchases, and decisions
+retain players where purchases do not.
+
+### The honest caveat, recorded openly
+
+The odds genuinely follow the mass you forged — `P(face i) ∝ (M − mᵢ)` — so your
+mental model is entirely correct. But it is **arithmetic, not collision solving**.
+The tumble you watch is animation resolving to a face the server already chose.
+This is recorded as accepted risk **R-1** rather than concealed, and §2 explains
+why it cannot be otherwise.
+
+---
+
+## 9b. CURRENT IMPLEMENTATION STATUS
+
+**Everything above is built and playable.** That is the headline change from the
+original draft of this document, which said the client was empty.
 
 ### Verified working — executed live in Studio, output captured
-```
-[PASS] UT-1 ForgeMath        38 assertions
-[PASS] UT-2 ForgeValidation  52
-[PASS] UT-4 Payout           62
-[PASS] UT-3 Sampling       2627
-=== SUITE COMPLETE: 4 passed, 0 failed ===   total 2779
-```
-Evidence: `deliveries/evidence/2026-08-06-blocks12-postaudit-suite.txt`
 
-### Gate status — Blocks 1 + 2 are COMPLETE through Gate 4
-| Gate | Verdict |
+```
+=== SUITE COMPLETE: 21 passed, 0 failed ===   3,565 assertions
+```
+
+Run in a live Studio session, not inferred from reading code. Twenty-two suite
+files exist; `Fakes.luau` is a helper, not a suite.
+
+### What works end to end
+
+Rolling · forging · elements · streaks and the shield · shapes · dice slots ·
+ascension and the Diamond tree · the vault and offline earnings · quests, login
+streak and playtime chests · leaderboards · settings · persistence with session
+locking and fail-closed loading · the full V7 UI.
+
+### What is built but not reachable
+
+- **Daily Spin** — remote, handler and client wrapper all work. **No button.**
+- **REDEEM code** — backend fully works, button drawn, **no click handler**.
+- **Group Rewards** — complete and correct, deliberately unplugged (`GROUP_ID = 0`).
+
+### What takes currency and delivers nothing
+
+**This is the most important line in this section.**
+
+- **Luck Boost / Offline 2x** cost **real Robux**. `BoostService.getMultiplier` is
+  never called by anything. The player gets a countdown that does nothing.
+- **MassCeiling / SlotNodes** cost Diamonds, store the level, and display it. Each
+  has exactly **one read in the whole codebase, for display only**. The real caps
+  still come from a flat constant and from ascension count.
+
+Nothing should ship in this state. It is **Phase 0** of the roadmap.
+
+### What is decoration
+
+- **Trait Forge** — the panel is drawn, but no trait or shard concept exists in
+  `src/Server/` or `src/Shared/` at all. Currently held inert behind one switch.
+- **Element unlocks** — `Diamond.Elements` is *read* to gate elements and **never
+  written**, so every player is stuck on plain faces forever.
+
+### Known blockers
+
+| Blocker | Owner |
 |---|---|
-| Blueprint (6 docs) | **DELIVERED**, Gates 0–6 |
-| Block 1+2 Gate 2 | **MECHANICALLY-CLEAN** — 4/4 suites, 2,779 assertions |
-| Block 1+2 Gate 3 | **AUDIT-APPROVED** (cross-vendor, 3 findings, all remediated) |
-| Block 1+2 Gate 4 | **SECURE** (4 findings, all remediated) |
+| **158 Script Analysis warnings** (NFR-8 requires zero) | Code. Decide the `Vendor/ProfileStore.luau` policy first — 2,242 lines that must not be edited |
+| **9 audio asset IDs** | **Operator.** Cannot be done in code |
+| **A real `GROUP_ID`** | **Operator.** Cannot be done in code |
+| **Robux product IDs** | **Operator.** Agents never create monetized assets |
 
-### Written and audited but with a caveat
-- `performRoll` (the service shell) is **not directly unit-tested** — needs `tests/Fakes.luau`, which does not exist. Only the pure functions are covered.
-
-### Not started
-- **All client code.** `src/Client/` is empty. **Nothing is playable.**
-- `ForgeService`, `ProgressionService`, `AscensionService`, `OfflineService`, `MonetizationService`, `LeaderboardService`, `ServerBootstrap`, `RateLimiter` (separate module)
-- Shared: `DiceCatalog`, `UpgradeCatalog`, `Format`
-- `tests/Fakes.luau`; UT-5…UT-11; IT-1…IT-5
+Shipping constants are already at release values: `ASCEND_MIN_LIFETIME_CASH = 1e6`,
+`PLAYTEST_DIE_COUNT = 0`, `MAX_DIE_SLOTS = 12`.
 
 ---
 
@@ -306,7 +479,7 @@ Everything needed to reconstruct context is on disk and in git.
 
 | Source | Contains |
 |---|---|
-| **`.brain/LEDGER.md`** | **Read first.** L-001…L-020, each with root cause and fix. Most relevant: **L-013** (a clean scoreboard over unexecuted work is worthless), **L-014** (enumerated audit briefs), **L-015** (per-entity behaviour vs aggregate state), **L-016** (coupling not curve-shaping — the simulation findings), **L-017** (modelling error ≠ design finding), **L-018** (audit misclassification), **L-019 / L-020** (green suites over stale code) |
+| **`.brain/LEDGER.md`** | **Read first.** L-001…L-079, each with root cause and fix. Most relevant on **design**: **L-015** (per-entity behaviour vs aggregate state), **L-016** (coupling not curve-shaping — the simulation findings). On **process**: **L-013** (a clean scoreboard over unexecuted work is worthless), **L-017** (modelling error ≠ design finding), **L-019 / L-020** (green suites over stale code), **L-051** (a metric merely NEAR the property certifies a broken build). On **the client**, which is where the recent entries cluster: **L-057** (a `nil` in an `ipairs` fan-out silently cancels everything after it — the one that killed seven panels), **L-058** (`TextFits` reports truncation, not containment), **L-061** (the Luau 200-register limit on large UI builders), **L-062** (hardcoded pixel dimensions break cross-modal parity) |
 | `.brain/SCOREBOARD.md` | Every pipeline run, rejections, defect classes. Honest, including failures |
 | `.brain/skills/roblox_luau.md` | Roblox rules. **§6 = Luau syntax traps that cost real time** |
 | `docs/blueprint/*` | The binding spec |
@@ -324,31 +497,71 @@ Everything needed to reconstruct context is on disk and in git.
 
 ## 14. EXACT NEXT STEPS
 
-### Immediate — Block 3, remaining server (~1 session)
-Blocks 1–2 are audited and clean. Nothing blocks construction.
+**`docs/ROADMAP.md` is the authority here.** This is the summary; that document
+has the worked examples and the reasoning.
 
-Build: `ForgeService` (applies validated mass redistribution) · `DiceCatalog` (per-shape face counts, mass floors, budget caps — **`RollService.MASS_FLOOR` should move here**) · `UpgradeCatalog` · `Format` (suffix ladder, precision-safe to 1e300) · `ServerBootstrap` (wires services in dependency order, player lifecycle, `BindToClose`) · `tests/Fakes.luau` · UT-5…UT-8.
+### The governing rule the operator set
 
-After this the **server is functionally complete**: a player could roll, forge, and persist — with no way to see any of it.
+> **Build the UI once, freeze it, then do backend only.**
 
-### Then — Block 4: the client (~2–3 sessions, the biggest chunk)
-`src/Client/` is empty. Arena rendering · dice tumble-to-target animation · **forge panel with live preview** (the core screen) · HUD · retro-pixel menus.
+The alternative — port a screen, return later for another feature, reopen it a
+third time — is exactly how this codebase broke before. The failure log records
+the cause as *"the visual layer was rebuilt and the wiring behind it was not
+re-checked."* Touching each panel once removes that entire class of failure.
 
-The interesting problem is the animation: pre-authored tumbles resolving to the server's chosen face, so it looks like physics decided when it did not.
+**The freeze rule:** once UI is signed off, connect buttons to real functions and
+replace placeholder values with real ones — but **never move, resize, restyle or
+re-lay-out anything.** If wiring cannot be done without a visual change, **stop and
+ask the operator** rather than deciding alone.
 
-**First playable build lands at the end of this block.**
+### The four phases
 
-### Then — Block 5: monetization + leaderboards
-`MonetizationService` · `LeaderboardService` · `ProgressionService` · `AscensionService` · `OfflineService`.
-**The operator must create the Robux products** and supply the IDs; everything currently fails closed on `DUMMY_ID_*`.
+**Phase 0 — stop charging for nothing.** Pure backend, no screen touched, so it
+does not conflict with UI-first and can run while the UI agent designs. Boost
+multipliers (the hook already exists and is already guarded at
+`RollService.luau:302`, hardcoded to `1` at `:458`) · MassCeiling and SlotNodes
+feeding the real caps · the REDEEM click handler, one line.
 
-### Then — Block 6: pre-launch
-Full audit sweep · balance tuning against playtest data · the P-4 smoke checklist · publish.
+**Phase 1 — all UI, finalised then frozen.** Only two new screens exist: the
+element-unlock section (into the Shapes panel, which already does "unlock a thing
+with currency") and Daily Spin (a single control). External UI agent, **one panel
+per run**.
+
+**Phase 2 — backend only, against frozen UI.** Element unlocks · Daily Spin
+wiring · Trait Forge, the largest item.
+
+**Phase 3 — cleanup and launch readiness.** Delete the 3,662 dead lines · Script
+Analysis to zero · the operator-supplied IDs.
+
+### Three traps that will bite silently
+
+1. **Currency fallthrough.** `EconomyService` uses one explicit branch per
+   currency and its `else` returns **Diamonds**. A missed branch for a new
+   currency reads the wrong balance and *does not error*. No test pins the
+   currency list — add one.
+2. **Per-die migration.** `Profile.Dice` is a flat positional array (**the index
+   IS the slot**), and the reconcile logic deliberately **never descends into
+   arrays**. Any new per-die field needs an explicit entry in the per-die loop at
+   `PlayerProfile.luau:325`, following the `PurchasedBudget` precedent directly
+   above it.
+3. **The remote contract.** Six files must agree for a new remote.
+   `tests/RemoteContract.test.luau` fails loudly if any is missed — intended
+   behaviour, not an obstacle.
 
 ### Standing habits
-- **Verify the assertion count moved** after any test change. An unchanged count on a change that adds assertions means stale code (L-020).
+
+- **Verify the assertion count moved** after any test change. An unchanged count
+  on a change that adds assertions means stale code (L-020).
 - **Re-run the simulation** before retuning any balance constant (L-016).
 - **Verify an auditor's claims** before accepting a verdict.
+- **A green build says nothing about types.** Rojo does not type-check and there
+  is no CLI type-checker in this repo. A declaration-order defect that would have
+  thrown on every snapshot built perfectly cleanly. Studio's analysis pane is the
+  only mechanical check that exists.
+- **A stub is a present function.** Four refreshers once had bodies consisting of
+  a single comment; they were called on every snapshot and did nothing, and the
+  panels rendered perfectly. A silent console is not proof a panel is live.
+- **When a number and a screenshot disagree, the screenshot wins.**
 
 ---
 
@@ -372,4 +585,22 @@ Keep MCP use lean — the operator has asked to conserve tokens. Batch queries i
 
 ## 16. THE ONE-PARAGRAPH VERSION
 
-Dice Forge Incremental is a Roblox idle game whose core mechanic is a zero-sum mass budget on dice faces: heavier faces pay superlinearly more but land less often, so forging is a real trade-off. The server decides every outcome by weighted sampling and the client's 3D physics is pure animation — this is what makes the game exploit-proof, and it forbids any feature depending on where a die physically is. The maths was validated by simulation before any code was written and must not be retuned without re-running it. About 2,514 lines of our Luau exist across seven modules and five test files; **Blocks 1 and 2 are complete and have passed Gates 2, 3 and 4**, with 2,779 assertions passing live and seven audit findings folded in — including a real offline-earnings exploit the threat model had missed. The entire client is unbuilt and nothing is playable yet. The next task is Block 3: the remaining server services, then the client.
+Dice Forge Incremental is a Roblox idle game whose core mechanic is a **zero-sum
+mass budget** on dice faces: heavier faces pay superlinearly more but land less
+often, so every forge is a genuine trade-off rather than a purchase. The server
+decides every outcome by weighted sampling and the client's 3D physics is pure
+animation — this is what makes the game exploit-proof, and it forbids any feature
+depending on where a die physically is. The maths was validated by simulation
+before any code was written and must not be retuned without re-running it; the
+deepest lever is **Streak Strength**, a player-bought value with a cliff at
+`b ≈ 0.15` that makes genuinely different builds optimal for different players.
+About **28,900 lines** of our Luau now exist across three areas plus 2,242
+vendored, with **21 suites and 3,565 assertions passing live**. The game is
+**playable end to end** — rolling, forging, elements, streaks, shapes, ascension,
+the vault, quests, boards and persistence all work. What remains is not new
+systems but **finishing**: two purchase paths currently take currency (one of them
+**real Robux**) and deliver nothing, three built features have no button, the
+Trait Forge is decoration, ~3,700 lines of superseded client code are dead, and
+158 Script Analysis warnings stand against a zero-warnings requirement. The plan
+to close all of it is `docs/ROADMAP.md`, and its governing rule is the operator's:
+**build the UI once, freeze it, then do backend only.**
