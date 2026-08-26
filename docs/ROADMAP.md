@@ -35,7 +35,7 @@ verdict — see §10b for exactly what that means and what else to update with i
 
 | # | Item | Kind | Verdict | Status |
 |---|---|---|---|---|
-| 1 | REDEEM code button does nothing | No button (inverse) | Fix — one line | OPEN |
+| 1 | REDEEM code button does nothing | No button (inverse) | Fix — one line | **DONE** — see §4/0c (P-1 outstanding) |
 | 2 | Element unlocks impossible | No button | Build | OPEN |
 | 3 | MassCeiling / SlotNodes charge Diamonds, do nothing | Takes money | Fix first | OPEN |
 | 4 | Luck Boost / Offline 2x charge **real Robux**, do nothing | Takes money | Fix first | OPEN |
@@ -222,6 +222,32 @@ persistence. Somebody built the whole feature and never connected the button.
 
 **The fix:** one handler. This is the highest value-for-effort item in the
 document.
+
+**DONE 2026-08-27.** A player can now type a promo code, click REDEEM, and
+actually receive the reward — with an honest message on every outcome, including
+the ones that previously showed nothing at all.
+
+*It cost three audit rounds and eight defects, on the smallest item here.* Worth
+recording why, because the lessons generalise:
+
+- **The refusal map was built producer-outward twice and was wrong twice.**
+  Walking out from the functions you already know about cannot see a producer you
+  are not thinking of — first `PlayerProfile.mutate`, then the gateway's own
+  dispatch wrapper. It is now built **consumer-inward** (enumerate everything that
+  can arrive on this wire, then account for each), and `TEST_PLAN.md` P-3 enforces
+  it from disk.
+- **Sizing a child to fit its own contents is half a layout check.** The first fix
+  made the card fit its contents and pushed the card 9px out of the panel.
+- **A test whose assertions are its own literals cannot fail.** 11 such
+  assertions inflated the count and covered nothing; deleting them moved the
+  total DOWN, which is the correct direction.
+- **An artifact certifies the code that existed when it was captured.** Two
+  rounds failed on evidence captured mid-edit and then reasoned forward
+  arithmetically — not on code quality.
+
+**One thing is still outstanding and needs the operator:** P-1 static analysis
+was never produced. No Luau analyzer exists on PATH and the Script Analysis pane
+is not script-readable, so this is a standing blocker on every Gate 2 here.
 
 ### Verification for Phase 0
 

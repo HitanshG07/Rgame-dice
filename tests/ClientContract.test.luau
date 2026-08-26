@@ -559,6 +559,54 @@ local function run(): (boolean, string?, number)
 	e = e or check(not okAwait,
 		"NetClient.awaitReady must refuse to run off-client rather than returning a false ready")
 
+	----------------------------------------------------------------------------
+	-- The promo-code refusal surface is CLOSED (added 2026-08-26)
+	----------------------------------------------------------------------------
+
+	-- WHY THIS EXISTS. The REDEEM handler shipped a reason->message table under a
+	-- comment claiming every reason was mapped. Two audit rounds found two
+	-- different producers outside that claim -- `PlayerProfile.mutate`, then the
+	-- gateway's own dispatch wrapper. Nothing mechanical could catch either: a
+	-- missing table key is not a syntax error, and the fallback rendered it as a
+	-- plausible message.
+	--
+	-- A FIRST ATTEMPT AT THIS TEST WAS A TAUTOLOGY and is recorded here so it is
+	-- not rebuilt. It declared the reason strings in the test and then asserted
+	-- they were non-empty strings -- checking the test's own literals against
+	-- themselves. It could not fail, it pinned nothing, and it inflated the
+	-- assertion count while covering zero behaviour (the L-018 / F-G3-3 shape,
+	-- and the count moving is exactly what made it look like coverage).
+	--
+	-- The client's message table CANNOT be reached from here: it is a local
+	-- inside a closure, and reading `Source` needs PluginOrOpenCloud which a game
+	-- script does not have. Per TEST_PLAN.md:136 that check belongs in **P-3**,
+	-- which greps the repository from disk -- not in a runtime suite pretending
+	-- it can see the text.
+	--
+	-- What IS provable here is the PRODUCER side: the reasons really are what the
+	-- client must handle. These drive the real functions and fail on real drift.
+
+	-- `boundedString` is the validator the RedeemCode path runs through, and its
+	-- three refusals must stay exactly these three. Proven by driving it, not by
+	-- reading it.
+	local okStr, whyStr = (RemoteGateway :: any).V.boundedString(42, 32)
+	e = e or check(okStr == false and whyStr == "not_string",
+		"boundedString must refuse a non-string as not_string")
+	okStr, whyStr = (RemoteGateway :: any).V.boundedString("", 32)
+	e = e or check(okStr == false and whyStr == "empty_string",
+		"boundedString must refuse an empty string as empty_string")
+	okStr, whyStr = (RemoteGateway :: any).V.boundedString(string.rep("A", 33), 32)
+	e = e or check(okStr == false and whyStr == "too_long",
+		"boundedString must refuse an over-length code as too_long")
+	okStr, whyStr = (RemoteGateway :: any).V.boundedString("FORGE2026", 32)
+	e = e or check(okStr == true and whyStr == nil,
+		"boundedString must accept a well-formed code")
+
+	-- RedeemCode takes exactly one argument. If this changes, the client wrapper
+	-- and the handler have to change together.
+	e = e or check(RemoteGateway.arityFor("RedeemCode") == 1,
+		"RedeemCode must take exactly one argument")
+
 	if e then
 		return false, e, n
 	end

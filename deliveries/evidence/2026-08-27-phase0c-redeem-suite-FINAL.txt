@@ -1,0 +1,91 @@
+Phase 0c (REDEEM click handler) -- FINAL verification.
+Captured 2026-08-27, AFTER the last edit to every file it certifies.
+
+WHY THIS FILE EXISTS SEPARATELY. The earlier artifact
+(2026-08-26-phase0c-redeem-suite.txt) was captured mid-edit and its figures were
+then reasoned forward arithmetically. Round-3 audit flagged that as defect D6.
+This run was captured only after the final code state, with sync proven first.
+
+SYNC PROOF (the Rojo plugin is detached this session, so Source is pushed via MCP
+and hashed on both sides before any run -- L-019/L-020):
+  src/Client/V7MenuPanel.luau      len=197626  hash=302441248   disk == Studio
+  tests/ClientContract.test.luau   len=28508   hash=384107992   disk == Studio
+  markers present in Studio: generationBump=true, card140=true, rateLimitedKey=true
+Both survived a full Studio restart mid-session and were re-verified after it.
+
+=== DICE FORGE TEST SUITE ===
+[PASS] UT-14 Balance (4 assertions)
+[UT-13] emoji scan SKIPPED -- this thread cannot read Source (needs PluginOrOpenCloud).
+[PASS] UT-13 ClientContract (51 assertions)
+[PASS] UT-5 Elements (32 assertions)
+[PASS] UT-12 ForgeService (369 assertions)
+[PASS] UT-1 ForgeMath (43 assertions)
+[PASS] UT-2 ForgeValidation (52 assertions)
+[PASS] IT-5 Integration_Ascension (19 assertions)
+[PASS] IT-4 Integration_Authority (4 assertions)
+[PASS] IT-2 Integration_Forge (15 assertions)
+[PASS] IT-1 Integration_RollLoop (9 assertions)
+[PASS] IT-3 Integration_SessionLock (11 assertions)
+[PASS] Leaderboard.test (8 assertions)
+[PASS] PassEffects.test (10 assertions)
+[PASS] UT-4 Payout (77 assertions)
+[PASS] UT-8 ProfileLifecycle (38 assertions)
+[PASS] UT-7 ProfileSchema (72 assertions)
+[PASS] UT-6 RateLimit (40 assertions)
+[PASS] UT-15 RemoteContract (16 assertions)
+[PASS] UT-3 Sampling (2627 assertions)
+[PASS] UT-16 Settings (62 assertions)
+[PASS] Vault.test (15 assertions)
+total assertions: 3574
+=== SUITE COMPLETE: 21 passed, 0 failed ===
+
+ASSERTION COUNT LINEAGE (the L-020 canary, stated so the next session can check it):
+  3569  baseline before this change (corrected from the 3,565 recorded in
+        handoff-8, which was wrong; the scoreboard independently said 3,569).
+  3585  round 1 -- inflated by 11 TAUTOLOGICAL assertions that checked the
+        test's own string literals against themselves. Rejected.
+  3574  FINAL. Tautology removed, 5 real assertions kept. +5 over baseline,
+        every one of them driving a real function.
+A count that went DOWN 3585 -> 3574 is the correct direction here: fake
+coverage was deleted. The count alone would have read that as a regression,
+which is exactly why it is a canary and not a verdict.
+
+LIVE UI VERIFICATION -- every path clicked through the real button in a running
+game, not simulated, not reasoned:
+  valid code (FORGE2026)   -> "Code redeemed. Your balance has been updated."
+                              green; box cleared; HUD DIAMONDS 8 -> 18.
+                              *** The 18 SURVIVED A FULL STUDIO RESTART, so the
+                              redemption was durably persisted, not just shown.
+  already redeemed         -> "You have already redeemed that code."
+  invalid (NOTAREALCODE)   -> "That code is not valid."  (box keeps the text)
+  empty                    -> "Enter a code first."      (no request sent)
+  whitespace only ("   ")  -> "Enter a code first."      (no request sent)
+  lowercase + spaces       -> " re lease " normalised to RELEASE server-side
+  rate limited             -> proven reachable by six spaced calls:
+                              invalid_code, invalid_code, invalid_code,
+                              rate_limited, rate_limited, invalid_code
+                              now reads "Too many tries. Wait a few seconds..."
+  watchdog timeout         -> rendered "That took too long. Try again in a moment."
+
+CONTAINMENT (measured live at the final 140px card size):
+  card inside panel body   true, margin 4.49px
+  status inside card       true, margin 22.43px
+  worst overflow of ANY body child   0.00px
+Earlier sizes for the record: 126 overflowed the card by 8px; 152 overflowed the
+PANEL by 8.97px; 144 landed exactly flush at 0.00 margin, which is not a fit.
+
+P-3 REFUSAL SURFACE (new check, run from disk):
+  inbound reasons enumerated consumer-inward: 14
+  mapped keys in REDEEM_MESSAGES:             14
+  comm -23 inbound mapped:                    EMPTY
+Validated against a known-bad build: deleting the rate_limited key makes the
+check emit rate_limited. It is load-bearing, not vacuous.
+
+P-3 PROHIBITIONS: InvokeClient empty; ProcessReceipt exactly 1; MessagingService
+empty outside Vendor; TODO/FIXME/TBD empty.
+
+*** STILL NOT VERIFIED: P-1 STATIC ANALYSIS. ***
+No Luau analyzer exists on PATH (only rojo), and Studio's Script Analysis pane is
+not readable from a script. Per TEST_PLAN.md:45 a missing P-1 artifact is a
+REJECTED gate, never a pass with a caveat. This is a STANDING OPERATOR BLOCKER on
+every Gate 2 in this project, not specific to this change. Reported as unverified.

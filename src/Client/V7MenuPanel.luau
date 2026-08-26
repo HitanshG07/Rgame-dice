@@ -3274,7 +3274,28 @@ local function buildSettingsOverlay(
 
 	local codeCard = Instance.new("Frame")
 	codeCard.Name = "PromoCard"
-	codeCard.Size = UDim2.new(1, 0, 0, 126)
+	-- 144. Two separate budgets had to balance here and the first fix only
+	-- balanced one of them, so both are written down:
+	--
+	--   INSIDE the card: 14+14 padding + 22 title + 10 gap + 48 input row
+	--   + 10 gap + 16 status = 134. A UIListLayout charges its Padding BETWEEN
+	--   siblings, so a third child costs 10+16, not 16 -- which is why the
+	--   original 126 (sized for two children) could not absorb a status line.
+	--
+	--   INSIDE THE PANEL: `settingsBody` is a fixed 512px with no ScrollingFrame
+	--   and ClipsDescendants = false, and `sList` pads 12 between children. Four
+	--   setting rows at 80 = 320, plus 3 gaps at 12 = 36, plus 12 to this card,
+	--   leaves 144 at the absolute limit. At 152 the card hung 9px past the
+	--   panel body -- measured
+	--   live, not derived -- and because nothing clips, it drew over the scrim
+	--   rather than being cut off.
+	--
+	-- 140, not 144: 144 lands EXACTLY flush, and a zero margin is not a fit --
+	-- it survives only until any row grows by a pixel. 140 leaves 4px outside
+	-- and 6px inside. THE
+	-- LESSON: sizing a child to fit its own contents is half the check; the
+	-- other half is whether the parent still holds the child.
+	codeCard.Size = UDim2.new(1, 0, 0, 140)
 	codeCard.BackgroundColor3 = THEME.CardBg
 	codeCard.BorderSizePixel = 0
 	codeCard.LayoutOrder = 90
@@ -3362,6 +3383,176 @@ local function buildSettingsOverlay(
 	local rbc = Instance.new("UICorner")
 	rbc.CornerRadius = UDim.new(0, 6)
 	rbc.Parent = redeemBtn
+
+	-- The button was built, styled and parented with NO click handler at all, on
+	-- top of a redemption path that works end to end -- gateway, catalog,
+	-- duplicate tracking and persistence were all already in place. Typing a
+	-- valid code and clicking did nothing, with no error and no feedback.
+	--
+	-- The card was resized to hold this line -- see the arithmetic where
+	-- `codeCard.Size` is set. Nothing else was moved or restyled.
+	local codeStatus = Instance.new("TextLabel")
+	codeStatus.Name = "CodeStatus"
+	codeStatus.Size = UDim2.new(1, 0, 0, 16)
+	codeStatus.BackgroundTransparency = 1
+	codeStatus.Font = Enum.Font.Gotham
+	codeStatus.Text = ""
+	codeStatus.TextColor3 = THEME.TextMuted
+	codeStatus.TextSize = 12
+	codeStatus.TextXAlignment = Enum.TextXAlignment.Left
+	codeStatus.TextTruncate = Enum.TextTruncate.AtEnd
+	codeStatus.LayoutOrder = 3
+	codeStatus.Parent = codeCard
+
+	local function setCodeStatus(message: string, colour: Color3)
+		codeStatus.Text = message
+		codeStatus.TextColor3 = colour
+	end
+
+	-- NFR-5: the reward is never named here. The server credits it and the next
+	-- snapshot carries the new balance -- quoting a figure client-side would be
+	-- asserting an outcome the client has no authority over.
+	--
+	-- Every value that can ARRIVE HERE, enumerated by walking the wire INWARD
+	-- from this consumer -- not by listing what the functions I happened to know
+	-- about return. Two rounds of audit rejection came from the outward method:
+	-- both times the table looked complete and both times a producer nobody was
+	-- thinking about (first `PlayerProfile.mutate`, then the gateway's own
+	-- dispatch wrapper) sat outside the walk. The inbound surface is finite and
+	-- greppable; the set of functions that might feed it is not.
+	--
+	-- The surface, in the order a call meets it:
+	--
+	--   1. NetClient.call, BEFORE the wire  (NetClient.luau:105,112,119)
+	--        throttled, unavailable, malformed_response
+	--   2. Gateway dispatch wrapper          (RemoteGateway.luau:241,245,261)
+	--        invalid_request, rate_limited, server_error
+	--        -- and reject() at :204 rewrites any detailed refusal to
+	--        invalid_request on the way out, so the detail never arrives.
+	--   3. The RedeemCode handler            (ServerBootstrap.server.luau:695)
+	--        not_string, empty_string, too_long -- returned DIRECTLY, not
+	--        through reject(), so unlike most refusals these do reach us.
+	--   4. ProgressionService.redeemCode     (:89,99,104,108)
+	--        invalid_code, no_profile, already_redeemed
+	--   5. PlayerProfile.mutate, via `reason or "mutate_failed"` (:116)
+	--        profile_released, mutate_failed
+	--
+	-- NFR-5: no message below names a figure. The server credits the reward and
+	-- the next snapshot carries the balance; quoting an amount here would assert
+	-- an outcome the client has no authority over.
+	--
+	-- `invalid_code` stays deliberately generic -- the server returns it both for
+	-- a malformed code and for one that does not exist, so a fishing client
+	-- cannot enumerate which codes are real. Do not split it.
+	local REDEEM_MESSAGES: { [string]: string } = {
+		-- 1. never left the client
+		throttled = "Slow down a moment, then try again.",
+		unavailable = "Could not reach the server. Try again in a moment.",
+		malformed_response = "Could not reach the server. Try again in a moment.",
+		-- 2. refused by the gateway
+		invalid_request = "That code is not valid.",
+		rate_limited = "Too many tries. Wait a few seconds, then try again.",
+		server_error = "Something went wrong on our side. Try again in a moment.",
+		-- 3. refused by the handler's own validator
+		not_string = "That code is not valid.",
+		empty_string = "Enter a code first.",
+		too_long = "That code is too long.",
+		-- 4. refused by the redemption rules
+		invalid_code = "That code is not valid.",
+		no_profile = "Your profile is still loading. Try again in a moment.",
+		already_redeemed = "You have already redeemed that code.",
+		-- 5. the write itself failed -- the redemption did NOT persist
+		profile_released = "Your session ended, so that code was not saved. Rejoin and try again.",
+		mutate_failed = "Could not save that redemption. Try again in a moment.",
+	}
+
+	-- Bumped on every submit so a reply that arrives after the watchdog has
+	-- already given up cannot overwrite the newer attempt's status.
+	local REDEEM_TIMEOUT_SEC = 10
+	local redeemBusy = false
+	local redeemGeneration = 0
+
+	local function submitCode()
+		if redeemBusy then
+			return
+		end
+
+		local typed = (string.gsub(codeBox.Text, "%s+", ""))
+		if typed == "" then
+			setCodeStatus("Enter a code first.", THEME.TextMuted)
+			return
+		end
+
+		redeemBusy = true
+		redeemGeneration += 1
+		local generation = redeemGeneration
+		redeemBtn.AutoButtonColor = false
+		redeemBtn.Text = "..."
+		setCodeStatus("Checking...", THEME.TextMuted)
+
+		-- Claims the right to report this attempt's outcome. Exactly one caller
+		-- can win: the reply or the watchdog, whichever arrives first.
+		--
+		-- IT MUST BUMP THE GENERATION ITSELF. An earlier version only compared
+		-- against it, which separated one attempt from the NEXT but not the two
+		-- racers within a single attempt -- so on a stall the watchdog reported
+		-- the timeout at T+10 and a reply landing at T+12 passed the same check
+		-- again, overwrote the message and re-ran the restore. Bumping here is
+		-- what makes the claim exclusive rather than merely ordered.
+		--
+		-- The Parent check keeps a spawned thread from writing to a destroyed
+		-- Instance, which throws inside `task.spawn` where nothing catches it.
+		local function finish(): boolean
+			if generation ~= redeemGeneration or codeStatus.Parent == nil then
+				return false
+			end
+			redeemGeneration += 1
+			redeemBusy = false
+			redeemBtn.AutoButtonColor = true
+			redeemBtn.Text = "REDEEM"
+			return true
+		end
+
+		-- `NetClient.call` pcalls InvokeServer, which catches a handler that
+		-- ERRORS -- but not one that never returns. A RemoteFunction whose server
+		-- handler yields forever (a DataStore stall is the realistic case) yields
+		-- this thread indefinitely, and pcall never resolves. Without a watchdog
+		-- the button would sit at "..." with redeemBusy stuck true, and every
+		-- later click would hit the early return: exactly the do-nothing button
+		-- this change exists to remove, only now claiming to be busy.
+		task.delay(REDEEM_TIMEOUT_SEC, function()
+			if finish() then
+				setCodeStatus("That took too long. Try again in a moment.", THEME.Negative)
+			end
+		end)
+
+		task.spawn(function()
+			local result = NetClient.redeemCode(typed)
+
+			if not finish() then
+				return
+			end
+
+			if result.ok then
+				codeBox.Text = ""
+				setCodeStatus("Code redeemed. Your balance has been updated.", THEME.Positive)
+			else
+				local reason = if type(result.reason) == "string" then result.reason else ""
+				setCodeStatus(REDEEM_MESSAGES[reason] or "Could not redeem that code right now.", THEME.Negative)
+			end
+		end)
+	end
+
+	redeemBtn.MouseButton1Click:Connect(submitCode)
+
+	-- Enter submits, because a code box that ignores Enter reads as broken. The
+	-- guard matters: FocusLost fires on click-away too, and submitting then would
+	-- fire a request the player never asked for.
+	codeBox.FocusLost:Connect(function(enterPressed: boolean)
+		if enterPressed then
+			submitCode()
+		end
+	end)
 
 	local function refreshSettings(state: any)
 		if type(state) == "table" and type(state.settings) == "table" then

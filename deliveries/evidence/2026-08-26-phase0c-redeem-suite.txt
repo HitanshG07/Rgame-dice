@@ -1,0 +1,77 @@
+*** THIS ARTIFACT IS STALE AND DOES NOT CERTIFY THE CURRENT CODE. ***
+
+Captured at 20:28. The files it certifies were edited afterwards:
+  tests/ClientContract.test.luau   20:42
+  src/Client/V7MenuPanel.luau      20:46
+
+The figures below (46 ClientContract assertions, 3,569 total) were TRUE WHEN
+CAPTURED and are false now. Later rounds reported 51 / 3,574 -- and that figure
+was DERIVED ARITHMETICALLY (46+5, 3569+5), never observed in a run captured
+after the final edit. Round-3 audit flagged this as defect D6.
+
+This is the L-019 / L-020 staleness-canary failure that the preamble below
+warns about, committed by the person who wrote the warning. The assertion count
+only works as a canary if the artifact is re-captured AFTER the last edit;
+capturing mid-edit and reasoning forward defeats it entirely.
+
+DO NOT cite this file as Gate 2 evidence. A fresh run must be captured after
+the final code state, together with a P-1 static-analysis artifact, which does
+not exist for this change at all.
+
+=============================================================================
+
+Phase 0c (REDEEM click handler) -- full suite, live Studio session, 2026-08-26.
+Run AFTER the change was confirmed byte-identical in Studio (len=192409, hash=702691609
+matching disk), because the Rojo plugin had silently detached and Studio was holding
+the pre-edit file. This is L-020: a green suite over stale code looks identical to a pass.
+
+=== DICE FORGE TEST SUITE ===
+[PASS] UT-14 Balance (4 assertions)
+[UT-13] emoji scan SKIPPED -- this thread cannot read Source (needs PluginOrOpenCloud).
+[PASS] UT-13 ClientContract (46 assertions)
+[PASS] UT-5 Elements (32 assertions)
+[PASS] UT-12 ForgeService (369 assertions)
+[PASS] UT-1 ForgeMath (43 assertions)
+[PASS] UT-2 ForgeValidation (52 assertions)
+[PASS] IT-5 Integration_Ascension (19 assertions)
+[PASS] IT-4 Integration_Authority (4 assertions)
+[PASS] IT-2 Integration_Forge (15 assertions)
+[PASS] IT-1 Integration_RollLoop (9 assertions)
+[PASS] IT-3 Integration_SessionLock (11 assertions)
+[PASS] Leaderboard.test (8 assertions)
+[PASS] PassEffects.test (10 assertions)
+[PASS] UT-4 Payout (77 assertions)
+[PASS] UT-8 ProfileLifecycle (38 assertions)
+[PASS] UT-7 ProfileSchema (72 assertions)
+[PASS] UT-6 RateLimit (40 assertions)
+[PASS] UT-15 RemoteContract (16 assertions)
+[PASS] UT-3 Sampling (2627 assertions)
+[PASS] UT-16 Settings (62 assertions)
+[PASS] Vault.test (15 assertions)
+total assertions: 3569
+=== SUITE COMPLETE: 21 passed, 0 failed ===
+[ClientBootstrap] V7 UI ready -- NetClient online, 7 modules loaded.
+[Bootstrap] admitted UserId=1272229789
+
+BASELINE CORRECTION: docs/handoff-8.md recorded 3,565. The live figure is 3,569,
+and the scoreboard's last two runs independently say 3,569 and 3,570. Corrected in
+handoff-8 and HANDOFF.md. The assertion count is this project's staleness canary
+(L-019/L-020) -- a baseline four low would disarm it.
+
+LIVE UI VERIFICATION -- clicked through the real button, not simulated:
+  FORGE2026 (valid, unredeemed) -> "Code redeemed. Your balance has been updated."
+                                   green; box cleared; HUD DIAMONDS 8 -> 18.
+  RELEASE / DICEFORGE (valid, already used) -> "You have already redeemed that code."
+  NOTAREALCODE                 -> "That code is not valid."
+  "" (empty)                   -> "Enter a code first."  (no request sent)
+  "   " (whitespace only)      -> "Enter a code first."  (no request sent)
+  " re lease " (lower+spaces)  -> normalised to RELEASE by the server; correct reply.
+
+Containment: status label bottom 649.9 vs card bottom 656.6 -- inside, nothing moved.
+Console clean across nine redemption attempts: no errors, no warnings, no rate-limit
+rejections.
+
+Screenshot: screenshots/redeem_verified_1.png
+
+NOT VERIFIED BY ME: Studio Script Analysis (P-1). The pane is not script-readable
+and needs a human look against the 158-warning baseline.

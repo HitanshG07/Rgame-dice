@@ -70,6 +70,42 @@ grep -rnE "TODO|FIXME|TBD"        src/                  # Matrix B    — MUST b
 
 **EVERY TEXT CHECK MUST STRIP COMMENT LINES BEFORE MATCHING.** Amended 2026-08-07, triggering fact: the Block 4A sweep reported a `:: Player` cast violation, and the match was the source comment *explaining why a cast must not be used*. A grep that trips on the documentation of its own rule punishes writing the rule down, and the reflex fix — deleting the comment — destroys the explanation instead of the defect. Pipe through `grep -vE '^[[:space:]]*--'` first.
 
+**P-3 ALSO CHECKS THE REFUSAL SURFACE.** Added 2026-08-26, triggering fact: the
+REDEEM click handler shipped a reason-to-message table under a comment asserting
+completeness, and two consecutive audit rounds each found a different producer
+outside it. The consumer is a `local` inside a closure, so no runtime suite can
+read it (`Source` needs PluginOrOpenCloud, see §136) — this is a text check and
+it belongs here.
+
+```bash
+# Gather the RedeemCode inbound surface, then diff it against the consuming map.
+# Verified working 2026-08-26: emits nothing, and DID emit the two reasons that
+# the two audit rounds found missing.
+{
+  grep -hoE 'reason = "[a-z_]+"' src/Client/NetClient.luau | grep -oE '"[a-z_]+"'
+  for n in RateLimited InvalidRequest ServerError; do
+    grep -hoE "$n = \"[a-z_]+\"" src/Shared/Remotes.luau | grep -oE '"[a-z_]+"'
+  done
+  sed -n '/function V.boundedString/,/^end/p' src/Server/RemoteGateway.luau     | grep -oE 'return false, "[a-z_]+"' | grep -oE '"[a-z_]+"'
+  sed -n '/function ProgressionService.redeemCode/,/^end/p' src/Server/ProgressionService.luau     | grep -oE 'return false, "[a-z_]+"' | grep -oE '"[a-z_]+"'
+  echo '"profile_released"'; echo '"mutate_failed"'   # forwarded by `reason or ...`
+} | tr -d '"' | sort -u > /tmp/inbound.txt
+
+# STRIP COMMENTS FIRST -- a commented-out key must NOT count as mapped.
+sed -n '/local REDEEM_MESSAGES/,/^	}$/p' src/Client/V7MenuPanel.luau   | grep -vE '^[[:space:]]*--'   | grep -oE '[a-z_]+ = "' | sed 's/ = "//' | sort -u > /tmp/mapped.txt
+
+comm -23 /tmp/inbound.txt /tmp/mapped.txt        # MUST be empty
+```
+
+**PASS = every string the first four commands emit appears as a key in the fifth.**
+A string with no key is the defect: it renders as the generic fallback, which
+reads to a player as a plausible answer rather than a missing one.
+
+**Enumerate INWARD, never outward.** Walking outward from the producers you happen
+to know about is what failed twice — the gateway's own dispatch wrapper is
+invisible to that method and unmissable to this one. The inbound surface is finite
+and greppable; the set of functions that might feed it is not.
+
 **PASS = each line matches its stated expectation.** These are silent-failure classes: nothing at runtime tells you a second `ProcessReceipt` assignment overwrote the first.
 
 **P-3 MUST ALSO SWEEP THE LIVE DATAMODEL, not only `src/`.** Amended 2026-08-06, triggering fact: `ServerScriptService.MonetizationManager` — a leftover from the retired tycoon project, present in the `.rbxl` place file but in no Rojo-managed directory — was found assigning `MarketplaceService.ProcessReceipt`, holding its receipt ledger in memory only, and returning `PurchaseGranted` before anything persisted (threats T-15, T-16, T-17). **Every grep in this procedure scans the repository, so not one of them could ever have seen it.** Rojo syncs disk *into* Studio; it does not remove what disk never put there. Enumerate every `LuaSourceContainer` in the place, flag any whose full name falls outside `ServerScriptService.Server`, `ServerScriptService.Tests`, or `ReplicatedStorage.Shared`, and re-run each prohibition check against those sources too. An unmanaged script in the place is untracked, unreviewed, and unversioned — treat its presence as a finding in its own right.
