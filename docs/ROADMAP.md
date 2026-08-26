@@ -30,18 +30,48 @@ into three kinds, and the difference matters:
 
 ### The ten items
 
-| # | Item | Kind | Verdict |
-|---|---|---|---|
-| 1 | REDEEM code button does nothing | No button (inverse) | Fix — one line |
-| 2 | Element unlocks impossible | No button | Build |
-| 3 | MassCeiling / SlotNodes charge Diamonds, do nothing | Takes money | Fix first |
-| 4 | Luck Boost / Offline 2x charge **real Robux**, do nothing | Takes money | Fix first |
-| 5 | Group Rewards inert (`GROUP_ID = 0`) | Blocked on operator | Set the ID |
-| 6 | Like Goal event never built | Decoration | **Dropped** |
-| 7 | Daily Spin has no UI | No button | Build |
-| 8 | Audio — 9 placeholder asset IDs | Blocked on operator | Upload sounds |
-| 9 | Trait Forge — pure decoration | Decoration | Build |
-| 10 | 3,662 lines of dead legacy files | Housekeeping | Delete |
+**The Status column is the live record.** It is updated only at a G5 DELIVERED
+verdict — see §10b for exactly what that means and what else to update with it.
+
+| # | Item | Kind | Verdict | Status |
+|---|---|---|---|---|
+| 1 | REDEEM code button does nothing | No button (inverse) | Fix — one line | OPEN |
+| 2 | Element unlocks impossible | No button | Build | OPEN |
+| 3 | MassCeiling / SlotNodes charge Diamonds, do nothing | Takes money | Fix first | OPEN |
+| 4 | Luck Boost / Offline 2x charge **real Robux**, do nothing | Takes money | Fix first | OPEN |
+| 5 | Group Rewards inert (`GROUP_ID = 0`) | Blocked on operator | Set the ID | BLOCKED — operator |
+| 6 | Like Goal event never built | Decoration | **Dropped** | CLOSED — dropped, see §9 |
+| 7 | Daily Spin has no UI | No button | Build | OPEN |
+| 8 | Audio — 9 placeholder asset IDs | Blocked on operator | Upload sounds | BLOCKED — operator |
+| 9 | Trait Forge — pure decoration | Decoration | Build | OPEN |
+| 10 | 3,662 lines of dead legacy files | Housekeeping | Delete | OPEN |
+
+---
+
+## 1b. ONE SPEC ROW HAS DRIFTED FROM THE CODE
+
+Found on 2026-08-26 by sweeping handoffs 1–7 against live code. It is not one of
+the ten items and it is not a feature — it is a **contradiction between the
+binding spec and what ships**, which this project treats as a defect rather than
+a document to quietly correct.
+
+**`docs/blueprint/SRS.md:15` (FR-1.1)** says the arena holds *"between 1 and 7
+dice"*. The code ships `DiceCatalog.MAX_DIE_SLOTS = 12` (`:386`) with a nine-rung
+ascension ladder up to it. The row was never amended, and no test pins the 7.
+
+**Operator decision (2026-08-26): amend the spec to 1–12.** The 12 was a
+deliberate balance decision recorded in handoffs 5 and 7, and the game has been
+played at 12 — the code is right and the document is stale. Amend FR-1.1 citing
+that as the triggering fact, per the SRS's own `STATUS: LIVING` rule.
+
+**Do this before any other work.** Every later phase is audited against the spec,
+and an auditor reading FR-1.1 as it stands today would correctly reject work that
+assumes twelve slots.
+
+*Related, and not a blocker:* handoff-4 records that die counts other than 1, 6
+and 7 have never been checked by eye on a live board, and **FR-1.4 — no die may
+come to rest outside the tray — is the one hard invariant** the arena must hold.
+Worth one look at a full twelve-die board during the next play session.
 
 ---
 
@@ -119,6 +149,17 @@ with the UI-first rule and runs in parallel while Antigravity designs.
 
 This phase is first because everything in it is a live defect that costs players
 money or currency today.
+
+**Execution order (operator decision, 2026-08-26): `0c` → `0a` → `0b`**, which is
+not the order they are written in below. The sub-items keep their labels so
+existing references stay valid.
+
+The reason: `0c` is a single click handler against a backend that already works
+end to end. It is the smallest change that can walk all seven gates, so it proves
+the pipeline on something low-risk **before** anything touches the payout formula.
+`0a` follows because it is the only defect involving real money. `0b` is last
+because it is the only one of the three that moves a balance number, and it needs
+a proposed curve brought to the operator before it is built.
 
 ### 0a — Boosts do nothing
 
@@ -415,6 +456,14 @@ where three files had to agree and nothing pinned the middle one.
 
 ## 9. DECISIONS ON RECORD
 
+Added 2026-08-26, after sweeping handoffs 1–7 against live code:
+
+| Decision | Choice |
+|---|---|
+| FR-1.1 says 7 dice, code ships 12 | **Amend the spec to 1–12** — the code is right, the document is stale (§1b) |
+| Phase 0 execution order | **`0c` → `0a` → `0b`** — smallest change first to prove the pipeline (§4) |
+| Marking work complete | **Only at a G5 DELIVERED verdict**, never when the code merely looks finished (§10b) |
+
 Made by the operator during planning on 2026-08-23:
 
 | Decision | Choice |
@@ -464,6 +513,55 @@ dropped from every subsequent one. This document ends that ambiguity: it is
 - Fresh-context audit before each commit. The author never verifies their own
   work.
 - **Phase 2 onward:** confirm by screenshot that the frozen UI is unchanged.
+
+---
+
+## 10b. CLOSING AN ITEM OUT — MARK IT DONE, AND ONLY WHEN IT IS
+
+**Every item in this document is updated to DONE the moment it lands, and never
+before.** An item is not done when the code is written. It is done when it has
+passed the full `.brain/PIPELINE.md` sequence and been delivered:
+
+`G0 intake → G1 construct → G2 validate → G3 audit → G4 secure → G5 deliver → G6 evolve`
+
+Until a **G5 DELIVERED** verdict exists, the item stays open in this document
+regardless of how finished the code looks. A rejection at G2, G3 or G4 rewinds to
+G1 and re-runs G2–G4 **in full** — so a rejected item does not get a partial mark,
+it simply stays open.
+
+### What to update, at G5, in the same commit as the work
+
+1. **The item's row in §1** — change the Verdict cell to `DONE — <short-sha>`.
+2. **The phase section** — mark the sub-item `**DONE (<short-sha>)**` with one
+   line stating what a player can now actually do that they could not before.
+3. **`.brain/SCOREBOARD.md`** — append the pipeline run: date, tier, lane,
+   rejections (**including none**), and the outcome. Mandatory, and it is where
+   the honesty lives; a whitewashed scoreboard voids the audit trail
+   (Non-Negotiable 7).
+4. **`.brain/LEDGER.md`** — only if the work produced a genuine lesson. At G6,
+   *"no evolution required"* is a valid verdict, not an omission.
+5. **A handoff** — when the session ends, not per item.
+
+### The rule this exists to enforce
+
+**Do not mark an item done and then keep working on it.** Two of this project's
+recorded incidents are exactly that shape: a figure stated once and carried
+forward by documents that never re-checked it (handoff-7's "23 audio IDs", and
+its "nothing outstanding" while 158 warnings stood open). A roadmap that says
+DONE next to something half-finished is the same defect with a bigger blast
+radius, because the next session trusts it and builds on top.
+
+Equally: **do not leave a finished item unmarked.** The next reader has no way to
+tell shipped work from unstarted work except this document, and re-deriving it
+costs a full audit pass — which is how this session's ten-item list got built in
+the first place.
+
+### When an item turns out to be wrong
+
+If a completed item is later found defective, **do not silently un-tick it.**
+Leave the DONE mark, strike it through, and add a line naming what was wrong and
+where it was corrected. The record of a mistake is worth more than a tidy list —
+`docs/handoff-8.md` §4 is the precedent.
 
 ---
 
