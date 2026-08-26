@@ -319,7 +319,11 @@ function OfflineService.getStatus(player: Player): VaultStatus?
 end
 
 -- Atomic claim (SRS FR-8.6, T-24).
-function OfflineService.claimVault(player: Player, doubled: boolean): (boolean, string?, number)
+-- `_doubled` is accepted for arity and IGNORED on purpose -- see the block
+-- below. Underscore-prefixed so the analyser does not read a deliberate
+-- non-use as an oversight, and so the next reader does not 'fix' it by
+-- wiring it back in.
+function OfflineService.claimVault(player: Player, _doubled: boolean): (boolean, string?, number)
 	local status = OfflineService.getStatus(player)
 	if not status then
 		return false, "no_profile", 0
@@ -345,11 +349,26 @@ function OfflineService.claimVault(player: Player, doubled: boolean): (boolean, 
 	-- worth by asking `BoostService`, which reads a server-clocked expiry the
 	-- client cannot influence (T-20). A player without the boost gets 1.0 no
 	-- matter what they send.
+	-- APPLIED ON OWNERSHIP, NOT ON THE CLIENT'S SAY-SO. `doubled` is accepted for
+	-- arity and deliberately IGNORED: the server already knows whether the player
+	-- holds the boost, so asking the client is both unnecessary and unsafe.
+	--
+	-- THIS LINE HAS BEEN WRONG IN BOTH DIRECTIONS AND BOTH WERE REAL-MONEY BUGS:
+	--
+	--   1. Originally `if doubled then payout = payout * 2 end` -- no entitlement
+	--      check at all, so anyone sending `true` took 2x free, and what was
+	--      given away is exactly what `OfflineX2` sells.
+	--   2. Then `if doubled then payout = payout * boostMult end` -- entitlement
+	--      now checked, but the ONLY shipped caller
+	--      (`V7VaultOverlay.luau:671`) passes `false`, so the multiply never ran
+	--      while the consume below still fired. A player paid Robux, collected
+	--      1x, and the boost was destroyed. Worse than the exploit it replaced.
+	--
+	-- The lesson both times: APPLY AND CONSUME MUST SHARE ONE CONDITION. They are
+	-- now both `boostMult > 1.0`, so they cannot disagree about whether the boost
+	-- was used, whatever any caller passes.
 	local boostMult = BoostService.getMultiplier(player, "OfflineX2")
-	local payout = status.unclaimedEarnings
-	if doubled then
-		payout = payout * boostMult
-	end
+	local payout = status.unclaimedEarnings * boostMult
 
 	-- ATOMIC MUTATION: consume vault accrual and update LastSeen synchronously.
 	local mutated, reason = PlayerProfile.mutate(player, function(d)

@@ -187,6 +187,55 @@ function BoostEffectsTest.run(): (boolean, string?, number)
 	check(BoostService.getMultiplier(player, "OfflineX2") == 1.0,
 		"the boost must be consumed by the claim that used it")
 
+	----------------------------------------------------------------------------
+	-- 7. THE REGRESSION: the boost must apply with doubled=FALSE too
+	----------------------------------------------------------------------------
+
+	-- THE TEST THAT WAS MISSING, and its absence shipped a real-money bug.
+	-- Section 6 above only ever claimed with `true`, so it passed while the
+	-- multiply was gated on `doubled` and the ONLY shipped caller
+	-- (`V7VaultOverlay.luau:671`) passes `false`. A player bought the boost,
+	-- collected 1x, and the consume below still destroyed it.
+	--
+	-- The flag is now ignored entirely: ownership decides, so BOTH values must
+	-- produce the doubled payout. Testing only the convenient one is what hid it.
+	PlayerProfile.mutate(player, function(d)
+		d.Vault.AvgIncomePerSec = 10
+		d.Vault.LastSeen = os.time() - 3600
+	end)
+	OfflineService.beginSession(player)
+
+	check(BoostService.addBoost(player, "OfflineX2", 2, 3600),
+		"granting OfflineX2 for the doubled=false test should succeed")
+
+	local status3 = OfflineService.getStatus(player)
+	check(status3 ~= nil, "vault status should exist for the third claim")
+	local pending3 = (status3 :: any).unclaimedEarnings
+	check(pending3 > 0, "the vault must have accrued for the third claim")
+
+	local okClaim3, _, paid3 = OfflineService.claimVault(player, false)
+	check(okClaim3, "the doubled=false claim should succeed")
+	check(math.abs(paid3 - pending3 * 2) < 1e-6, string.format(
+		"A HELD BOOST MUST PAY 2x EVEN WITH doubled=false. Paid %.4f against "
+		.. "%.4f expected -- if these differ, the paid product is being consumed "
+		.. "without being applied, which is worse than not working at all.",
+		paid3, pending3 * 2))
+	check(BoostService.getMultiplier(player, "OfflineX2") == 1.0,
+		"and it must still be consumed exactly once")
+
+	-- Apply and consume must share one condition. With no boost held, a claim
+	-- must pay 1x and spend nothing -- proven for both flag values.
+	PlayerProfile.mutate(player, function(d)
+		d.Vault.AvgIncomePerSec = 10
+		d.Vault.LastSeen = os.time() - 3600
+	end)
+	OfflineService.beginSession(player)
+	local status4 = OfflineService.getStatus(player)
+	local pending4 = (status4 :: any).unclaimedEarnings
+	local _, _, paid4 = OfflineService.claimVault(player, false)
+	check(math.abs(paid4 - pending4) < 1e-6,
+		"no boost and doubled=false must pay exactly 1x")
+
 	PlayerProfile.releaseAll()
 	return true, nil, asserts
 end
