@@ -358,7 +358,7 @@ original draft of this document, which said the client was empty.
 ### Verified working — executed live in Studio, output captured
 
 ```
-=== SUITE COMPLETE: 21 passed, 0 failed ===   3,565 assertions
+=== SUITE COMPLETE: 21 passed, 0 failed ===   3,569 assertions
 ```
 
 Run in a live Studio session, not inferred from reading code. Twenty-two suite
@@ -595,7 +595,7 @@ before any code was written and must not be retuned without re-running it; the
 deepest lever is **Streak Strength**, a player-bought value with a cliff at
 `b ≈ 0.15` that makes genuinely different builds optimal for different players.
 About **28,900 lines** of our Luau now exist across three areas plus 2,242
-vendored, with **21 suites and 3,565 assertions passing live**. The game is
+vendored, with **21 suites and 3,569 assertions passing live**. The game is
 **playable end to end** — rolling, forging, elements, streaks, shapes, ascension,
 the vault, quests, boards and persistence all work. What remains is not new
 systems but **finishing**: two purchase paths currently take currency (one of them

@@ -22,7 +22,7 @@ All remotes live under `ReplicatedStorage.Remotes`, are created by the server, a
 | `SetElement` | `dieIndex: number`, `faceIndex: number`, `elementId: string` | `ok, reason?` | `elementId` resolved against the server catalog ∩ player's unlocked set. Never used as a table index. |
 | `SetShape` | `dieIndex: number`, `shapeId: string` | `ok, reason?` | `shapeId` allowlisted; Diamond cost checked server-side. |
 | `BuyUpgrade` | `upgradeId: string` | `ok, newLevel?, reason?` | `upgradeId` allowlisted. **Price is resolved server-side and never accepted from the client.** |
-| `AddDieSlot` | `shapeId: string` | `ok, slots?, reason?` | Buys one more die. `shapeId` names its shape and **must be one the player already owns**; the **empty string** means the starting shape. Cap is `3 + ascensions`, hard maximum `7`, verified server-side. |
+| `AddDieSlot` | `shapeId: string` | `ok, slots?, reason?` | Buys one more die. `shapeId` names its shape and **must be one the player already owns**; the **empty string** means the starting shape. Cap is `3 + ascensions`, hard maximum `12`, verified server-side. *(Amended 2026-08-26 from `7`; triggering fact: `DiceCatalog.MAX_DIE_SLOTS` is 12 and `dieSlotCapFor` clamps to it — same operator balance decision as SRS FR-1.1.)* |
 | `Ascend` | *(none)* | `ok, diamondsGained?, reason?` | Minimum lifetime-earnings threshold enforced server-side (SRS FR-9.5). |
 | `BuyDiamondNode` | `nodeId: string` | `ok, reason?` | `nodeId` allowlisted; Diamond cost server-resolved. Includes the Streak Strength tree. |
 | `SetAutoRoll` | `enabled: boolean` | `ok, reason?` | Strict boolean. The **interval** is server-owned and is never a parameter. |

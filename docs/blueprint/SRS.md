@@ -12,7 +12,7 @@ Every task's acceptance criteria must trace to a requirement here. An untraceabl
 ## 2. FUNCTIONAL REQUIREMENTS
 
 ### FR-1 — Arena and dice presentation
-- **FR-1.1** The arena renders as a contained low-poly 3D pit viewed top-down, holding between 1 and 7 dice.
+- **FR-1.1** The arena renders as a contained low-poly 3D pit viewed top-down, holding between 1 and 12 dice. *(Amended 2026-08-26 from “1 and 7”; triggering fact: `DiceCatalog.MAX_DIE_SLOTS` was raised to 12 as a deliberate operator balance decision recorded in `docs/handoff-5.md` and `docs/handoff-7.md`, with a nine-rung ascension ladder built up to it, and the game has been played at that cap. The code was right and this row was stale — the divergence was found by a documentation sweep, not by a defect. **FR-1.4 containment remains binding at the new ceiling** and has not yet been verified by eye above 7 dice.)*
 - **FR-1.2** Each die renders as a bevelled low-poly solid with emissive numerals, its face count matching its shape (4, 6, 8, 12, or 20).
 - **FR-1.3** A die's visual mass distribution is legible without opening a menu: heavier faces are visibly weightier (scale, glow intensity, or inset depth), so a player can read a die's build at a glance.
 - **FR-1.4** Dice come to rest fully inside the arena. A die that would settle outside is repositioned within it before the result is presented.
@@ -130,7 +130,7 @@ Every task's acceptance criteria must trace to a requirement here. An untraceabl
 
 ## 3. NON-FUNCTIONAL REQUIREMENTS
 
-- **NFR-1 — Client frame budget.** 60 FPS on desktop and 30 FPS on mid-tier mobile with 7 dice active. Client per-frame work under 4 ms. No allocation inside per-frame loops.
+- **NFR-1 — Client frame budget.** 60 FPS on desktop and 30 FPS on mid-tier mobile with **12 dice active** — the full cap, not a typical load. *(Amended 2026-08-26 from 7, following FR-1.1. The budget must be met at the ceiling the game actually permits; this has NOT been measured at 12 and is an open verification item.)* Client per-frame work under 4 ms. No allocation inside per-frame loops.
 - **NFR-2 — Server cost.** Per-player per-roll resolution under 0.5 ms. Cost scales with **die count**, never with physics complexity, because the server runs no simulation.
 - **NFR-3 — Responsive layout.** Correct rendering from 320 px wide through 4K, `Scale` units only.
 - **NFR-4 — Numeric safety.** Cash is representable to 1e300 without precision loss in display or comparison. All leaderboard values are bounded log-scaled integers. Every inbound numeric is explicitly checked finite before use — `NaN` fails all comparisons and would silently defeat the forge sum validator. *(Threat T-25.)*

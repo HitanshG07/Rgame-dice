@@ -12,7 +12,7 @@ and what is true right now.
 
 ## 1. STATE
 
-**21 suites, 0 failed, 3,565 assertions.** Verified in a running Studio session,
+**21 suites, 0 failed, 3,569 assertions.** Verified in a running Studio session,
 not by reading code.
 
 **Script Analysis: 158 warnings.** Unchanged this session — no new ones were
@@ -153,7 +153,7 @@ deliver.** Item 4 involves real money.
 
 ---
 
-## 4. THREE CORRECTIONS TO THE RECORD
+## 4. FOUR CORRECTIONS TO THE RECORD
 
 **Audio placeholder count.** `docs/handoff-7.md` §3 states *"23 audio asset
 IDs"*. The real count is **9** — 8 SFX cues plus one music loop, verified by
@@ -177,7 +177,11 @@ Caught on a re-verification pass, before any deletion was attempted.
 `docs/ROADMAP.md` §7 now carries the corrected instruction, including the L-028
 pre-deletion check for duties these files perform outside themselves.
 
-All three corrections follow the same pattern the zero-warnings incident did: a
+**The assertion count.** §1 of this document originally said **3,565**. The live suite reports **3,569**, confirmed on 2026-08-26 in a running Studio session, and the scoreboard's last two entries independently say 3,569 and 3,570. Corrected throughout this file and in `HANDOFF.md`.
+
+This one matters more than its size suggests. **The assertion count is this project's staleness canary** — L-019 and L-020 both turned on noticing that a green suite had run over stale code, and the tell was a count that did not move. A baseline recorded four low disarms that check: real work could remove four assertions and still look like it had added none.
+
+All four corrections follow the same pattern the zero-warnings incident did: a
 figure stated once, then carried forward by documents that did not re-check it.
 The third adds a wrinkle worth naming — **"nothing references this" is a claim
 about absence, and absence is the one thing a grep for a name cannot confirm.**
