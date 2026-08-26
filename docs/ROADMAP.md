@@ -19,7 +19,15 @@ paid Robux for, one permanently kills a progression path, one mints currency, an
 one poisons a balance beyond in-game recovery. Three whole shipped features turn
 out to be inert.
 
-**Phase 1 should not start until §12.2 is triaged.** The phases in this document
+**The two worst are on the forge — the game's core screen.** It reports
+“CALIBRATED” on *every* refusal (the result table is read as a tuple, so the
+success branch is unconditional), and forging is **permanently impossible on D7
+and D14** because their stored budget is 59.997 / 59.990 while the client always
+submits 60. Together: a D14 owner can forge all day, be told it worked every
+time, and never change a thing.
+
+**Phase 1 should not start until §12.2 and §12.8 are triaged.** §12.9 gives the
+ordered fix list. The phases in this document
 were planned against a picture of the codebase that the sweep has since
 corrected.
 
@@ -925,8 +933,8 @@ when the code uses D2, plus seven omitted fields).
 
 ### 12.6 What is NOT yet covered
 
-- **The client sweep was still running** when this was written. Its findings will
-  append here.
+- ~~The client sweep was still running.~~ **Complete — see §12.8.** It found the
+  two worst defects of the exercise.
 - **Round 2 was started and deferred by the operator.** It was to independently
   re-verify every claim above and dig into four areas the first pass
   under-covered: element resolution across dice, forge mass validation under
@@ -944,3 +952,157 @@ division-by-zero or `nil` arithmetic reaches a stored value. Fan-out loops are
 five remotes produced **zero throws and zero false successes**, every economic
 boundary refused correctly, and repeat vault claims correctly report
 `vault_empty`.
+
+---
+
+### 12.8 CLIENT SWEEP — round 1 complete (appended 2026-08-27)
+
+The third sweep landed after §12 was first written. It found the two worst
+defects of the whole exercise, and they compound each other.
+
+#### CRITICAL
+
+**CL-1 — The forge reports success on every single refusal.**
+`V7ForgePanel.luau:1325` (and `:1239`) do:
+
+```lua
+local ok, reason = NetClient.forge(activeDie, out)
+if ok then ... bForge.Text = "CALIBRATED" ...
+```
+
+`NetClient.forge` returns a **single `Result` table**, not `(ok, reason)`. So
+`ok` is always a truthy table and `reason` is always `nil` — **the success branch
+is unconditional.** Verified: every other call site in the client correctly does
+`local result = ...; if result.ok`.
+
+A player who cannot afford the forge, is throttled, or submits a distribution the
+server rejects sees the button turn green and read **"CALIBRATED"**, and `dirty`
+is cleared. They believe they paid and reforged. Nothing happened. Same at
+`:1239`, where a refused `MassBudget` purchase never shows its reason.
+
+This is a **false economic receipt on the game's core screen.**
+
+**CL-2 — Forging is permanently impossible on D7 and D14.**
+`newDie` snaps the per-face share down to 3dp, so the budget is not an integer for
+shapes that do not divide 60 evenly. The submit path forces the total to
+`math.floor(budget + 0.5)` = exactly 60. Measured in a running game:
+
+| Shape | Stored budget | Client sends | Drift | vs EPSILON 0.001 |
+|---|---|---|---|---|
+| D7 | **59.997** | 60 | 0.0030 | **rejected** |
+| D14 | **59.990** | 60 | 0.0100 | **rejected** |
+
+All ten other shapes produce an exact 60 and are unaffected.
+
+**Every forge on a D7 or D14 fails with `sum_mismatch`, forever — and CL-1 tells
+the player it worked.** The two together are why this pair is listed first: a
+player can own a D14, forge it repeatedly, be told "CALIBRATED" each time, and
+never once change anything.
+
+**CL-3 — The MULT readout overstates by orders of magnitude past streak 50.**
+`ClientBootstrap.client.luau:290` uses `math.min(streak, 500)`; the server caps
+the exponent at **50** (`RollService.STREAK_CAP`) and clamps to `1e6`. At
+StreakStrength 20 and streak 60 the HUD reads **×56,347** against a real **×9,100**.
+This is a third hardcoded copy of a server-owned constant, two lines below the
+`B_PER_LEVEL` duplication in R-3.
+
+**CL-4 — The SHAPES panel's equip button is dead.** `V7MenuPanel.luau:1073` and
+`:1157` read `playerInventory`, but the only declaration is at `:3854` inside a
+*different closure*. It resolves to a nil global, so `ownedTotal` is always 0: a
+player holding three D6 sees **"[ NO DICE OWNED ]"** and the click guard can never
+pass. A scope scan found this is the only cross-closure leak in the live set.
+
+**CL-5 — The DAILY QUESTS panel is permanent mock data with a dead CLAIM
+button.** `questRows` is built and read by nothing; `state.quests` — which the
+server ships complete with progress and target *specifically* so the client can
+draw the bar — is read nowhere. The cards sit forever at their construction
+values, including a fabricated **"REWARD: +$2,500 CASH"**. The server
+deliberately omits quest reward amounts under NFR-5; the client invented one.
+`rowState.id` is never assigned, so CLAIM returns immediately every time.
+
+**CL-6 — Two unguarded lines sit upstream of the panel fan-out.**
+`V7MenuPanel:applyState` and `V7ForgePanel:applyState` are both correctly
+isolated — but in `ClientBootstrap`, lines `:310` and `:326-329` run *before*
+`menuController:applyState` at `:336`. Only the risk calculation (the one that
+already caused the L-057 incident) was wrapped. A throw in `estimateMultiplier` —
+which happens on any non-table `state.diamondTree` — aborts the snapshot before
+any panel is fed, while the HUD keeps working. **That is the exact L-057
+symptom.** Separately, the three `.new()` panel constructions at `:152/:155/:159`
+are not `pcall`'d, unlike `require` and `init`; a throw inside ~6,000 lines of
+`V7MenuPanel.new` would leave the ROLL button unwired with no `fatal()` panel.
+
+#### HIGH
+
+- **Shape-change cost is invisible and its refusal is discarded.** The server
+  charges 5 Diamonds for a non-first equip; `SHAPE_CHANGE_DIAMOND_COST` exists so
+  the client can show it, and `ShapesEquipped` is shipped so it can tell free from
+  paid. Neither is read. The catalog comment says this defect was already fixed —
+  it has returned, in both SHAPES and SLOTS.
+- **`★ TOTAL` on the board sums face *indices*, which have no economic meaning.**
+  Payout is `mass^ALPHA`, and under the inverse-mass rule a high index is usually
+  a *light, low-paying* face. The board's most prominent number moves opposite to
+  earnings.
+- **The SLOTS panel quotes a slot price the server will refuse.** Client passes
+  `slotNodes` to `dieSlotCost`; `ServerBootstrap.server.luau:546` omits it. A
+  Diamond node the player paid up to 3,200 Diamonds for buys a slot the store then
+  declines to sell. *(This one is mine — introduced in `daac879` when I threaded
+  `slotNodes` through the client and missed the server's own pricing call.)*
+- **All four settings toggles control nothing.** `refreshSettings` hardcodes
+  `available = true` and never reads `_capabilities`, which is written and read by
+  nothing. Music and SFX render as live switches over a subsystem where
+  `AudioDirector.play` has zero call sites outside the dead files.
+- **The shop shows the false Luck Boost claim the catalog was corrected to
+  remove.** `V7MenuPanel.luau:2412` still says *"heavy faces land closer to even
+  odds"*, rendering directly beneath the corrected blurb — so the card now shows
+  both the true and the false description of the same Robux product.
+
+#### MEDIUM / LOW
+
+Vault panel invents plausible defaults for missing fields and hardcodes "1.50x
+VIP" (the bonus is additive, so the real figure varies) and labels Premium players
+"Standard" · the forge re-implements `landingProbabilities` / `expectedValue` /
+`voidProbability` instead of calling `ForgeMath`, the third recorded instance of
+L-025 · `+` on the starting D2 returns only 2 mass where `−` removed 5 · the
+payout flash shows the pre-multiplier figure, so a CashX2 owner sees `+$100` while
+the balance jumps `+$200` · a throttled leaderboard read is painted as
+"STREAM OFFLINE" · client-side duplicates of the playtime and login reward tables
+· per-snapshot `Model:Clone()` churn rebuilding ~20 rigged dice per second for
+panels nobody is looking at · SAFE and EVEN presets are byte-identical · the
+SHAPES card's priced button has no click handler (an overlay intercepts it) ·
+**nothing subscribes to `onNotice`, so every enumerated server refusal is fired
+into nothing** · `state.boosts` is read by no client module, so a purchased
+15-minute Luck Boost has no countdown anywhere — which is exactly what §5's item
+**1c** must fix.
+
+#### Verified clean by this sweep
+
+`applyState` isolation in both panels · board tab ids match the server ·
+`BuyDieInstance` and shape-unlock pricing match · `refreshAscend` correctly reads
+`state.cash`, not `LifetimeCash` · `DiceRenderer` and `BoardView` have symmetric
+`shutdown` · every `NetClient` throttle is looser than its server bucket · no
+unbounded connection or instance leak anywhere in the live set.
+
+---
+
+### 12.9 REVISED PRIORITY after all three sweeps
+
+**Fix before Phase 1 starts.** Ordered by what a player loses:
+
+1. **CL-1** — the forge lies about every failure. One-line fix, and it is masking
+   at least CL-2.
+2. **CL-2** — D7 and D14 cannot be forged at all.
+3. **B-1 / B-2** — ascension deletes Robux-bought Gems; the slot pass grants
+   double.
+4. **B-3** — ascension permanently kills the Cash mass-budget path.
+5. **B-4 / B-5** — the login mint, and NaN poisoning a balance forever.
+6. **H-1** — leaderboards have never been written.
+7. **CL-4 / CL-5** — the equip button and the quest panel are dead; the quest
+   panel additionally displays an invented reward figure.
+8. **R-1 / CL-3** — RISK and MULT both report numbers that are simply wrong.
+
+**Then:** H-2 (currency fallthrough) *before* any Shards work, and the six per-die
+sites *before* any traits work — both are in §12.5.
+
+**Two of the findings above are mine, from today**, and are called out as such
+rather than folded in anonymously: the `OfflineX2` consume-without-apply
+regression (fixed, `67c8e84`) and the SLOTS price mismatch (open).

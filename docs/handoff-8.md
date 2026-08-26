@@ -313,7 +313,16 @@ Two operator reports ("risk not working dynamically", "streak has no usecase")
 were both correct, and the sweep behind them found far more. **Full register with
 file:line and failure scenarios is `docs/ROADMAP.md` §12.** Headlines:
 
-**Five CRITICAL:**
+**The two worst are on the forge, and they compound.** `V7ForgePanel` reads
+`NetClient.forge`'s **`Result` table as a tuple**, so `ok` is always truthy and
+the panel prints **“CALIBRATED” on every refusal** — a false economic receipt on
+the game's core screen. And **forging is permanently impossible on D7 and D14**:
+their stored budget is 59.997 / 59.990 (the per-face share is snapped to 3dp)
+while the client always submits exactly 60, which exceeds the 0.001 epsilon. So
+a D14 owner forges, is told it worked, and nothing ever changes. Measured in a
+running game; the other ten shapes are exact and unaffected.
+
+**Five more CRITICAL on the server:**
 
 1. **Ascension deletes Gems**, which are sold for Robux. Not on FR-9.1's reset
    list, not mentioned on the confirm screen FR-9.4 requires.
@@ -373,8 +382,14 @@ file:line and failure scenarios is `docs/ROADMAP.md` §12.** Headlines:
 **Everything in `docs/ROADMAP.md` §12**, none of which is fixed except the
 `67c8e84` regression.
 
-**Not yet swept:** the client sweep was still running when this was written, and
-a deeper round 2 was started and **deferred by the operator**. Round 2 was to
+**Round 1 is now complete** — all three sweeps in, client findings included above
+and in full at `docs/ROADMAP.md` §12.8. The client sweep also found the SHAPES
+equip button is dead (a cross-closure nil global), the quests panel is permanent
+mock data advertising an invented “+$2,500 CASH” reward, the MULT chip overstates
+by orders of magnitude past streak 50, and **nothing in the client subscribes to
+`onNotice`**, so every enumerated server refusal is fired into nothing.
+
+**A deeper round 2 was started and deferred by the operator.** Round 2 was to
 independently re-verify every claim and dig into element resolution across dice,
 forge mass validation, auto-roll lifecycle, and rate-limiter token maths.
 
