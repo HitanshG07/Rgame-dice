@@ -588,7 +588,7 @@ move to `src/Shared/` so the client can look it up locally — the same solution
 | | |
 |---|---|
 | **Severity** | HIGH |
-| **Status** | **READY** |
+| **Status** | **FIXED** |
 | **Stands** | CONFIRMED. **Operator-reported**, then measured |
 | **Where** | `src/Client/ClientBootstrap.client.luau:219` |
 
@@ -637,7 +637,7 @@ took the whole client down once. Wrap the loop, do not replace them.
 | | |
 |---|---|
 | **Severity** | HIGH |
-| **Status** | **READY** |
+| **Status** | **FIXED** |
 | **Where** | `src/Client/ClientBootstrap.client.luau:290` |
 
 **Root cause.** `math.min(streak, 500)` — the server caps the exponent at **50**

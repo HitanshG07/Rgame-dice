@@ -70,6 +70,7 @@ end
 -- function `RollService` uses server-side, so this cannot compute a different
 -- answer than the roll it is describing.
 local ForgeMath = require(shared:WaitForChild("ForgeMath"))
+local StreakMath = require(shared:WaitForChild("StreakMath"))
 local DiceCatalog = require(shared:WaitForChild("DiceCatalog"))
 
 local clientRoot = script.Parent
@@ -206,89 +207,77 @@ if type(V7HUDModule) == "table" and type(V7HUDModule.new) == "function" then
 	end)
 
 	-- VOID RISK, computed here rather than sent by the server.
-	--
-	-- Reads die 1's own Faces off the snapshot and asks the exact function
-	-- RollService uses server-side, so the number on screen cannot drift from
-	-- the number the roll actually resolves against. Returns nil (unknown) for
-	-- any snapshot shape that is not yet a real die, rather than defaulting to a
-	-- guessed 0% -- a die nobody has examined is unknown risk, not safe risk.
+	-- RISK-1: Aggregate void risk ACROSS EVERY DIE, not just the first.
+	-- FR-5.1 resets the streak when ANY die lands Void, so the combined risk
+	-- is the complement of "no die voids": 1 - Π(1 - p_i).
+	-- Reading only dice[1] caused multi-dice loadouts to severely understate risk
+	-- (e.g. 12 dice at 33% showed 33% instead of real 99.2%) and forging any die
+	-- other than die 1 never moved the readout.
 	local function computeVoidRiskPct(state: any): number?
-		if type(state) ~= "table" or type(state.dice) ~= "table" then
+		if type(state) ~= "table" or type(state.dice) ~= "table" or #state.dice == 0 then
 			return nil
 		end
-		local die = state.dice[1]
-		if type(die) ~= "table" or type(die.Faces) ~= "table" or type(die.Shape) ~= "string" then
-			return nil
-		end
-		-- A FACE MAY BE A NUMBER OR A TABLE, and reading only one shape is what
-		-- took the whole client down. This accepted `{ Mass = n }` and scored
-		-- anything else as 0 -- so a snapshot carrying plain numeric faces
-		-- produced an all-zero mass list, `ForgeMath.voidProbability` raised
-		-- "total mass must be positive", and the error escaped the StateSync
-		-- handler ENTIRELY. Every panel downstream of that line -- shop, shapes,
-		-- slots, settings, vault, quests, ascend, and the forge -- silently
-		-- stopped receiving snapshots, which is why the whole UI read as
-		-- unhooked rather than as one broken readout.
-		local masses: { number } = {}
-		local total = 0
-		for i, face in ipairs(die.Faces) do
-			local m: number
-			if type(face) == "table" then
-				m = tonumber(face.Mass) or 0
-			else
-				m = tonumber(face) or 0
+
+		local survive = 1.0
+		for _, die in ipairs(state.dice) do
+			if type(die) ~= "table" or type(die.Faces) ~= "table" or type(die.Shape) ~= "string" then
+				return nil
 			end
-			if m < 0 or m ~= m then
-				m = 0
+
+			-- A FACE MAY BE A NUMBER OR A TABLE, and reading only one shape is what
+			-- took the whole client down. This accepted `{ Mass = n }` and scored
+			-- anything else as 0 -- so a snapshot carrying plain numeric faces
+			-- produced an all-zero mass list, `ForgeMath.voidProbability` raised
+			-- "total mass must be positive", and the error escaped the StateSync
+			-- handler ENTIRELY.
+			local masses: { number } = {}
+			local total = 0
+			for i, face in ipairs(die.Faces) do
+				local m: number
+				if type(face) == "table" then
+					m = tonumber(face.Mass) or 0
+				else
+					m = tonumber(face) or 0
+				end
+				if m < 0 or m ~= m then
+					m = 0
+				end
+				masses[i] = m
+				total += m
 			end
-			masses[i] = m
-			total += m
+
+			-- GUARD THE PRECONDITION, not just the emptiness. `voidProbability`
+			-- requires a positive total; a list of zeros is the wrong input, not an
+			-- error to propagate. Unknown risk is `nil`, which the HUD renders as
+			-- "--" -- honest about not knowing rather than fatal.
+			if #masses == 0 or total <= 0 then
+				return nil
+			end
+			local floor = DiceCatalog.getMassFloor(die.Shape)
+			local p = ForgeMath.voidProbability(masses, floor)
+			if not ForgeMath.isFinite(p) then
+				return nil
+			end
+			local pClamped = math.clamp(p, 0, 1)
+			survive *= (1.0 - pClamped)
 		end
-		-- GUARD THE PRECONDITION, not just the emptiness. `voidProbability`
-		-- requires a positive total; a list of zeros is the wrong input, not an
-		-- error to propagate. Unknown risk is `nil`, which the HUD renders as
-		-- "--" -- honest about not knowing rather than fatal.
-		if #masses == 0 or total <= 0 then
-			return nil
-		end
-		local floor = DiceCatalog.getMassFloor(die.Shape)
-		local p = ForgeMath.voidProbability(masses, floor)
-		if not ForgeMath.isFinite(p) then
-			return nil
-		end
-		return math.clamp(p, 0, 1) * 100
+
+		return math.clamp((1.0 - survive) * 100, 0, 100)
 	end
 
-	-- The streak MULTIPLIER is a display quantity derived from `state.streak`
-	-- and the player's own StreakStrength -- both already on the snapshot -- and
-	-- is refined by the exact-server-value RollResult carries after each roll.
-	-- Between rolls this is an honest approximation, not a guess invented on the
-	-- client: it uses the same `(1+b)^streak` shape RollService computes.
-	local B_PER_LEVEL = 0.01
-
-	-- RETURNS THE MULTIPLIER *AND* WHETHER THE BONUS IS EVEN UNLOCKED.
-	--
-	-- Both used to collapse to a bare `1`, and those are OPPOSITE situations
-	-- (L-053): a multiplier of 1 with StreakStrength bought means "keep rolling,
-	-- the streak is building"; a multiplier of 1 with StreakStrength at zero
-	-- means "this readout will never move no matter how long your streak gets".
-	-- Every new player is in the second state, so the HUD showed x1.00 beside a
-	-- STREAK of 10 and looked broken -- reported as "we have a multi option, have
-	-- never seen it work".
-	--
-	-- The maths was always right. What was missing was the display saying which
-	-- of the two states the player is in, which is exactly the defect class where
-	-- a working feature has no observer (L-039).
+	-- MULT-1 & CONST-1: The streak MULTIPLIER is computed from shared StreakMath
+	-- so client and server share the identical STREAK_CAP (50, not 500), B_PER_LEVEL (0.01),
+	-- and MAX_MULTIPLIER ceiling (1e6).
 	local function estimateMultiplier(state: any): (number, boolean)
 		local level = tonumber(state.diamondTree and state.diamondTree.StreakStrength) or 0
 		local unlocked = level > 0
-		local b = math.max(0, level) * B_PER_LEVEL
+		local b = StreakMath.streakStrengthToB(level)
 		local streak = tonumber(state.streak) or 0
 		if b <= 0 or streak <= 0 then
 			return 1, unlocked
 		end
-		local m = (1 + b) ^ math.min(streak, 500)
-		return (if ForgeMath.isFinite(m) then m else 1), unlocked
+		local m = StreakMath.multiplier(streak, b)
+		return m, unlocked
 	end
 
 	-- Held so the RollResult handler below can redraw risk without waiting for

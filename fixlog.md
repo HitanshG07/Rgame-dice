@@ -107,4 +107,25 @@
   - Evidence captured: `deliveries/evidence/2026-09-17-batch4-inert-features.txt`.
 - **Still open?** CLOSED. Fixed in Batch 4.
 
+### 2026-09-17 — Batch 5: Wrong Numbers on Screen (`RISK-1`, `MULT-1`, `CONST-1`)
+- **Date / Batch / Defect ID:** 2026-09-17 / Batch 5 / `RISK-1`, `MULT-1`, `CONST-1`
+- **What happened:**
+  - `RISK-1`: In `ClientBootstrap.client.luau:219`, `computeVoidRiskPct` read only `state.dice[1]`. It ignored all other dice in multi-die loadouts, severely understating real void risk (e.g. 12 dice at 33% showed 33% instead of real 99.2%) and forging any die other than die 1 never moved the HUD risk readout.
+  - `MULT-1` & `CONST-1`: `estimateMultiplier` in `ClientBootstrap.client.luau:290` hardcoded `math.min(streak, 500)` and duplicated `B_PER_LEVEL = 0.01` (`CONST-1`), while the server enforced `STREAK_CAP = 50` and capped multipliers at `1e6`. At StreakStrength 20 and streak 60 the HUD displayed ×56,347 against an authoritative server payout multiplier of ×9,100.
+- **What caused it:**
+  - `RISK-1`: Single-die indexing assumption (`dice[1]`) ignoring the probabilistic complement rule: `P(at least one void) = 1 - Π(1 - p_i)` under FR-5.1.
+  - `MULT-1` & `CONST-1`: Tuning duplication and divergence between client display heuristics and authoritative server roll logic.
+- **How it was addressed:**
+  - `RISK-1`: In `ClientBootstrap.client.luau`, updated `computeVoidRiskPct` to aggregate void risk across all active dice using `survive *= (1 - p)` and returning `(1 - survive) * 100`, with all existing nil-on-unknown and mass floor guards preserved.
+  - `MULT-1` & `CONST-1`: Created shared pure math module `src/Shared/StreakMath.luau` containing authoritative constants (`STREAK_CAP = 50`, `B_PER_LEVEL = 0.01`, `MAX_MULTIPLIER = 1e6`) and compounding multiplier function `StreakMath.multiplier(streak, b)`. Wired `RollService.luau` and `ClientBootstrap.client.luau` to read from `StreakMath`.
+- **Verified how:**
+  - Full automated suite: 23 passed, 0 failed.
+  - Assertions increased from 3,712 to 3,743 (+31 assertions).
+  - Pin tests in `tests/Payout.test.luau`:
+    - Verified `StreakMath` constants match `RollService` constants.
+    - Verified `StreakMath.multiplier` matches `RollService.streakMultiplier` across a grid of levels and streaks (including streaks > 50).
+    - Verified multi-die void risk formula produces ~69.9% for 3 dice at 33% void risk each (vs 33% single die).
+  - Evidence captured: `deliveries/evidence/2026-09-17-batch5-wrong-numbers.txt`.
+- **Still open?** CLOSED. Fixed in Batch 5.
+
 

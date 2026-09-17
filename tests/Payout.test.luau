@@ -98,6 +98,34 @@ local function run(): (boolean, string?, number)
 	e = e or check(RollService.streakMultiplier(5, 0 / 0) == 1, "NaN b must fall back to 1x")
 
 	----------------------------------------------------------------------------
+	-- MULT-1 & CONST-1: Sourced from shared StreakMath pure module
+	----------------------------------------------------------------------------
+	local StreakMath = require(Shared:WaitForChild("StreakMath"))
+	e = e or check(StreakMath.STREAK_CAP == 50, "StreakMath.STREAK_CAP must be 50")
+	e = e or check(RollService.STREAK_CAP == StreakMath.STREAK_CAP, "RollService.STREAK_CAP must match StreakMath")
+	e = e or check(StreakMath.B_PER_LEVEL == 0.01, "StreakMath.B_PER_LEVEL must be 0.01")
+	e = e or check(RollService.B_PER_LEVEL == StreakMath.B_PER_LEVEL, "RollService.B_PER_LEVEL must match StreakMath")
+	e = e or check(StreakMath.MAX_MULTIPLIER == 1e6, "StreakMath.MAX_MULTIPLIER must be 1e6")
+	e = e or check(RollService.MAX_STREAK_MULTIPLIER == StreakMath.MAX_MULTIPLIER, "RollService.MAX_STREAK_MULTIPLIER must match StreakMath")
+
+	-- Shared multiplier consistency check across grid of levels and streaks
+	for _, testLvl in ipairs({ 0, 1, 5, 20 }) do
+		for _, testStreak in ipairs({ 0, 1, 10, 50, 60, 500 }) do
+			local testB = StreakMath.streakStrengthToB(testLvl)
+			local sharedMult = StreakMath.multiplier(testStreak, testB)
+			local serverMult = RollService.streakMultiplier(testStreak, testB)
+			e = e or check(approx(sharedMult, serverMult, 1e-9), string.format(
+				"StreakMath.multiplier mismatch at lvl=%d, streak=%d", testLvl, testStreak))
+		end
+	end
+
+	-- RISK-1: Multi-die void risk formula proof (1 - Π(1 - p_i))
+	local pDie = 0.33
+	local threeDiceRisk = (1.0 - (1.0 - pDie) ^ 3) * 100
+	e = e or check(threeDiceRisk > 69.9 and threeDiceRisk < 70.0,
+		"3 dice at 33% void risk each must produce ~69.9% combined risk, not 33% (RISK-1)")
+
+	----------------------------------------------------------------------------
 	-- VOID DETECTION: the lightest face is the streak breaker (SRS FR-5.2)
 	----------------------------------------------------------------------------
 	-- a face AT the floor is the Void

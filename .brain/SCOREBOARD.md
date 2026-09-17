@@ -62,8 +62,11 @@ Rejections are appended to the active task's line AT REJECTION TIME (circuit-bre
 - [2026-09-17] critical-bugfix-batch4-inert-features | PRODUCTION | lane: full | rejections: G2:1 (fakePlayer Folder member error in test) | test-mock-player-shape | **DELIVERED.** G2 MECHANICALLY-CLEAN (23 suites / 3,712 assertions, +5 assertions). BOARD-1 (LeaderboardService hooks in onPlayerRemoving, BindToClose, periodic publish; M3 pre-yield cache timestamp), LUCK-1 (Luck upgrade removed from CASH_UPGRADES per operator decision), SHAPE-1 (shapesInventory scoped to buildShapesOverlay), QUEST-1 (fabricated reward text removed, refreshQuests live state.quests wiring) verified live in Studio VM.
   - **P-1 Caveat:** Static analysis (P-1) was not produced due to standing environmental blocker: no Luau analyzer on system PATH and Studio Script Analysis pane is not script-readable. Standing operator blocker on every Gate 2 in this project, recorded rather than waived.
 
+- [2026-09-17] critical-bugfix-batch5-wrong-numbers | PRODUCTION | lane: full | rejections: none | none | **DELIVERED.** G2 MECHANICALLY-CLEAN (23 suites / 3,743 assertions, +31 assertions). RISK-1 (aggregate void risk across active dice 1 - Π(1 - p_i)), MULT-1 & CONST-1 (pure shared StreakMath module, unifying STREAK_CAP=50, B_PER_LEVEL=0.01, MAX_MULTIPLIER=1e6 between RollService and ClientBootstrap) verified live in Studio VM.
+  - **P-1 Caveat:** Static analysis (P-1) was not produced due to standing environmental blocker: no Luau analyzer on system PATH and Studio Script Analysis pane is not script-readable. Standing operator blocker on every Gate 2 in this project, recorded rather than waived.
+
 ## RUNNING TALLIES
-- Total pipeline runs: 26 (one superseded, one disputed, one breaker-halted then reset and delivered)
+- Total pipeline runs: 27 (one superseded, one disputed, one breaker-halted then reset and delivered)
 - Rejections by gate: G2: 6 | G3: 6 | G4: 1 | G5: 0 | G6 vetoes: 0
 - **Breaker trips: 1** (dice-forge-block3-services, 2026-08-07 — and it was BREACHED before being noticed, because the scoreboard line that arms it was never written. The persistence rule failed exactly where it was designed to hold: across a context compaction.)
 - Most recurrent defect classes, measured:

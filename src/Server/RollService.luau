@@ -22,6 +22,7 @@ local RunService = game:GetService("RunService")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local ForgeMath = require(Shared:WaitForChild("ForgeMath"))
+local StreakMath = require(Shared:WaitForChild("StreakMath"))
 local ElementCatalog = require(Shared:WaitForChild("ElementCatalog"))
 local DiceCatalog = require(Shared:WaitForChild("DiceCatalog"))
 local Remotes = require(Shared:WaitForChild("Remotes"))
@@ -39,11 +40,12 @@ local RollService = {}
 -- measured cliff at b ~= 0.15 deliberately: a player who has invested nothing
 -- sits below it and is correctly a sniper, one who has invested heavily sits
 -- above it and is correctly a grinder. That split IS the build diversity.
+-- CONST-1: Sourced from shared StreakMath so client and server cannot drift.
 --------------------------------------------------------------------------------
 
-RollService.STREAK_CAP = 50
-RollService.B_PER_LEVEL = 0.01           -- StreakStrength level -> b
-RollService.MAX_STREAK_MULTIPLIER = 1e6  -- hard ceiling; compounding is explosive
+RollService.STREAK_CAP = StreakMath.STREAK_CAP
+RollService.B_PER_LEVEL = StreakMath.B_PER_LEVEL
+RollService.MAX_STREAK_MULTIPLIER = StreakMath.MAX_MULTIPLIER
 RollService.SHIELD_COOLDOWN = 30         -- seconds, server-clocked (SRS FR-5.6)
 
 -- A face is a Void only if it is the lightest AND sits at or near the mass
@@ -100,25 +102,11 @@ export type ThrowResult = {
 -- the forge optimum at any strength -- only compounding creates the fork
 -- between sniper and grinder builds (ledger L-016).
 function RollService.streakMultiplier(streak: number, b: number): number
-	if not ForgeMath.isFinite(streak) or not ForgeMath.isFinite(b) then
-		return 1
-	end
-	if streak <= 0 or b <= 0 then
-		return 1
-	end
-	local capped = math.min(streak, RollService.STREAK_CAP)
-	local m = (1 + b) ^ capped
-	if not ForgeMath.isFinite(m) or m > RollService.MAX_STREAK_MULTIPLIER then
-		return RollService.MAX_STREAK_MULTIPLIER
-	end
-	return m
+	return StreakMath.multiplier(streak, b)
 end
 
 function RollService.streakStrengthToB(level: number): number
-	if not ForgeMath.isFinite(level) or level <= 0 then
-		return 0
-	end
-	return level * RollService.B_PER_LEVEL
+	return StreakMath.streakStrengthToB(level)
 end
 
 -- A face at or near the mass floor is a Void (SRS FR-5.2). Because it is the
