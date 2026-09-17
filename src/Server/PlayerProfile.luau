@@ -56,7 +56,7 @@ export type Face = { Mass: number, Element: string }
 -- clamp of PurchasedBudget gives both: switching to a smaller-capped shape
 -- caps the usable budget but does not destroy what was bought, and switching
 -- to a larger-capped shape restores it but never manufactures more.
-export type Die = { Shape: string, MassBudget: number, PurchasedBudget: number, Faces: { Face } }
+export type Die = { Shape: string, MassBudget: number, PurchasedBudget: number, Faces: { Face }, [string]: any }
 
 export type Profile = {
 	SchemaVersion: number,
@@ -269,6 +269,27 @@ function PlayerProfile._reconcile(raw: any): Profile
 	-- function; every caller sees a `Profile` going in and coming out.
 	local data: { [string]: any } = if type(raw) == "table" then raw else {}
 	local template = (TEMPLATE :: any) :: { [string]: any }
+
+	-- CONTAINER TYPE SANITIZATION (RECON-1):
+	-- Ensure all container keys are genuine tables BEFORE recursion so corrupted
+	-- scalar or non-table types do not survive or crash downstream accessors.
+	for _, containerKey in ipairs({
+		"Vault",
+		"Settings",
+		"Quests",
+		"LoginStreak",
+		"CodesRedeemed",
+		"PurchaseIds",
+		"PurchaseOrder",
+		"Inventory",
+		"Upgrades",
+		"Diamond",
+	}) do
+		if type(data[containerKey]) ~= "table" then
+			data[containerKey] = deepCopy(template[containerKey])
+		end
+	end
+
 	-- RECURSIVE, not top-level only. A shallow sweep fills `Upgrades` when the
 	-- whole table is missing but never notices a NEW KEY INSIDE an existing
 	-- one -- so the day a field is added to Upgrades, Vault, Settings or
@@ -291,6 +312,8 @@ function PlayerProfile._reconcile(raw: any): Profile
 					target[k] = deepCopy(v)
 				elseif type(target[k]) == "table" and type(v) == "table" then
 					fill(target[k], v)
+				elseif type(v) == "table" and type(target[k]) ~= "table" then
+					target[k] = deepCopy(v)
 				end
 			end
 		end
@@ -298,6 +321,18 @@ function PlayerProfile._reconcile(raw: any): Profile
 	fill(data, template)
 	if type(data.Dice) ~= "table" or #data.Dice == 0 then
 		data.Dice = deepCopy(TEMPLATE.Dice)
+	else
+		local cleanDice = {}
+		for _, die in ipairs(data.Dice) do
+			if type(die) == "table" then
+				table.insert(cleanDice, die)
+			end
+		end
+		if #cleanDice == 0 then
+			data.Dice = deepCopy(TEMPLATE.Dice)
+		else
+			data.Dice = cleanDice
+		end
 	end
 
 	-- SELF-REPAIR: `DieSlots` and `#Dice` must agree.
@@ -394,6 +429,32 @@ function PlayerProfile._reconcile(raw: any): Profile
 	end
 	if type(data.Diamond.ShapesEquipped) ~= "table" then
 		data.Diamond.ShapesEquipped = deepCopy(TEMPLATE.Diamond.ShapesEquipped)
+	end
+	if type(data.Quests) ~= "table" then
+		data.Quests = deepCopy(TEMPLATE.Quests)
+	end
+	if type(data.Quests.Slots) ~= "table" then
+		data.Quests.Slots = deepCopy(TEMPLATE.Quests.Slots)
+	end
+	if type(data.Vault) ~= "table" then
+		data.Vault = deepCopy(TEMPLATE.Vault)
+	else
+		for _, vKey in ipairs({ "LastSeen", "AccrualId", "AvgIncomePerSec", "PurchasedHours" }) do
+			local val = (data.Vault :: any)[vKey]
+			if type(val) ~= "number" or val ~= val or val == math.huge or val == -math.huge then
+				(data.Vault :: any)[vKey] = (TEMPLATE.Vault :: any)[vKey]
+			end
+		end
+	end
+	if type(data.LoginStreak) ~= "table" then
+		data.LoginStreak = deepCopy(TEMPLATE.LoginStreak)
+	else
+		for _, sKey in ipairs({ "Count", "LastDay", "ForgivenessLeft" }) do
+			local val = (data.LoginStreak :: any)[sKey]
+			if type(val) ~= "number" or val ~= val or val == math.huge or val == -math.huge then
+				(data.LoginStreak :: any)[sKey] = (TEMPLATE.LoginStreak :: any)[sKey]
+			end
+		end
 	end
 
 	-- `RunCash` WAS BACKFILLED HERE, and the field has been deleted.
@@ -671,6 +732,13 @@ function PlayerProfile.saveNow(player: Player): (boolean, string?)
 	end
 	if not profile:IsActive() then
 		return false, "profile_released"
+	end
+
+	local okPayload, size = PlayerProfile.checkPayloadSize(profile.Data :: Profile)
+	if not okPayload then
+		warn(string.format("[PlayerProfile] refusing saveNow for UserId=%d: payload ceiling exceeded (%d bytes)",
+			player.UserId, size))
+		return false, "payload_ceiling_exceeded"
 	end
 
 	local ok, err = pcall(function()

@@ -56,7 +56,7 @@ must land before any Phase 2 work or it turns into data loss.
 | **3** | Permanent, unrecoverable player loss | `ASC-2`, `LOGIN-1`, `NAN-1` | Small–medium |
 | **4** | Whole features are inert | `BOARD-1`, `LUCK-1`, `SHAPE-1`, `QUEST-1` | Medium |
 | **5** | Numbers on screen are simply wrong | `RISK-1`, `MULT-1`, `CONST-1` | Small |
-| **6** | Safety nets — **before Phase 2** | `CURR-1`, `DIE-1`, `SAVE-1`, `VAULT-1`, `RECON-1`, `FANOUT-1` | Medium–large |
+| **6** | Safety nets — **before Phase 2** | `CURR-1`, `DIE-1`, `SAVE-1`, `VAULT-1`, `RECON-1`, `FANOUT-1` | **FIXED** |
 | **7** | Everything else | See §7 | Varies |
 
 **Batch 1 alone is two lines and removes the worst defect in the game.**
@@ -680,7 +680,7 @@ loss the moment Phase 2 ships**, so they must land first.
 | | |
 |---|---|
 | **Severity** | HIGH — **blocks Shards work** |
-| **Status** | **READY** |
+| **Status** | **FIXED** |
 | **Where** | `EconomyService.luau:80-97`, and a second copy at `PurchaseService.luau:85-93` |
 
 **Root cause.** `readBalance` and `writeBalance` have no `else → refuse`. An
@@ -725,7 +725,7 @@ the list today; that absence is why the fallthrough survived.
 | | |
 |---|---|
 | **Severity** | HIGH — **blocks Trait Forge** |
-| **Status** | **READY** (as a checklist) |
+| **Status** | **FIXED** |
 
 The roadmap names one site. There are six:
 
@@ -758,7 +758,7 @@ forward** every field they do not deliberately reset — the same way
 | | |
 |---|---|
 | **Severity** | HIGH |
-| **Status** | **READY** |
+| **Status** | **FIXED** |
 | **Where** | `PlayerProfile.luau:681` (zero production callers) |
 
 `API_DATA_CONTRACT.md` §3.1 invariant 6: *"The serialised profile is asserted
@@ -782,7 +782,7 @@ are retained and the ceiling is a hard stop.
 | | |
 |---|---|
 | **Severity** | HIGH |
-| **Status** | **READY** |
+| **Status** | **FIXED** |
 | **Where** | `OfflineService.luau:354-375` |
 
 Order is: consume the vault → zero the frozen window → **then** credit → check.
@@ -804,7 +804,7 @@ identical read and this does not.
 | | |
 |---|---|
 | **Severity** | HIGH |
-| **Status** | **READY** |
+| **Status** | **FIXED** |
 
 `fill` only writes when a key is **absent**; a key present with the **wrong type**
 is left alone. Guards exist for six fields. **Missing:** `Vault`, `Settings`,
@@ -833,7 +833,7 @@ repair it to fill gaps rather than wipe.
 | | |
 |---|---|
 | **Severity** | HIGH |
-| **Status** | **READY** |
+| **Status** | **FIXED** |
 | **Where** | `ClientBootstrap.client.luau:310`, `:326-329` |
 
 `V7MenuPanel:applyState` and `V7ForgePanel:applyState` are both correctly

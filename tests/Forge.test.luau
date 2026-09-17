@@ -342,6 +342,7 @@ local function run(): (boolean, string?, number)
 	-- The real change: budget carries across (clamped into the new shape's legal
 	-- range) and elements carry across. Confiscating purchased progression would
 	-- make the change anything but "freely reversible".
+	data.Dice[1].CustomTrait = "ShinyMythic"
 	local shapeOk, shapeReason = ForgeService.performSetShape(player, 1, "D20")
 	e = e or check(shapeOk, string.format("an unlocked, affordable shape change must apply, got '%s'",
 		tostring(shapeReason)))
@@ -385,6 +386,8 @@ local function run(): (boolean, string?, number)
 
 	e = e or check(data.Dice[1].Faces[1].Element == "Gold",
 		"a shape change CONFISCATED a purchased element -- FR-6.1 calls the change reversible")
+	e = e or check(data.Dice[1].CustomTrait == "ShinyMythic",
+		"a shape change CONFISCATED custom die metadata (DIE-1)")
 
 	e = e or check(math.abs(diamondsBefore - (EconomyService.balance(player, "Diamonds") :: number)
 		- ForgeService.SHAPE_CHANGE_DIAMOND_COST) < 1e-6,

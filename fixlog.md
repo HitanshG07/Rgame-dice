@@ -128,4 +128,33 @@
   - Evidence captured: `deliveries/evidence/2026-09-17-batch5-wrong-numbers.txt`.
 - **Still open?** CLOSED. Fixed in Batch 5.
 
+### 2026-09-17 — Batch 6: Safety Nets (`CURR-1`, `DIE-1`, `SAVE-1`, `VAULT-1`, `RECON-1`, `FANOUT-1`)
+- **Date / Batch / Defect ID:** 2026-09-17 / Batch 6 / `CURR-1`, `DIE-1`, `SAVE-1`, `VAULT-1`, `RECON-1`, `FANOUT-1`
+- **What happened:**
+  - `CURR-1`: `EconomyService.readBalance` and `writeBalance` lacked an `else` branch and read/wrote `Diamonds` for unrecognized currency strings, risking silent corruption of premium currency.
+  - `DIE-1`: `ForgeService.performSetShape` and `repairDie` rebuilt die records with fresh 4-field tables, wiping custom die metadata/traits.
+  - `SAVE-1`: `PlayerProfile.checkPayloadSize` existed and was tested, but was never invoked before `profile:Save()`, leaving oversized profiles vulnerable to silent save failure.
+  - `VAULT-1`: `OfflineService.claimVault` mutated timestamps and zeroed `sessionElapsed` before `EconomyService.credit`, permanently destroying earned offline progress if credit failed; `boostMult` was not sanitized against non-finite values.
+  - `RECON-1`: `PlayerProfile._reconcile` checked absent keys but did not validate container types, leaving corrupted/scalar values in `Vault`, `Settings`, `Quests`, `LoginStreak`, `CodesRedeemed`, `PurchaseIds`, `PurchaseOrder`, `Inventory` to cause crashes on player join.
+  - `FANOUT-1`: In `ClientBootstrap.client.luau`, unhandled errors in display calculations (`updateBalances`, `estimateMultiplier`, `updateStreak`) or controller instantiation aborted `onStateSync` before state was delivered to menu and forge controllers.
+- **What caused it:**
+  - Incomplete public parameter validation, structural data overwriting, inverted mutation/credit ordering, shallow container reconciliation, and unisolated client event handling.
+- **How it was addressed:**
+  - `CURR-1`: Added `isCurrency` validation helper in `EconomyService.luau`, guarded `credit`, `debit`, `balance`, `canAfford`, and made `readBalance` / `writeBalance` total, throwing on unknown currency. In `PurchaseService.luau`, made `grantCurrency` branches explicit to prevent fallthrough to Diamonds.
+  - `DIE-1`: In `ForgeService.luau:repairDie` and `performSetShape`, added carry-forward loops preserving existing non-overwritten fields on die records. Added `[string]: any` to `CandidateDie` and `PlayerProfile.Die` types.
+  - `SAVE-1`: In `PlayerProfile.luau:saveNow`, called `PlayerProfile.checkPayloadSize(profile.Data)` before `profile:Save()`, refusing and logging if payload ceiling is exceeded.
+  - `VAULT-1`: In `OfflineService.luau:claimVault`, added finiteness check on `boostMult`, reordered `EconomyService.credit` before timestamp mutation, and added atomic rollback debit if profile mutation fails.
+  - `RECON-1`: In `PlayerProfile.luau:_reconcile`, added pre-recursion type checks resetting corrupted container keys to template defaults. Enhanced recursive `fill` to replace non-table values when a table is expected, sanitized `Dice` array against non-table holes, and validated container subfields.
+  - `FANOUT-1`: In `ClientBootstrap.client.luau`, wrapped panel `.new()` constructors in `pcall` with `fatal()` on error. In `onStateSync`, wrapped balance update, risk calculation, streak update, and controller `applyState` calls in individual `pcall` blocks.
+- **Verified how:**
+  - Full automated suite: 23 passed, 0 failed.
+  - Assertions increased from 3,743 to 3,767 (+24 assertions).
+  - Pin tests added in:
+    - `tests/ProfileSchema.test.luau`: Container type repair for corrupted containers and `checkPayloadSize` validation (+14 assertions).
+    - `tests/PassEffects.test.luau`: Currency validation and Diamond protection in `EconomyService` (+5 assertions).
+    - `tests/Vault.test.luau`: Safe `claimVault` payout credit and boost consumption (+4 assertions).
+    - `tests/Forge.test.luau`: Custom die metadata preservation during shape change (+1 assertion).
+  - Evidence captured: `deliveries/evidence/2026-09-17-batch6-safety-nets.txt`.
+- **Still open?** CLOSED. Fixed in Batch 6.
+
 

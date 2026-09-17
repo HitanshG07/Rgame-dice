@@ -118,6 +118,23 @@ function PassEffectsTest.run(): (boolean, string?, number)
 	check(okRefund, "refund credit failed")
 	check(PlayerProfile.get(fakePlayer).Cash == postCash + 50, "refund should credit exact 50 without multiplier")
 
+	----------------------------------------------------------------------------
+	-- 5. CURR-1: Reject invalid currencies and protect Diamonds
+	----------------------------------------------------------------------------
+	local diamondsBefore = PlayerProfile.get(fakePlayer).Diamonds
+	local okBadCredit, badReason = EconomyService.credit(fakePlayer, "Shards" :: any, 100, "test_bad")
+	check(not okBadCredit and badReason == "invalid_currency", "EconomyService.credit must reject invalid currency (CURR-1)")
+	check(PlayerProfile.get(fakePlayer).Diamonds == diamondsBefore, "Diamonds must not be mutated on invalid credit (CURR-1)")
+
+	local okBadDebit, badDebitReason = EconomyService.debit(fakePlayer, "Shards" :: any, 100, "test_bad")
+	check(not okBadDebit and badDebitReason == "invalid_currency", "EconomyService.debit must reject invalid currency (CURR-1)")
+
+	local badBal = EconomyService.balance(fakePlayer, "Shards" :: any)
+	check(badBal == nil, "EconomyService.balance must return nil for unknown currency (CURR-1)")
+
+	local canAffordBad = EconomyService.canAfford(fakePlayer, "Shards" :: any, 10)
+	check(not canAffordBad, "EconomyService.canAfford must return false for unknown currency (CURR-1)")
+
 	PlayerProfile.releaseAll()
 	return true, nil, asserts
 end

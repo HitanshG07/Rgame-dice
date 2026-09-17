@@ -368,7 +368,20 @@ function OfflineService.claimVault(player: Player, _doubled: boolean): (boolean,
 	-- now both `boostMult > 1.0`, so they cannot disagree about whether the boost
 	-- was used, whatever any caller passes.
 	local boostMult = BoostService.getMultiplier(player, "OfflineX2")
+	if type(boostMult) ~= "number" or not ForgeMath.isFinite(boostMult) or boostMult < 1.0 then
+		boostMult = 1.0
+	end
 	local payout = status.unclaimedEarnings * boostMult
+	if not ForgeMath.isFinite(payout) or payout <= 0 then
+		return false, "bad_payout", 0
+	end
+
+	-- CREDIT FIRST before consuming the vault window (VAULT-1).
+	-- If credit fails, nothing has been mutated and offline earnings are preserved.
+	local credited, creditReason = EconomyService.credit(player, "Cash", payout, "vault_claim")
+	if not credited then
+		return false, creditReason or "credit_failed", 0
+	end
 
 	-- ATOMIC MUTATION: consume vault accrual and update LastSeen synchronously.
 	local mutated, reason = PlayerProfile.mutate(player, function(d)
@@ -377,6 +390,8 @@ function OfflineService.claimVault(player: Player, _doubled: boolean): (boolean,
 	end)
 
 	if not mutated then
+		-- Roll back credit if mutation fails to keep state consistent.
+		EconomyService.debit(player, "Cash", payout, "vault_claim_rollback")
 		return false, reason or "mutate_failed", 0
 	end
 
@@ -388,14 +403,7 @@ function OfflineService.claimVault(player: Player, _doubled: boolean): (boolean,
 	-- which is the exact bug this freeze exists to prevent.
 	sessionElapsed[player] = 0
 
-	local credited, creditReason = EconomyService.credit(player, "Cash", payout, "vault_claim")
-	if not credited then
-		return false, creditReason or "credit_failed", 0
-	end
-
-	-- SPENT ONLY NOW, after the money is safely in. Consuming before the credit
-	-- would burn a real-money purchase on a failed payout -- the same ordering
-	-- rule `buyVaultHours` states for Gems, applied to a boost instead.
+	-- SPENT ONLY NOW, after the money is safely in and the vault is persisted.
 	-- Guarded on `boostMult` so a claim without a boost cannot spend one.
 	if boostMult > 1.0 then
 		BoostService.consumeBoost(player, "OfflineX2")

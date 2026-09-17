@@ -104,6 +104,20 @@ function VaultTest.run(): (boolean, string?, number)
 	local mult = BoostService.getMultiplier(fakePlayer, "LuckBoost")
 	check(mult == 2.0, "LuckBoost multiplier should be 2.0")
 
+	----------------------------------------------------------------------------
+	-- 5. VAULT-1: claimVault boost multiplier safety and ordering
+	----------------------------------------------------------------------------
+	liveData.Vault.LastSeen = os.time() - 300
+	liveData.Vault.AvgIncomePerSec = 20
+	OfflineService.beginSession(fakePlayer)
+	BoostService.addBoost(fakePlayer, "OfflineX2", 2.0, 900)
+	local preClaimCash = liveData.Cash
+	local okBoostClaim, boostClaimErr, payout = OfflineService.claimVault(fakePlayer, true)
+	check(okBoostClaim, "claimVault with OfflineX2 must succeed: " .. tostring(boostClaimErr))
+	check(payout > 0, "vault payout must be positive")
+	check(liveData.Cash == preClaimCash + payout, "player Cash must be credited exactly the payout")
+	check(not BoostService.isBoostActive(fakePlayer, "OfflineX2"), "OfflineX2 boost must be consumed after claim (VAULT-1)")
+
 	PlayerProfile.releaseAll()
 	return true, nil, asserts
 end

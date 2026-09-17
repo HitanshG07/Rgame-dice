@@ -149,48 +149,69 @@ local V7HUDModule = loaded["V7HUD"]
 local V7ForgeModule = loaded["V7ForgePanel"]
 local V7MenuModule = loaded["V7MenuPanel"]
 
+local hudCtrl: any = nil
 if type(V7HUDModule) == "table" and type(V7HUDModule.new) == "function" then
-	local hudCtrl = V7HUDModule.new()
+	local okHud, resultHud = pcall(V7HUDModule.new)
+	if not okHud then
+		fatal(string.format("V7HUD failed to instantiate:\n%s", tostring(resultHud)))
+		return
+	end
+	hudCtrl = resultHud
+end
 
+if hudCtrl ~= nil then
 	if type(V7ForgeModule) == "table" and type(V7ForgeModule.new) == "function" then
-		local forgeCtrl = V7ForgeModule.new()
-		forgeController = forgeCtrl
-
-		if type(V7MenuModule) == "table" and type(V7MenuModule.new) == "function" then
-			local menuCtrl = V7MenuModule.new()
-			menuController = menuCtrl
-
-			-- CAPABILITY REPORTING, from the one place that holds both modules.
-			--
-			-- The settings panel must not offer a live-looking switch over a
-			-- feature that does not exist. Every audio asset id is still a
-			-- `DUMMY_ID_*` placeholder, so no Sound is ever built and the Music
-			-- and SFX toggles control silence; the panel shows them disabled
-			-- with an honest note instead.
-			--
-			-- ASKED rather than assumed, so dropping real ids into
-			-- `AudioDirector.ASSET_IDS` is the ONLY change needed to bring both
-			-- rows to life -- nothing here and nothing in the panel needs
-			-- revisiting. A hardcoded "audio is not ready" would have to be
-			-- remembered and removed, and would not be.
-			local audioModule = loaded["AudioDirector"]
-			local hasAudio = false
-			if type(audioModule) == "table" and type(audioModule.hasAudio) == "function" then
-				local okAudio, result = pcall(audioModule.hasAudio)
-				hasAudio = okAudio and result == true
-			end
-			menuCtrl:setCapability("audio", hasAudio)
-
-			hudCtrl:onMenuClicked(function(menuId: string)
-				if menuId == "forge" then
-					menuCtrl:closeAll()
-					forgeCtrl:show()
-				else
-					forgeCtrl:hide()
-					menuCtrl:openOverlay(menuId)
-				end
-			end)
+		local okForge, resultForge = pcall(V7ForgeModule.new)
+		if okForge then
+			forgeController = resultForge
+		else
+			warn("[ClientBootstrap] V7ForgePanel failed to instantiate: " .. tostring(resultForge))
 		end
+	end
+
+	if type(V7MenuModule) == "table" and type(V7MenuModule.new) == "function" then
+		local okMenu, resultMenu = pcall(V7MenuModule.new)
+		if okMenu then
+			menuController = resultMenu
+		else
+			warn("[ClientBootstrap] V7MenuPanel failed to instantiate: " .. tostring(resultMenu))
+		end
+	end
+
+	local forgeCtrl = forgeController
+	local menuCtrl = menuController
+
+	if menuCtrl ~= nil and forgeCtrl ~= nil then
+		-- CAPABILITY REPORTING, from the one place that holds both modules.
+		--
+		-- The settings panel must not offer a live-looking switch over a
+		-- feature that does not exist. Every audio asset id is still a
+		-- `DUMMY_ID_*` placeholder, so no Sound is ever built and the Music
+		-- and SFX toggles control silence; the panel shows them disabled
+		-- with an honest note instead.
+		--
+		-- ASKED rather than assumed, so dropping real ids into
+		-- `AudioDirector.ASSET_IDS` is the ONLY change needed to bring both
+		-- rows to life -- nothing here and nothing in the panel needs
+		-- revisiting. A hardcoded "audio is not ready" would have to be
+		-- remembered and removed, and would not be.
+		local audioModule = loaded["AudioDirector"]
+		local hasAudio = false
+		if type(audioModule) == "table" and type(audioModule.hasAudio) == "function" then
+			local okAudio, result = pcall(audioModule.hasAudio)
+			hasAudio = okAudio and result == true
+		end
+		menuCtrl:setCapability("audio", hasAudio)
+
+		hudCtrl:onMenuClicked(function(menuId: string)
+			if menuId == "forge" then
+				menuCtrl:closeAll()
+				forgeCtrl:show()
+			else
+				forgeCtrl:hide()
+				menuCtrl:openOverlay(menuId)
+			end
+		end)
 	end
 
 	hudCtrl:onRollClicked(function()
@@ -296,15 +317,15 @@ if type(V7HUDModule) == "table" and type(V7HUDModule.new) == "function" then
 		if type(state) ~= "table" then
 			return
 		end
-		hudCtrl:updateBalances(state.cash or 0, state.gems or 0, state.diamonds or 0)
 
-		-- ISOLATED, because a display calculation must never cost the snapshot.
-		-- This raised once -- an all-zero mass list reaching
-		-- `ForgeMath.voidProbability` -- and the throw escaped the whole handler,
-		-- so the eight menu overlays and the forge stopped being fed while the
-		-- HUD above kept updating. A wrong risk percentage is a cosmetic defect;
-		-- losing every panel's data path is not, and the two should not share a
-		-- fate.
+		-- ISOLATED, because a display calculation must never abort the snapshot fanout (FANOUT-1).
+		local okBal, balErr = pcall(function()
+			hudCtrl:updateBalances(state.cash or 0, state.gems or 0, state.diamonds or 0)
+		end)
+		if not okBal then
+			warn("[ClientBootstrap] balance update failed: " .. tostring(balErr))
+		end
+
 		local okRisk, risk = pcall(computeVoidRiskPct, state)
 		if okRisk then
 			lastVoidRiskPct = risk
@@ -312,20 +333,33 @@ if type(V7HUDModule) == "table" and type(V7HUDModule.new) == "function" then
 			lastVoidRiskPct = nil
 			warn("[ClientBootstrap] void-risk calculation failed: " .. tostring(risk))
 		end
-		local mult, multUnlocked = estimateMultiplier(state)
-		lastMultUnlocked = multUnlocked
-		hudCtrl:updateStreak(mult, tonumber(state.streak) or 0,
-			lastVoidRiskPct, multUnlocked)
 
-		-- THE SEAM THAT WAS MISSING. `updateBalances` was the ONLY thing any
-		-- snapshot reached: the forge never learned what dice existed, and every
-		-- menu overlay opened onto content nothing had filled in. The panels were
-		-- complete, and completely disconnected.
+		local okStreak, streakErr = pcall(function()
+			local mult, multUnlocked = estimateMultiplier(state)
+			lastMultUnlocked = multUnlocked
+			hudCtrl:updateStreak(mult, tonumber(state.streak) or 0,
+				lastVoidRiskPct, multUnlocked)
+		end)
+		if not okStreak then
+			warn("[ClientBootstrap] streak update failed: " .. tostring(streakErr))
+		end
+
+		-- THE SEAM THAT WAS MISSING. Fan out to menu and forge controllers.
 		if menuController ~= nil then
-			menuController:applyState(state)
+			local okMenu, errMenu = pcall(function()
+				menuController:applyState(state)
+			end)
+			if not okMenu then
+				warn("[ClientBootstrap] menuController:applyState failed: " .. tostring(errMenu))
+			end
 		end
 		if forgeController ~= nil then
-			forgeController:applyState(state)
+			local okForge, errForge = pcall(function()
+				forgeController:applyState(state)
+			end)
+			if not okForge then
+				warn("[ClientBootstrap] forgeController:applyState failed: " .. tostring(errForge))
+			end
 		end
 	end)
 

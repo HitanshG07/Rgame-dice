@@ -344,6 +344,49 @@ local function run(): (boolean, string?, number)
 	local tmpl = PlayerProfile.getTemplate()
 	e = e or check(tmpl.Upgrades.MassBudget == 0, "TEMPLATE.Upgrades.MassBudget must be 0 (ASC-2)")
 
+	----------------------------------------------------------------------------
+	-- RECON-1: Corrupted or non-table container types must be restored
+	----------------------------------------------------------------------------
+	local corruptContainers: any = {
+		Vault = "corrupted_vault",
+		Settings = 12345,
+		Quests = false,
+		LoginStreak = "invalid",
+		CodesRedeemed = 999,
+		PurchaseIds = true,
+		PurchaseOrder = "not a list",
+		Inventory = -1,
+		Upgrades = "none",
+		Diamond = false,
+		Dice = { "invalid_die_string", { Shape = "D2", MassBudget = 60, PurchasedBudget = 60, Faces = { { Mass = 30, Element = "None" }, { Mass = 30, Element = "None" } } } },
+	}
+	local repaired = PlayerProfile._reconcile(corruptContainers)
+	e = e or check(type(repaired.Vault) == "table", "Vault container must be restored to a table (RECON-1)")
+	e = e or check(type(repaired.Settings) == "table", "Settings container must be restored to a table (RECON-1)")
+	e = e or check(type(repaired.Quests) == "table", "Quests container must be restored to a table (RECON-1)")
+	e = e or check(type(repaired.Quests.Slots) == "table", "Quests.Slots container must be a table (RECON-1)")
+	e = e or check(type(repaired.LoginStreak) == "table", "LoginStreak container must be restored to a table (RECON-1)")
+	e = e or check(type(repaired.CodesRedeemed) == "table", "CodesRedeemed container must be restored to a table (RECON-1)")
+	e = e or check(type(repaired.PurchaseIds) == "table", "PurchaseIds container must be restored to a table (RECON-1)")
+	e = e or check(type(repaired.PurchaseOrder) == "table", "PurchaseOrder container must be restored to a table (RECON-1)")
+	e = e or check(type(repaired.Inventory) == "table", "Inventory container must be restored to a table (RECON-1)")
+	e = e or check(type(repaired.Upgrades) == "table", "Upgrades container must be restored to a table (RECON-1)")
+	e = e or check(type(repaired.Diamond) == "table", "Diamond container must be restored to a table (RECON-1)")
+	e = e or check(#repaired.Dice == 1 and type(repaired.Dice[1]) == "table", "Dice array must filter out invalid non-table entries (RECON-1)")
+
+	----------------------------------------------------------------------------
+	-- SAVE-1: checkPayloadSize detects oversized profiles
+	----------------------------------------------------------------------------
+	local normalOk, normalSize = PlayerProfile.checkPayloadSize(repaired)
+	e = e or check(normalOk and normalSize > 0 and normalSize < 3_500_000,
+		string.format("normal profile must pass payload ceiling check, got ok=%s size=%d", tostring(normalOk), normalSize))
+
+	local hugeProfile: any = PlayerProfile._reconcile({})
+	hugeProfile.HugeBlob = string.rep("x", 3_600_000)
+	local hugeOk, hugeSize = PlayerProfile.checkPayloadSize(hugeProfile)
+	e = e or check(not hugeOk and hugeSize > 3_500_000,
+		string.format("oversized profile (>3.5MB) must fail payload ceiling check, got ok=%s size=%d (SAVE-1)", tostring(hugeOk), hugeSize))
+
 	if e then
 		return false, e, n
 	end

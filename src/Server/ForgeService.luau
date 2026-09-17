@@ -98,6 +98,7 @@ export type CandidateDie = {
 	MassBudget: number,
 	PurchasedBudget: number,
 	Faces: { PlayerProfile.Face },
+	[string]: any,
 }
 
 function ForgeService.assertDieInvariant(die: CandidateDie, shape: DiceCatalog.ShapeDef): (boolean, string?)
@@ -241,12 +242,21 @@ local function repairDie(die: any, shape: DiceCatalog.ShapeDef): CandidateDie
 		faces[i] = { Mass = faceMass, Element = element }
 	end
 
-	return {
+	local result: any = {
 		Shape = shape.id,
 		MassBudget = exact,
 		PurchasedBudget = purchased :: number,
 		Faces = faces,
 	}
+	if type(die) == "table" then
+		for k, v in pairs(die) do
+			if result[k] == nil then
+				result[k] = v
+			end
+		end
+	end
+
+	return result
 end
 
 -- Validate every stored die at LOAD and repair any that breaks the contract.
@@ -718,7 +728,8 @@ function ForgeService.performSetShape(player: Player, dieIndex: number, shapeId:
 		for i = 1, shape.faceCount do
 			faces[i] = { Mass = faceMass, Element = carriedElements[i] }
 		end
-		d.Dice[dieIndex] = {
+		local existingDie = d.Dice[dieIndex]
+		local newDie: any = {
 			Shape = shapeId,
 			MassBudget = exactBudget,
 			-- Carried UNCHANGED. This is the value the player bought; a shape
@@ -726,6 +737,14 @@ function ForgeService.performSetShape(player: Player, dieIndex: number, shapeId:
 			PurchasedBudget = purchased,
 			Faces = faces,
 		}
+		if type(existingDie) == "table" then
+			for k, v in pairs(existingDie) do
+				if newDie[k] == nil then
+					newDie[k] = v
+				end
+			end
+		end
+		d.Dice[dieIndex] = newDie
 		-- Latched INSIDE the same mutation that equips it, so the free equip and
 		-- the record of it cannot come apart -- a write that half-applied would
 		-- otherwise leave the discount available forever.

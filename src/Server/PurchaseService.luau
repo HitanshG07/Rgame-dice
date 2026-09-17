@@ -87,7 +87,7 @@ local function grantCurrency(player: Player, currency: string, amount: number): 
 			data.Cash += amount
 		elseif currency == "Gems" then
 			data.Gems += amount
-		else
+		elseif currency == "Diamonds" then
 			data.Diamonds += amount
 		end
 	end)

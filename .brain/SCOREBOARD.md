@@ -65,8 +65,11 @@ Rejections are appended to the active task's line AT REJECTION TIME (circuit-bre
 - [2026-09-17] critical-bugfix-batch5-wrong-numbers | PRODUCTION | lane: full | rejections: none | none | **DELIVERED.** G2 MECHANICALLY-CLEAN (23 suites / 3,743 assertions, +31 assertions). RISK-1 (aggregate void risk across active dice 1 - Π(1 - p_i)), MULT-1 & CONST-1 (pure shared StreakMath module, unifying STREAK_CAP=50, B_PER_LEVEL=0.01, MAX_MULTIPLIER=1e6 between RollService and ClientBootstrap) verified live in Studio VM.
   - **P-1 Caveat:** Static analysis (P-1) was not produced due to standing environmental blocker: no Luau analyzer on system PATH and Studio Script Analysis pane is not script-readable. Standing operator blocker on every Gate 2 in this project, recorded rather than waived.
 
+- [2026-09-17] critical-bugfix-batch6-safety-nets | PRODUCTION | lane: full | rejections: none | none | **DELIVERED.** G2 MECHANICALLY-CLEAN (23 suites / 3,767 assertions, +24 assertions). CURR-1 (EconomyService isCurrency guard, total readBalance/writeBalance, PurchaseService Diamonds fallthrough protection), DIE-1 (repairDie and performSetShape custom metadata carry-forward), SAVE-1 (checkPayloadSize in saveNow), VAULT-1 (claimVault finite boost multiplier, credit before mutate with rollback), RECON-1 (container type repair for 10 profile sub-tables, Dice array hole filtering), FANOUT-1 (pcall isolation for panel instantiation and ClientBootstrap onStateSync dispatches) verified live in Studio VM.
+  - **P-1 Caveat:** Static analysis (P-1) was not produced due to standing environmental blocker: no Luau analyzer on system PATH and Studio Script Analysis pane is not script-readable. Standing operator blocker on every Gate 2 in this project, recorded rather than waived.
+
 ## RUNNING TALLIES
-- Total pipeline runs: 27 (one superseded, one disputed, one breaker-halted then reset and delivered)
+- Total pipeline runs: 28 (one superseded, one disputed, one breaker-halted then reset and delivered)
 - Rejections by gate: G2: 6 | G3: 6 | G4: 1 | G5: 0 | G6 vetoes: 0
 - **Breaker trips: 1** (dice-forge-block3-services, 2026-08-07 — and it was BREACHED before being noticed, because the scoreboard line that arms it was never written. The persistence rule failed exactly where it was designed to hold: across a context compaction.)
 - Most recurrent defect classes, measured:

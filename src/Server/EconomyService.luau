@@ -66,6 +66,11 @@ end
 -- catalog field typed loosely and then passed straight in.
 export type Currency = "Cash" | "Gems" | "Diamonds"
 
+local function isCurrency(currency: any): boolean
+	return currency == "Cash" or currency == "Gems" or currency == "Diamonds"
+end
+EconomyService.isCurrency = isCurrency
+
 -- Currency access is EXPLICIT, one branch per field, rather than a computed
 -- `data[currency]` index.
 --
@@ -82,21 +87,25 @@ local function readBalance(data: PlayerProfile.Profile, currency: Currency): num
 		return data.Cash
 	elseif currency == "Gems" then
 		return data.Gems
+	elseif currency == "Diamonds" then
+		return data.Diamonds
 	end
-	return data.Diamonds
+	error(string.format("[Economy] readBalance called with unknown currency: %s", tostring(currency)))
 end
 
 local function writeBalance(data: PlayerProfile.Profile, currency: Currency, value: number): ()
 	if type(value) ~= "number" or value ~= value or value == math.huge or value == -math.huge then
-		warn(string.format("[Economy] refused write of non-finite balance for %s: %s", currency, tostring(value)))
+		warn(string.format("[Economy] refused write of non-finite balance for %s: %s", tostring(currency), tostring(value)))
 		return
 	end
 	if currency == "Cash" then
 		data.Cash = value
 	elseif currency == "Gems" then
 		data.Gems = value
-	else
+	elseif currency == "Diamonds" then
 		data.Diamonds = value
+	else
+		error(string.format("[Economy] writeBalance called with unknown currency: %s", tostring(currency)))
 	end
 end
 
@@ -112,6 +121,9 @@ end
 
 -- Credit. `source` is recorded for telemetry and is never player-supplied.
 function EconomyService.credit(player: Player, currency: Currency, amount: number, source: string): (boolean, string?)
+	if not isCurrency(currency) then
+		return false, "invalid_currency"
+	end
 	local ok, reason = guardAmount(amount)
 	if not ok then
 		warn(string.format("[Economy] refused credit of %s to UserId=%d from '%s': %s",
@@ -149,6 +161,9 @@ end
 -- Debit. Refuses rather than going negative -- an overdraft is how duplication
 -- bugs become permanent.
 function EconomyService.debit(player: Player, currency: Currency, amount: number, source: string): (boolean, string?)
+	if not isCurrency(currency) then
+		return false, "invalid_currency"
+	end
 	local ok, reason = guardAmount(amount)
 	if not ok then
 		return false, reason
@@ -180,6 +195,9 @@ function EconomyService.spend(player: Player, currency: Currency, cost: number, 
 end
 
 function EconomyService.balance(player: Player, currency: Currency): number?
+	if not isCurrency(currency) then
+		return nil
+	end
 	local data = PlayerProfile.get(player)
 	if not data then
 		return nil
@@ -188,6 +206,9 @@ function EconomyService.balance(player: Player, currency: Currency): number?
 end
 
 function EconomyService.canAfford(player: Player, currency: Currency, cost: number): boolean
+	if not isCurrency(currency) then
+		return false
+	end
 	if not ForgeMath.isFinite(cost) then
 		return false
 	end
