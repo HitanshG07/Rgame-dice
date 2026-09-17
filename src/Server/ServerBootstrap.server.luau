@@ -281,7 +281,7 @@ RemoteGateway.register("BuyUpgrade", announcing(function(player: Player, upgrade
 	if not spent then
 		return false, Remotes.Notice.InsufficientFunds
 	end
-	PlayerProfile.mutate(player, function(d)
+	local mutated, mutateReason = PlayerProfile.mutate(player, function(d)
 		d.Upgrades[upgradeId] = currentLvl + 1
 
 		-- MASS BUDGET is the one Cash upgrade that changes a DIE rather than a
@@ -321,6 +321,10 @@ RemoteGateway.register("BuyUpgrade", announcing(function(player: Player, upgrade
 			end
 		end
 	end)
+	if not mutated then
+		EconomyService.credit(player, "Cash", cost, "buy_upgrade_refund")
+		return false, Remotes.Notice.ProfileUnavailable
+	end
 	return true, nil
 end))
 
@@ -375,7 +379,11 @@ RemoteGateway.register("BuyDiamondNode", announcing(function(player: Player, nod
 				d.Diamond.Shapes[nodeId] = true
 			end
 		end)
-		return wrote, if wrote then nil else Remotes.Notice.ProfileUnavailable
+		if not wrote then
+			EconomyService.credit(player, currency, shapeCost, "unlock_shape_refund")
+			return false, Remotes.Notice.ProfileUnavailable
+		end
+		return true, nil
 	end
 
 	local def = UpgradeCatalog.getDiamondNode(nodeId)
@@ -394,7 +402,7 @@ RemoteGateway.register("BuyDiamondNode", announcing(function(player: Player, nod
 	if not spent then
 		return false, Remotes.Notice.InsufficientFunds
 	end
-	PlayerProfile.mutate(player, function(d)
+	local mutated, mutateReason = PlayerProfile.mutate(player, function(d)
 		d.Diamond[nodeId] = currentLvl + 1
 
 		-- MASSCEILING MUST ACTUALLY GROW THE DICE, not just raise a number.
@@ -436,6 +444,10 @@ RemoteGateway.register("BuyDiamondNode", announcing(function(player: Player, nod
 			end
 		end
 	end)
+	if not mutated then
+		EconomyService.credit(player, "Diamonds", cost, "buy_diamond_node_refund")
+		return false, Remotes.Notice.ProfileUnavailable
+	end
 	return true, nil
 end))
 
@@ -460,6 +472,10 @@ RemoteGateway.register("BuyDieInstance", announcing(function(player: Player, sha
 		return false, Remotes.Notice.InvalidRequest
 	end
 
+	if (data.Inventory and data.Inventory[shapeId] or 0) >= DiceCatalog.MAX_DIE_SLOTS then
+		return false, Remotes.Notice.AtCap
+	end
+
 	local shapeCost = DiceCatalog.getUnlockCost(shapeId) :: number
 	if not EconomyService.canAfford(player, "Cash", shapeCost) then
 		return false, Remotes.Notice.InsufficientFunds
@@ -469,12 +485,16 @@ RemoteGateway.register("BuyDieInstance", announcing(function(player: Player, sha
 		return false, Remotes.Notice.InsufficientFunds
 	end
 
-	PlayerProfile.mutate(player, function(d)
+	local mutated, mutateReason = PlayerProfile.mutate(player, function(d)
 		if type(d.Inventory) ~= "table" then
 			d.Inventory = {}
 		end
 		d.Inventory[shapeId] = (d.Inventory[shapeId] or 0) + 1
 	end)
+	if not mutated then
+		EconomyService.credit(player, "Cash", shapeCost, "buy_die_instance_refund")
+		return false, Remotes.Notice.ProfileUnavailable
+	end
 
 	return true, nil
 end))
@@ -572,9 +592,13 @@ RemoteGateway.register("AddDieSlot", announcing(function(player: Player, shapeId
 	-- Through the shared helper, so all THREE grant paths -- this, the +2 Die
 	-- Slots pass and the Starter Bundle -- increment the counter and create the
 	-- die by the same code. Two of the three used to write the counter alone.
-	PlayerProfile.mutate(player, function(d)
+	local mutated, mutateReason = PlayerProfile.mutate(player, function(d)
 		PlayerProfile.grantDieSlots(d, 1, slotCap, makeDie)
 	end)
+	if not mutated then
+		EconomyService.credit(player, "Cash", cost, "add_die_slot_refund")
+		return false, Remotes.Notice.ProfileUnavailable
+	end
 	return true, nil
 end))
 
@@ -1010,6 +1034,7 @@ game:BindToClose(function()
 	joinConnection:Disconnect()
 	for _, player in ipairs(Players:GetPlayers()) do
 		pcall(LeaderboardService.updatePlayer, player)
+		pcall(OfflineService.onPlayerRemoving, player)
 	end
 	PlayerProfile.releaseAll()
 end)

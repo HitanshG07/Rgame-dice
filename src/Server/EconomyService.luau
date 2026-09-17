@@ -120,18 +120,18 @@ local function guardAmount(amount: number): (boolean, string?)
 end
 
 -- Credit. `source` is recorded for telemetry and is never player-supplied.
-function EconomyService.credit(player: Player, currency: Currency, amount: number, source: string): (boolean, string?)
+function EconomyService.credit(player: Player, currency: Currency, amount: number, source: string): (boolean, string?, number?)
 	if not isCurrency(currency) then
-		return false, "invalid_currency"
+		return false, "invalid_currency", nil
 	end
 	local ok, reason = guardAmount(amount)
 	if not ok then
 		warn(string.format("[Economy] refused credit of %s to UserId=%d from '%s': %s",
 			tostring(amount), player.UserId, source, tostring(reason)))
-		return false, reason
+		return false, reason, nil
 	end
 	if amount == 0 then
-		return true, nil
+		return true, nil, 0
 	end
 
 	local finalAmount = amount
@@ -139,7 +139,7 @@ function EconomyService.credit(player: Player, currency: Currency, amount: numbe
 		finalAmount = amount * cashMultiplierFor(player)
 	end
 
-	return PlayerProfile.mutate(player, function(data)
+	local mutated, mutateReason = PlayerProfile.mutate(player, function(data)
 		local current = readBalance(data, currency)
 		local next_ = current + finalAmount
 		if next_ > MAX_CURRENCY then
@@ -152,10 +152,12 @@ function EconomyService.credit(player: Player, currency: Currency, amount: numbe
 			-- it. A second per-run counter used to be maintained alongside it here
 			-- to price ascension; that counter has been deleted and ascension now
 			-- reads cash on hand, which `writeBalance` above has already updated.
-			local lifetime = data.LifetimeCash + amount
+			local lifetime = data.LifetimeCash + finalAmount
 			data.LifetimeCash = if lifetime > MAX_CURRENCY then MAX_CURRENCY else lifetime
 		end
 	end)
+
+	return mutated, mutateReason, if mutated then finalAmount else nil
 end
 
 -- Debit. Refuses rather than going negative -- an overdraft is how duplication

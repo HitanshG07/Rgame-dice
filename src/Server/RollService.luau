@@ -498,13 +498,17 @@ function RollService.performRoll(player: Player): (boolean, string?)
 	-- Cash is credited BEFORE the event fires. If the client never receives
 	-- RollResult -- disconnect, lag, tab-out -- the player still has the money
 	-- (SRS FR-2.6). Presentation is downstream of truth.
+	local finalPayout = result.payout
 	if result.payout > 0 then
-		local credited, reason = EconomyService.credit(player, "Cash", result.payout, "roll")
+		local credited, reason, actualCredited = EconomyService.credit(player, "Cash", result.payout, "roll")
 		if not credited then
 			return false, reason
 		end
+		if actualCredited ~= nil then
+			finalPayout = actualCredited
+		end
 	end
-	EconomyService.recordRoll(player, result.payout)
+	EconomyService.recordRoll(player, finalPayout)
 
 	PlayerProfile.mutate(player, function(d)
 		d.Vault.AvgIncomePerSec = RollService.averageIncomePerSecond(player)
@@ -517,7 +521,7 @@ function RollService.performRoll(player: Player): (boolean, string?)
 
 	emitResult(player, {
 		faces = faces,
-		payout = result.payout,
+		payout = finalPayout,
 		streak = result.streak,
 		multiplier = result.streakMultiplier,
 		elementsFired = result.elementsFired,

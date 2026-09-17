@@ -133,7 +133,9 @@ function StateSyncService.buildSnapshot(data: PlayerProfile.Profile, streak: num
 
 	local upgrades = {}
 	for id, level in pairs(data.Upgrades) do
-		upgrades[id] = level
+		if not string.match(id, "^Boost_") then
+			upgrades[id] = level
+		end
 	end
 
 	-- The unlocked sets. Without these the forge defaults to showing EVERYTHING

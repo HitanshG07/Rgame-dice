@@ -2479,7 +2479,7 @@ local function buildShopOverlay(
 		DiamondCache = string.format("Diamonds re-roll die shape (%d per change) and unlock tree nodes.", DiceCatalog.SHAPE_CHANGE_DIAMOND_COST),
 		GemsLarge = string.format("Gems buy vault capacity at %d per hour (cap %dh).", VaultCatalog.GEMS_PER_CAPACITY_HOUR, math.floor(VaultCatalog.MAX_PURCHASED_CAPACITY_SEC / 3600)),
 		GemsSmall = string.format("Gems buy vault capacity at %d per hour (cap %dh).", VaultCatalog.GEMS_PER_CAPACITY_HOUR, math.floor(VaultCatalog.MAX_PURCHASED_CAPACITY_SEC / 3600)),
-		LuckBoost = "For 15 minutes, heavy faces land closer to even odds.",
+		LuckBoost = "Doubles every roll payout while it lasts.",
 		OfflineX2 = "Multiplies NEXT vault claim by 2x.",
 		TimeSkip24 = "Pays 24 hours at your own earning rate.",
 	}

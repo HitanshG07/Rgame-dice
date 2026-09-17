@@ -380,6 +380,10 @@ if hudCtrl ~= nil then
 			hudCtrl:flashPayout(payout, result.voidHit == true)
 		end
 	end)
+
+	NetClient.onNotice(function(notice: any)
+		warn("[ClientBootstrap] server notice: " .. tostring(notice))
+	end)
 end
 
 function ClientBootstrap.shutdown(): ()

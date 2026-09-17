@@ -1161,7 +1161,7 @@ function BoardView.updateResultSummary(rollResults: { { shape: string, value: nu
 	tcLbl.Size = UDim2.new(0, 0, 1, 0)
 	tcLbl.BackgroundTransparency = 1
 	tcLbl.Font = Enum.Font.GothamBlack
-	tcLbl.Text = "★ TOTAL: " .. tostring(grandTotal)
+	tcLbl.Text = "★ FACES SUM: " .. tostring(grandTotal)
 	tcLbl.TextColor3 = Color3.fromRGB(250, 204, 21)
 	tcLbl.TextSize = 12
 	tcLbl.ZIndex = 7

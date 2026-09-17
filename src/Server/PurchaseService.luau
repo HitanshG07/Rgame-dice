@@ -82,15 +82,8 @@ local function grantCurrency(player: Player, currency: string, amount: number): 
 		return false, "bad_currency"
 	end
 
-	return PlayerProfile.mutate(player, function(data)
-		if currency == "Cash" then
-			data.Cash += amount
-		elseif currency == "Gems" then
-			data.Gems += amount
-		elseif currency == "Diamonds" then
-			data.Diamonds += amount
-		end
-	end)
+	local EconomyService = require(script.Parent:WaitForChild("EconomyService"))
+	return EconomyService.credit(player, currency :: any, amount, "dev_product")
 end
 
 -- Applies whatever `entry` promises. Pure profile mutation; durability is the
@@ -259,7 +252,14 @@ local function processReceipt(info: any): Enum.ProductPurchaseDecision
 	-- so the ledger entry and the goods are made durable by one write. Recording
 	-- after the save would leave a window where a crash loses the ledger entry
 	-- but keeps the grant, and the next retry would grant a second time.
-	local recorded, recordNote = PlayerProfile.recordPurchase(data, receiptKey, os.time())
+	local recorded = false
+	local recordNote: string? = nil
+	local okMutate = PlayerProfile.mutate(player, function(profileData)
+		recorded, recordNote = PlayerProfile.recordPurchase(profileData, receiptKey, os.time())
+	end)
+	if not okMutate then
+		return NOT_YET
+	end
 	if not recorded then
 		-- Already present despite the check above: another thread beat us here.
 		-- The goods are delivered; stop the retries.
@@ -273,13 +273,15 @@ local function processReceipt(info: any): Enum.ProductPurchaseDecision
 	if not granted then
 		-- Roll the ledger entry back so a later retry is not mistaken for a
 		-- replay of a grant that never happened.
-		data.PurchaseIds[receiptKey] = nil
-		for i = #data.PurchaseOrder, 1, -1 do
-			if data.PurchaseOrder[i] == receiptKey then
-				table.remove(data.PurchaseOrder, i)
-				break
+		PlayerProfile.mutate(player, function(profileData)
+			profileData.PurchaseIds[receiptKey] = nil
+			for i = #profileData.PurchaseOrder, 1, -1 do
+				if profileData.PurchaseOrder[i] == receiptKey then
+					table.remove(profileData.PurchaseOrder, i)
+					break
+				end
 			end
-		end
+		end)
 		warn(string.format("[PurchaseService] grant failed for %s (user %d): %s",
 			entry.key, userId, tostring(grantReason)))
 		return NOT_YET

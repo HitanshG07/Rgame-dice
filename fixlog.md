@@ -157,4 +157,38 @@
   - Evidence captured: `deliveries/evidence/2026-09-17-batch6-safety-nets.txt`.
 - **Still open?** CLOSED. Fixed in Batch 6.
 
-
+### 2026-09-17 — Batch 7: Complete Polish & Defect Elimination
+- **Date / Batch / Defect ID:** 2026-09-17 / Batch 7 / `POLISH-1`
+- **What happened:**
+  - `OfflineService.buyVaultHours`: When a player requested more hours than remaining until cap, it did not clamp to `effectiveBuyableHours`, risking over-purchase.
+  - `ServerBootstrap.server.luau`: `BuyUpgrade`, `BuyDiamondNode`, `BuyDieInstance`, `UnlockShape`, and `AddDieSlot` charged currency and then discarded `PlayerProfile.mutate` return status, leaving players charged without receiving their purchase if the profile became unavailable. `BuyDieInstance` lacked a `MAX_DIE_SLOTS` check, and `OfflineService.onPlayerRemoving` was omitted from `game:BindToClose`.
+  - `PlayerProfile.luau`: `grantDieSlots` did not increment `d.Inventory`, causing inventory count desync for starting shapes. In `PlayerProfile.load`, `_migrate` ran after `profile:Reconcile()`, risking reconciliation conflicts before schema migrations.
+  - `PurchaseService.luau`: `grantCurrency` mutated profile directly rather than routing through `EconomyService.credit`, omitting telemetry, max currency clamps, and lifetime cash tracking. In `processReceipt`, `recordPurchase` and rollback were executed on raw profile tables outside `mutate`.
+  - `ForgeService.luau`: `performSetElement` lacked a check for whether the face already had the target element, charging 50 Cash for a zero-effect no-op.
+  - `StateSyncService.luau`: `buildSnapshot` copied all keys from `data.Upgrades`, leaking `Boost_` keys into the client upgrade UI.
+  - `BoardView.luau`: Line 1164 displayed `"★ TOTAL: "` summing face numbers from `DiceRenderer`, leading players to believe it was their cash roll payout.
+  - `EconomyService.luau` & `RollService.luau`: `EconomyService.credit` applied 2x Cash gamepass multiplier, but `RollService.rollSingle` only knew pre-multiplier payout, causing HUD payout flash to disagree with actual balance credited.
+  - `V7MenuPanel.luau`: Line 2482 contained a stale blurb for `LuckBoost` claiming it biased landing odds (violating FR-3.4) rather than doubling roll payouts.
+  - `ClientBootstrap.client.luau`: `NetClient.onNotice` was declared on the client but never subscribed to, dropping server notices.
+- **What caused it:**
+  - Remaining loose ends, unverified mutate return values, lack of no-op guards, stale copy text, and unhandled client notifications across the boundary.
+- **How it was addressed:**
+  - `OfflineService.luau`: Clamped `buyable` in `buyVaultHours` to `effectiveBuyableHours`.
+  - `ServerBootstrap.server.luau`: Gated all purchase handlers on successful `PlayerProfile.mutate` and issued refunds on failure. Capped `BuyDieInstance` at `MAX_DIE_SLOTS`. Added `OfflineService.onPlayerRemoving` to `game:BindToClose`.
+  - `PlayerProfile.luau`: Synced `d.Inventory` in `grantDieSlots`. Reordered `_migrate` before `Reconcile`/`_reconcile` in `load`.
+  - `PurchaseService.luau`: Routed `grantCurrency` through `EconomyService.credit`. Wrapped `recordPurchase` and rollback inside `PlayerProfile.mutate`.
+  - `ForgeService.luau`: Added `if die.Faces[faceIndex].Element == elementId then return false, Remotes.Notice.InvalidRequest end` in `performSetElement`.
+  - `StateSyncService.luau`: Filtered out keys matching `^Boost_` from `upgrades` snapshot table.
+  - `BoardView.luau`: Relabeled `"★ TOTAL: "` to `"★ FACES SUM: "`.
+  - `EconomyService.luau` & `RollService.luau`: Returned `finalAmount` from `EconomyService.credit`, passed it to `recordRoll` and `emitResult` in `RollService`.
+  - `V7MenuPanel.luau`: Updated `LuckBoost` blurb to `"Doubles every roll payout while it lasts."`.
+  - `ClientBootstrap.client.luau`: Connected `NetClient.onNotice` listener to log server notices.
+- **Verified how:**
+  - Full automated suite: 23 passed, 0 failed.
+  - Assertions increased from 3,767 to 3,774 (+7 assertions).
+  - Pin tests added in:
+    - `tests/Forge.test.luau`: Verified `performSetElement` succeeds on unlocked elements and rejects duplicate element assignments as no-ops (+3 assertions).
+    - `tests/Vault.test.luau`: Verified `buyVaultHours` clamps to `effectiveBuyableHours` (+4 assertions).
+  - Live verification in Roblox Studio VM via MCP: full suite executed cleanly, UI booted with 7 modules loaded, client connected.
+  - Evidence captured: `deliveries/evidence/2026-09-17-batch7-complete-polish.txt`.
+- **Still open?** CLOSED. Fixed in Batch 7.

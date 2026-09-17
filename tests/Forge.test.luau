@@ -977,6 +977,16 @@ local function run(): (boolean, string?, number)
 		end
 	end
 
+	-- performSetElement no-op test (prevent charging 50 Cash for same element)
+	data.Diamond.Elements["Fire"] = true
+	data.Cash = 500
+	data.Dice[1].Faces[1].Element = "None"
+	local okSet, errSet = ForgeService.performSetElement(player, 1, 1, "Fire")
+	e = e or check(okSet == true, "performSetElement to unlocked Fire should succeed: " .. tostring(errSet))
+	e = e or check(data.Dice[1].Faces[1].Element == "Fire", "face element should now be Fire")
+	local okNoOp, errNoOp = ForgeService.performSetElement(player, 1, 1, "Fire")
+	e = e or check(okNoOp == false, "performSetElement to same element should be refused as no-op")
+
 	ForgeService._setResultEmitterForTesting(nil)
 	PlayerProfile.release(player)
 

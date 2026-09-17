@@ -118,6 +118,18 @@ function VaultTest.run(): (boolean, string?, number)
 	check(liveData.Cash == preClaimCash + payout, "player Cash must be credited exactly the payout")
 	check(not BoostService.isBoostActive(fakePlayer, "OfflineX2"), "OfflineX2 boost must be consumed after claim (VAULT-1)")
 
+	----------------------------------------------------------------------------
+	-- 6. VAULT CAPACITY & BUYABLE HOURS CLAMP
+	----------------------------------------------------------------------------
+	liveData.Gems = 10000
+	liveData.Vault.PurchasedHours = 0
+	local effective = OfflineService.effectiveBuyableHours(fakePlayer)
+	check(effective > 0, "fresh player should have effective buyable hours")
+	local okBuy, buyReason, appliedHours = OfflineService.buyVaultHours(fakePlayer, effective + 10)
+	check(okBuy, "buyVaultHours should succeed: " .. tostring(buyReason))
+	check(appliedHours == effective, "buyVaultHours must clamp purchase to effective buyable hours")
+	check(liveData.Vault.PurchasedHours == effective, "profile PurchasedHours must equal effective buyable hours")
+
 	PlayerProfile.releaseAll()
 	return true, nil, asserts
 end

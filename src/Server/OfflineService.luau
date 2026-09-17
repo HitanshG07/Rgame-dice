@@ -452,13 +452,14 @@ function OfflineService.buyVaultHours(player: Player, hours: number): (boolean, 
 	-- already exceeds everything else combined, so Gems spent there buy nothing
 	-- -- see `effectiveBuyableHours`. Taking the payment anyway and reporting a
 	-- benefit is the defect the operator caught; refusing is the honest answer.
-	if OfflineService.effectiveBuyableHours(player) <= 0 then
+	local effective = OfflineService.effectiveBuyableHours(player)
+	if effective <= 0 then
 		return false, "no_benefit", owned
 	end
 	-- Trim the request to what is still buyable rather than refusing outright: a
 	-- player two hours short of the cap asking for five should get two, not an
 	-- error they cannot act on.
-	local buyable = math.min(hours, capHours - owned)
+	local buyable = math.min(hours, capHours - owned, effective)
 
 	local cost = VaultCatalog.gemCostForHours(buyable)
 	if cost == nil or cost <= 0 then

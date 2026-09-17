@@ -517,6 +517,11 @@ function ForgeService.performSetElement(player: Player, dieIndex: number, faceIn
 		return false, Remotes.Notice.InvalidRequest
 	end
 
+	-- Prevent charging Cash for a no-op if the face already has this element
+	if die.Faces[faceIndex].Element == elementId then
+		return false, Remotes.Notice.InvalidRequest
+	end
+
 	if not EconomyService.canAfford(player, "Cash", ELEMENT_SET_COST) then
 		return false, Remotes.Notice.InsufficientFunds
 	end

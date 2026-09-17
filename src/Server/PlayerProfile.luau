@@ -225,6 +225,9 @@ function PlayerProfile.grantDieSlots(d: any, count: number, maxSlots: number, ma
 			end
 		end
 		table.insert(d.Dice, die)
+		if type(d.Inventory) == "table" and type(die.Shape) == "string" then
+			d.Inventory[die.Shape] = (d.Inventory[die.Shape] or 0) + 1
+		end
 	end
 
 	return gained
@@ -596,19 +599,6 @@ function PlayerProfile.load(player: Player): (boolean, string?)
 		return false, "session_unavailable"
 	end
 
-	profile:AddUserId(player.UserId)      -- GDPR erasure support
-	profile:Reconcile()                    -- fill any key added since last save
-	-- Second, defensive layer under the library's own reconcile. Guarantees the
-	-- sub-tables the roll loop dereferences unguarded are present (threat T-12).
-	PlayerProfile._reconcile(profile.Data)
-
-	profile.OnSessionEnd:Connect(function()
-		active[player] = nil
-		if player.Parent == Players then
-			player:Kick("Your data session ended. Please rejoin.")
-		end
-	end)
-
 	if player.Parent ~= Players then
 		profile:EndSession()
 		return false, "player_left"
@@ -621,6 +611,19 @@ function PlayerProfile.load(player: Player): (boolean, string?)
 			player.UserId, tostring(migrateErr)))
 		return false, "migration_failed"
 	end
+
+	profile:AddUserId(player.UserId)      -- GDPR erasure support
+	profile:Reconcile()                    -- fill any key added since last save
+	-- Second, defensive layer under the library's own reconcile. Guarantees the
+	-- sub-tables the roll loop dereferences unguarded are present (threat T-12).
+	PlayerProfile._reconcile(profile.Data)
+
+	profile.OnSessionEnd:Connect(function()
+		active[player] = nil
+		if player.Parent == Players then
+			player:Kick("Your data session ended. Please rejoin.")
+		end
+	end)
 
 	active[player] = profile
 	return true, nil

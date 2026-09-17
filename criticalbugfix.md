@@ -854,10 +854,10 @@ ROLL button unwired **with no error panel**, because that path was skipped.
 
 ---
 
-# BATCH 7 — EVERYTHING ELSE
+# BATCH 7 — EVERYTHING ELSE — FIXED (Batch 7 Complete Polish)
 
 Grouped, with the fix in one line each. Full detail in `docs/ROADMAP.md` §12.4
-and §12.8.
+and §12.8. ALL ADDRESSED AND VERIFIED IN BATCH 7.
 
 ### Money and economy (MEDIUM)
 
