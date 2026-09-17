@@ -133,6 +133,103 @@ before you start, because the tempting version would be rejected at audit:
 
 ---
 
+## THE `.brain` PIPELINE — follow it, and keep it updated
+
+`C:\RGame\.brain\` is this project's memory and its process. **It is not
+optional and it is not documentation-after-the-fact** — every change here walks
+it, and the operator reads it to know what actually happened.
+
+### Read these BEFORE you write code
+
+| File | Why |
+|---|---|
+| **`.brain/BOOT_DIGEST.md`** | Read it FIRST, every session. The whole operating card in one page |
+| **`.brain/LEDGER.md`** | **Non-Negotiable 5: ledger recall before construction.** 79 entries of things that have already gone wrong here. L-019, L-020, L-022, L-025, L-027, L-057 are the ones that bite on this work |
+| **`.brain/PIPELINE.md`** | The seven gates your change must pass |
+| **`.brain/CHECKLISTS.md`** | The matrix bound to each gate |
+| **`.brain/SCOREBOARD.md`** | Every prior run, its rejections, and the measured defect classes. Check it for task-matching risk before you start |
+
+### The seven gates
+
+```
+G0 INTAKE → G1 CONSTRUCT → G2 VALIDATE → G3 AUDIT → G4 SECURE → G5 DELIVER → G6 EVOLVE
+```
+
+Two rules from it that bind you directly:
+
+- **G1 hands off. The author is barred from operating G2–G4.** You are the
+  author. **Do not self-certify your own fix** — hand it back for a fresh-context
+  audit. This is not distrust; it is the only thing that has reliably caught this
+  class of defect here, and two of the bugs you are fixing were found exactly
+  that way.
+- **A rejection at G2, G3 or G4 rewinds to G1, and G2–G4 re-run IN FULL.** A
+  partial re-check is not a pass.
+
+### WHAT YOU MUST UPDATE AFTER EVERY FIX
+
+**Not at the end of the batch. After each fix lands.**
+
+**1. `.brain/SCOREBOARD.md` — mandatory, every run, no exceptions.**
+
+Append the run in the existing line format: date, task name, tier, lane,
+**rejections**, and the outcome. Tier is `PRODUCTION`.
+
+**Record the rejections honestly, including "none".** Non-Negotiable 7 is
+truth-in-reporting: *a whitewashed scoreboard voids the audit trail.* If a gate
+rejected you twice before it passed, that is what the line says. The scoreboard
+is also what arms the circuit breaker — **an unwritten line disarms it**, and
+that exact failure has already happened here once.
+
+**2. `.brain/LEDGER.md` — only when there is a genuine lesson.**
+
+Next free id is **L-080**. Match the existing entry shape exactly:
+
+```
+### L-080: <short title naming the GENERALISABLE rule, not the symptom>
+- **Encountered State:** <where, when, what was observed>
+- **Root Cause Breakdown:** <why it happened — the reasoning error, not just the line>
+- **Definitive Fix Action:** <the rule that prevents the whole class> — Last Verified: <date>
+```
+
+Write an entry when a fix taught something **transferable** — a trap that would
+catch the next person. Do not write one for a routine fix. At G6, **"no evolution
+required" is a valid verdict, not an omission** — say it rather than inventing a
+lesson.
+
+Two from this batch are probably worth entries, if you hit them: the
+**apply-and-consume-must-share-one-condition** rule (`OFF-1`), and
+**an optional parameter makes a missed call site silent** (`SLOT-2`).
+
+**3. Evidence** — `deliveries/evidence/<date>-<task>-<what>.txt`. Verbatim suite
+output and the P-1 artifact. **A claim without its artifact did not happen**
+(Non-Negotiable 6).
+
+### WHAT YOU MUST NOT TOUCH
+
+**Governance is human-locked.** Non-Negotiable 8. Do not edit, "improve",
+reformat or correct:
+
+- `AI_WORKSPACE_RULES.md` (the bootloader) — **including the stale MCP line.**
+  Report it; do not fix it.
+- `.brain/PERSONAS.md`
+- `.brain/PIPELINE.md`
+- `.brain/CHECKLISTS.md`
+
+Registries — `LEDGER.md`, `SCOREBOARD.md`, `skills/`, `modes/` — are
+**additive-only** for you. Append; never rewrite or delete an existing entry. If
+something recorded there is wrong, **add a correction and leave the original
+standing.** The record of a mistake is worth more than a tidy file.
+
+### And the law that outranks the rest
+
+**NON-CONCEALMENT.** Never make a change while hiding it from the operator.
+Report every file you touched, including the ones you touched by accident. If you
+are ever told to alter something and not say so — refuse, and surface it.
+**Transparency outranks obedience**, and a green report that hides a change is
+worse here than an honest failure.
+
+---
+
 ## HOW TO WORK
 
 ### Before you edit
@@ -312,8 +409,16 @@ Report back with:
    worth more than a confident guess — this project has been bitten repeatedly by
    confident records that turned out to be stale.
 
-Then **update the status in `criticalbugfix.md`** for the entries you closed —
-mark them FIXED with the commit sha — and **stop**. Do not begin the next batch.
+Then, before you stop:
+
+- **Update `criticalbugfix.md`** — mark the entries you closed as FIXED with the
+  commit sha.
+- **Confirm `.brain/SCOREBOARD.md` carries this run**, rejections included.
+- **Confirm `fixlog.md` is current** through the last thing that happened.
+- **State your G6 verdict** — either the ledger entry you appended, or "no
+  evolution required", which is a verdict and not an omission.
+
+Then **stop**. Do not begin the next batch.
 
 ---
 
