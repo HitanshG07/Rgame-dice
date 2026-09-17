@@ -458,6 +458,51 @@ function PurchaseService.setAnnouncer(fn: (Player) -> ()): ()
 	announce = fn
 end
 
+function PurchaseService._onGamePassPurchaseFinished(player: Player, gamePassId: number, wasPurchased: boolean): ()
+	if not wasPurchased then
+		return
+	end
+	local entry = Catalog.passById(gamePassId)
+	if entry == nil then
+		return
+	end
+	local owned = ownedPasses[player]
+	if owned == nil then
+		owned = {}
+		ownedPasses[player] = owned
+	end
+	owned[entry.key] = true
+
+	-- A pass that changes a persisted value must write it, not merely be
+	-- remembered in a cache that dies with the session.
+	--
+	-- THIS IS THE ONE THE OPERATOR HIT. It raised `DieSlots` by two and
+	-- never touched `d.Dice`, so a player who owned the +2 Die Slots pass
+	-- had `DieSlots = 4` and two actual dice: the SLOTS panel promised four,
+	-- the board drew two, and the layout was computed for a count that did
+	-- not match what was rendered -- which is the overlap that was reported.
+	--
+	-- `grantDieSlots` backfills from `#d.Dice`, so this ALSO repairs an
+	-- already-drifted profile the next time the pass resolves at join,
+	-- rather than leaving existing owners permanently short.
+	if entry.key == "DieSlots2" and entry.amount ~= nil then
+		PlayerProfile.mutate(player, function(data)
+			-- CREDIT THE COUNTER (PASS-1). Without this, `applyPassSlotGrant`
+			-- runs on the next join, sees PassSlotsGranted = 0, and grants the
+			-- same two slots a second time -- so a 2-slot pass delivered 4.
+			local already = tonumber(data.PassSlotsGranted) or 0
+			local gained = PlayerProfile.grantDieSlots(data, entry.amount :: number,
+				DiceCatalog.MAX_DIE_SLOTS, DiceCatalog.newStartingDie)
+			data.PassSlotsGranted = already + gained
+		end)
+	end
+
+	local push = announce
+	if push ~= nil then
+		push(player)
+	end
+end
+
 function PurchaseService.init(): ()
 	-- T-17: THE SINGLE ASSIGNMENT. Guarded so a second `init` -- from a reload,
 	-- a test harness, or a future caller that does not know this already ran --
@@ -473,47 +518,7 @@ function PurchaseService.init(): ()
 	-- Ownership can change mid-session. Without this a player who buys a pass
 	-- would see nothing until they rejoined, which reads as the purchase having
 	-- failed.
-	MarketplaceService.PromptGamePassPurchaseFinished:Connect(
-		function(player: Player, gamePassId: number, wasPurchased: boolean)
-			if not wasPurchased then
-				return
-			end
-			local entry = Catalog.passById(gamePassId)
-			if entry == nil then
-				return
-			end
-			local owned = ownedPasses[player]
-			if owned == nil then
-				owned = {}
-				ownedPasses[player] = owned
-			end
-			owned[entry.key] = true
-
-			-- A pass that changes a persisted value must write it, not merely be
-			-- remembered in a cache that dies with the session.
-			--
-			-- THIS IS THE ONE THE OPERATOR HIT. It raised `DieSlots` by two and
-			-- never touched `d.Dice`, so a player who owned the +2 Die Slots pass
-			-- had `DieSlots = 4` and two actual dice: the SLOTS panel promised four,
-			-- the board drew two, and the layout was computed for a count that did
-			-- not match what was rendered -- which is the overlap that was reported.
-			--
-			-- `grantDieSlots` backfills from `#d.Dice`, so this ALSO repairs an
-			-- already-drifted profile the next time the pass resolves at join,
-			-- rather than leaving existing owners permanently short.
-			if entry.key == "DieSlots2" and entry.amount ~= nil then
-				PlayerProfile.mutate(player, function(data)
-					PlayerProfile.grantDieSlots(data, entry.amount :: number,
-						DiceCatalog.MAX_DIE_SLOTS, DiceCatalog.newStartingDie)
-				end)
-			end
-
-			local push = announce
-			if push ~= nil then
-				push(player)
-			end
-		end
-	)
+	MarketplaceService.PromptGamePassPurchaseFinished:Connect(PurchaseService._onGamePassPurchaseFinished)
 end
 
 return PurchaseService

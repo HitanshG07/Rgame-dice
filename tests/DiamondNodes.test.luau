@@ -138,6 +138,19 @@ function DiamondNodesTest.run(): (boolean, string?, number)
 		"with one node level the next slot MUST have a price -- otherwise the "
 		.. "panel hides a slot the player has already paid to unlock")
 
+	----------------------------------------------------------------------------
+	-- 3b. ServerBootstrap pricing contract (SLOT-2)
+	----------------------------------------------------------------------------
+	-- ServerBootstrap previously called `dieSlotCost(data.DieSlots, data.Ascensions)`
+	-- without passing `data.Diamond.SlotNodes`. When atOldCap, this evaluated to nil
+	-- and returned InvalidRequest, rejecting the purchase the client quoted.
+	local serverCostOmitted = DiceCatalog.dieSlotCost(atOldCap, 0)
+	local serverCostPassed = DiceCatalog.dieSlotCost(atOldCap, 0, 1)
+	check(serverCostOmitted == nil,
+		"omitting slotNodes returns nil when at base cap (reproduces SLOT-2 server rejection)")
+	check(serverCostPassed ~= nil and serverCostPassed > 0,
+		"passing slotNodes computes valid cost matching client quote (SLOT-2 fix pin)")
+
 	return true, nil, asserts
 end
 

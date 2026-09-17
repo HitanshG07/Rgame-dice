@@ -30,3 +30,28 @@
     - Verified insufficient funds handling ($120 cash remaining vs $290 cost): button disabled, cost in red, submission cleanly blocked with no false CALIBRATED state.
   - Evidence captured: `deliveries/evidence/2026-09-17-batch1-the-forge.txt` + screenshots.
 - **Still open?** CLOSED. Fixed in Batch 1.
+
+### 2026-09-17 — Batch 2: Real Money (`ASC-1`, `PASS-1`, `SLOT-2`)
+- **Date / Batch / Defect ID:** 2026-09-17 / Batch 2 / `ASC-1`, `PASS-1`, `SLOT-2`
+- **What happened:**
+  - `ASC-1`: `AscensionService.luau:66` executed `d.Gems = 0` on every ascension. Gems are purchased with real Robux (`MonetisationCatalog.luau`: `GemsSmall`, `GemsLarge`, `StarterBundle`) and are not in FR-9.1's reset list. Ascending silently confiscated up to 650 Robux-bought Gems with no warning.
+  - `PASS-1`: The `+2 Die Slots` gamepass (`Catalog.Passes.DieSlots2`) granted 4 slots and 4 free dice instead of 2. When purchased mid-session, `PurchaseService.luau` called `PlayerProfile.grantDieSlots(data, 2, ...)` but did not update `data.PassSlotsGranted`. On next join, `applyPassSlotGrant` evaluated `already = data.PassSlotsGranted or 0` (0), saw a shortfall of 2, and granted 2 more slots.
+  - `SLOT-2`: In `ServerBootstrap.server.luau:546`, buying a die slot called `DiceCatalog.dieSlotCost(data.DieSlots, data.Ascensions)` without passing `data.Diamond.SlotNodes`. When a player unlocked additional slot capacity via the Diamond Tree and reached the base ascension cap, `dieSlotCost` returned `nil`, causing the server to reject the purchase with `InvalidRequest` even though the client quoted a valid price.
+- **What caused it:**
+  - `ASC-1`: Unaudited exception in `AscensionService.luau` contradicting FR-9.1 reset list.
+  - `PASS-1`: Missing counter update (`data.PassSlotsGranted = already + gained`) in mid-session gamepass purchase callback.
+  - `SLOT-2`: Incomplete parameter propagation during commit `daac879` (threaded `slotNodes` on client `V7MenuPanel.luau` but missed server `ServerBootstrap.server.luau`).
+- **How it was addressed:**
+  - `ASC-1`: Removed `d.Gems = 0` from `AscensionService.luau:66` and documented that Gems survive prestige per operator decision.
+  - `PASS-1`: In `PurchaseService.luau`, updated mid-session gamepass callback to record `data.PassSlotsGranted = already + gained`, guaranteeing idempotency across joins. Exposed `PurchaseService._onGamePassPurchaseFinished` for testing.
+  - `SLOT-2`: In `ServerBootstrap.server.luau:546`, passed `data.Diamond.SlotNodes` to `DiceCatalog.dieSlotCost`.
+- **Verified how:**
+  - Full automated suite: 23 passed, 0 failed.
+  - Assertions increased from 3,686 to 3,693 (+7 assertions).
+  - Pin tests:
+    - `tests/Integration_Ascension.test.luau`: Verified `postData.Gems == 500` preserved across ascension.
+    - `tests/PassEffects.test.luau`: Tested mid-session purchase of `DieSlots2`, asserted `PassSlotsGranted == 2` and slots increased by 2, and asserted subsequent `applyPassSlotGrant` calls do not add more slots.
+    - `tests/DiamondNodes.test.luau`: Tested server-side `dieSlotCost` contract with and without `slotNodes` when at base cap.
+  - Evidence captured: `deliveries/evidence/2026-09-17-batch2-real-money.txt`.
+- **Still open?** CLOSED. Fixed in Batch 2.
+

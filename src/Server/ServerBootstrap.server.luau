@@ -542,8 +542,9 @@ RemoteGateway.register("AddDieSlot", announcing(function(player: Player, shapeId
 	end
 	-- Priced by the shared catalog, which is also what the SLOTS panel reads to
 	-- print the number on the button -- so the quoted price and the charged price
-	-- are the same expression, not two copies of it (L-025).
-	local cost = DiceCatalog.dieSlotCost(data.DieSlots, data.Ascensions)
+	-- are the same expression, not two copies of it (L-025). Threading SlotNodes
+	-- ensures the server accepts the slot the client quoted (SLOT-2).
+	local cost = DiceCatalog.dieSlotCost(data.DieSlots, data.Ascensions, data.Diamond.SlotNodes)
 	if cost == nil then
 		return false, Remotes.Notice.InvalidRequest
 	end

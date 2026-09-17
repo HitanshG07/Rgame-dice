@@ -77,7 +77,6 @@ local function run(): (boolean, string?, number)
 	if postData then
 		-- 1. Asserts WIPED state
 		e = e or check(postData.Cash == 0, "Cash MUST be wiped")
-		e = e or check(postData.Gems == 0, "Gems MUST be wiped")
 		
 		e = e or check(postData.Upgrades.AutoRollSpeed == 0, "Upgrades MUST be wiped")
 		e = e or check(postData.Vault.AccrualId == 0, "Vault MUST be wiped")
@@ -115,6 +114,10 @@ local function run(): (boolean, string?, number)
 		e = e or check(postData.Diamonds > 10, "Diamonds MUST be preserved and granted")
 		e = e or check(postData.Ascensions == 2, "Ascensions MUST be incremented (was 1, now 2)")
 		e = e or check(postData.LifetimeCash == 50000000000, "LifetimeCash MUST be preserved")
+		-- GEMS DELIBERATELY SURVIVE ASCENSION (ASC-1 / FR-9.1). They are sold for
+		-- Robux (MonetisationCatalog) and are not in FR-9.1's reset list.
+		e = e or check(postData.Gems == 500,
+			"Gems MUST survive ascension (FR-9.1 / ASC-1) -- they are bought with Robux")
 
 		-- CASH ON HAND IS CONSUMED, and it is what prices the NEXT ascension.
 		-- Without this reset the next prestige would be priced against earnings

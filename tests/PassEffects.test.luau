@@ -85,6 +85,34 @@ function PassEffectsTest.run(): (boolean, string?, number)
 		"DieSlots (%d) and #Dice (%d) must agree after repeated grants",
 		afterGrants.DieSlots, #afterGrants.Dice))
 
+	----------------------------------------------------------------------------
+	-- 3c. Mid-session pass purchase and rejoin idempotency (PASS-1)
+	--
+	-- Buying DieSlots2 mid-session must increment PassSlotsGranted so that
+	-- applyPassSlotGrant on subsequent joins does NOT grant another 2 slots.
+	----------------------------------------------------------------------------
+	local Catalog = require(Shared:WaitForChild("MonetisationCatalog"))
+	local slotsBeforePurchase = PlayerProfile.get(fakePlayer).DieSlots
+	local passId = Catalog.Passes.DieSlots2.assetId :: number
+	PurchaseService._onGamePassPurchaseFinished(fakePlayer, passId, true)
+
+	local dataAfterBuy = PlayerProfile.get(fakePlayer)
+	check(dataAfterBuy.DieSlots == slotsBeforePurchase + 2,
+		"mid-session purchase of DieSlots2 must grant exactly 2 slots")
+	check(dataAfterBuy.PassSlotsGranted == 2,
+		"mid-session purchase of DieSlots2 MUST credit PassSlotsGranted counter (PASS-1)")
+
+	-- Now simulate rejoining / applying pass slot grants
+	PurchaseService.applyPassSlotGrant(fakePlayer)
+	PurchaseService.applyPassSlotGrant(fakePlayer)
+	local dataAfterRejoin = PlayerProfile.get(fakePlayer)
+	check(dataAfterRejoin.DieSlots == slotsBeforePurchase + 2,
+		"rejoining must NOT grant additional slots when PassSlotsGranted was credited (PASS-1)")
+	check(dataAfterRejoin.PassSlotsGranted == 2,
+		"PassSlotsGranted remains 2 after rejoin checks")
+	check(#dataAfterRejoin.Dice == dataAfterRejoin.DieSlots,
+		"dice count must match DieSlots after pass purchase and rejoin")
+
 	-- 4. Test non-roll credits do NOT apply cashMultiplier
 	local okRefund, _ = EconomyService.credit(fakePlayer, "Cash", 50, "forge_refund")
 	check(okRefund, "refund credit failed")

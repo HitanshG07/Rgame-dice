@@ -53,9 +53,12 @@ Rejections are appended to the active task's line AT REJECTION TIME (circuit-bre
 - [2026-09-17] critical-bugfix-batch1-forge | PRODUCTION | lane: full | rejections: G2:1 (D16 floor breach during test expansion) | floor-breach-on-negative-drift | **DELIVERED.** G2 MECHANICALLY-CLEAN (23 suites / 3,686 assertions, +44 assertions). Pin tests added in ClientContract.test and ForgeValidation.test. FORGE-1 and FORGE-2 verified live in Studio VM.
   - **P-1 Caveat:** Static analysis (P-1) was not produced due to standing environmental blocker: no Luau analyzer on system PATH and Studio Script Analysis pane is not script-readable. Standing operator blocker on every Gate 2 in this project, recorded rather than waived.
 
+- [2026-09-17] critical-bugfix-batch2-real-money | PRODUCTION | lane: full | rejections: G2:1 (passId catalog property naming in test) | test-catalog-lookup-key | **DELIVERED.** G2 MECHANICALLY-CLEAN (23 suites / 3,693 assertions, +7 assertions). ASC-1 (Gems persist), PASS-1 (PassSlotsGranted counter), SLOT-2 (SlotNodes threaded in server dieSlotCost) verified live in Studio VM.
+  - **P-1 Caveat:** Static analysis (P-1) was not produced due to standing environmental blocker: no Luau analyzer on system PATH and Studio Script Analysis pane is not script-readable. Standing operator blocker on every Gate 2 in this project, recorded rather than waived.
+
 ## RUNNING TALLIES
-- Total pipeline runs: 23 (one superseded, one disputed, one breaker-halted then reset and delivered)
-- Rejections by gate: G2: 4 | G3: 6 | G4: 1 | G5: 0 | G6 vetoes: 0
+- Total pipeline runs: 24 (one superseded, one disputed, one breaker-halted then reset and delivered)
+- Rejections by gate: G2: 5 | G3: 6 | G4: 1 | G5: 0 | G6 vetoes: 0
 - **Breaker trips: 1** (dice-forge-block3-services, 2026-08-07 — and it was BREACHED before being noticed, because the scoreboard line that arms it was never written. The persistence rule failed exactly where it was designed to hold: across a context compaction.)
 - Most recurrent defect classes, measured:
   1. **Unwritten contract re-derived per fix — 3 occurrences in one function** (Dice Forge `performSetShape`: confiscate, then manufacture, then inflate). Root-caused and promoted: [[L-025]], `skills/roblox_luau.md` §7.

@@ -63,7 +63,10 @@ function AscensionService.ascend(player: Player): (boolean, string?, number)
 
 	local ok, reason = PlayerProfile.mutate(player, function(d)
 		d.Cash = 0
-		d.Gems = 0
+		-- GEMS DELIBERATELY SURVIVE ASCENSION (ASC-1). They are sold for Robux
+		-- (MonetisationCatalog GemsSmall / GemsLarge / StarterBundle) and are NOT in
+		-- FR-9.1's reset list. Zeroing them here destroyed a real-money purchase on a
+		-- button press, with no warning on the FR-9.4 confirm screen.
 		d.Diamonds += diamondsEarned
 		d.Ascensions += 1
 		-- `d.Cash = 0` above IS the run reset now. A separate `RunCash` counter

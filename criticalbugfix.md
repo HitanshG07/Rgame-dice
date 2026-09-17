@@ -183,7 +183,7 @@ next snapshot rather than reverting.
 | | |
 |---|---|
 | **Severity** | **CRITICAL** |
-| **Status** | **NEEDS A DECISION** (recommended fix below) |
+| **Status** | **FIXED** |
 | **Stands** | CONFIRMED. `AscensionService.luau:66` reads `d.Gems = 0` |
 | **Costs** | Up to 650 Robux-bought Gems, silently, on a button press |
 
@@ -227,7 +227,7 @@ delete the line.**
 | | |
 |---|---|
 | **Severity** | **CRITICAL** |
-| **Status** | **READY** |
+| **Status** | **FIXED** |
 | **Stands** | CONFIRMED. I traced both grant paths |
 | **Where** | `src/Server/PurchaseService.luau:504-509` |
 | **Costs** | 2 extra permanent slots + 4 free dice per buyer; each slot is otherwise worth up to $1.02M |
@@ -277,7 +277,7 @@ keep it and fix it forward.
 | | |
 |---|---|
 | **Severity** | HIGH |
-| **Status** | **READY** |
+| **Status** | **FIXED** |
 | **Stands** | CONFIRMED. **Introduced by my own commit `daac879`** |
 | **Where** | `src/Server/ServerBootstrap.server.luau:546` |
 | **Costs** | A Diamond node costing up to 3,200 Diamonds buys a slot the store then declines to sell |
