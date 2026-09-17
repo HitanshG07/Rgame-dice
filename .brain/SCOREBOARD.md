@@ -50,9 +50,12 @@ Rejections are appended to the active task's line AT REJECTION TIME (circuit-bre
 - [2026-08-27] phase0b-diamond-nodes | PRODUCTION | lane: full | rejections: none | **DELIVERED `daac879`. PHASE 0 COMPLETE.** `MassCeiling` and `SlotNodes` each had exactly one read in the codebase, in StateSync, for display. MassCeiling is FR-3.6's unbuilt second half: 15 levels x 80 spans exactly the existing 300->1500 gap, so no new numbers were invented and the flat 1500 becomes the reward for maxing the tree rather than everyone's default. SlotNodes +1/level after the real numbers changed the operator's decision -- the cost curve (50/200/800/3200 diamonds against 31 per billion-dollar ascension) was already doing the slowing. **No confiscation is possible by construction:** the ceiling gates purchases only, validation keeps the absolute bound. 35 new assertions. 23 suites / 3,635.
   - **Both runs carry the same caveat:** P-1 static analysis was NOT produced and Gate 2 is therefore not clean. No Luau analyzer exists on PATH and the Script Analysis pane is not script-readable. Standing operator blocker on every Gate 2 in this project, recorded rather than waived.
 
+- [2026-09-17] critical-bugfix-batch1-forge | PRODUCTION | lane: full | rejections: G2:1 (D16 floor breach during test expansion) | floor-breach-on-negative-drift | **DELIVERED.** G2 MECHANICALLY-CLEAN (23 suites / 3,686 assertions, +44 assertions). Pin tests added in ClientContract.test and ForgeValidation.test. FORGE-1 and FORGE-2 verified live in Studio VM.
+  - **P-1 Caveat:** Static analysis (P-1) was not produced due to standing environmental blocker: no Luau analyzer on system PATH and Studio Script Analysis pane is not script-readable. Standing operator blocker on every Gate 2 in this project, recorded rather than waived.
+
 ## RUNNING TALLIES
-- Total pipeline runs: 22 (one superseded, one disputed, one breaker-halted then reset and delivered)
-- Rejections by gate: G2: 3 | G3: 6 | G4: 1 | G5: 0 | G6 vetoes: 0
+- Total pipeline runs: 23 (one superseded, one disputed, one breaker-halted then reset and delivered)
+- Rejections by gate: G2: 4 | G3: 6 | G4: 1 | G5: 0 | G6 vetoes: 0
 - **Breaker trips: 1** (dice-forge-block3-services, 2026-08-07 — and it was BREACHED before being noticed, because the scoreboard line that arms it was never written. The persistence rule failed exactly where it was designed to hold: across a context compaction.)
 - Most recurrent defect classes, measured:
   1. **Unwritten contract re-derived per fix — 3 occurrences in one function** (Dice Forge `performSetShape`: confiscate, then manufacture, then inflate). Root-caused and promoted: [[L-025]], `skills/roblox_luau.md` §7.

@@ -1236,9 +1236,11 @@ function V7ForgePanel.new(): V7ForgeController
 		end
 		bBuy.Text = "Purchasing..."
 		task.spawn(function()
-			local ok, reason = NetClient.buyUpgrade("MassBudget")
-			if not ok then
-				bBuy.Text = tostring(reason or "Refused")
+			-- NetClient returns a single Result table { ok: boolean, reason: string? },
+			-- not a tuple. Destructuring as (ok, reason) made `ok` always truthy (FORGE-1).
+			local result = NetClient.buyUpgrade("MassBudget")
+			if not result.ok then
+				bBuy.Text = tostring(result.reason or "Refused")
 				task.wait(1.2)
 			end
 			refresh()
@@ -1308,8 +1310,12 @@ function V7ForgePanel.new(): V7ForgeController
 			out[i] = math.floor(m + 0.5)
 			sum += out[i]
 		end
-		local drift = math.floor(budget + 0.5) - sum
-		if drift ~= 0 then
+		-- Target the die's REAL budget, not a rounded one. `newDie` snaps the per-face
+		-- share down to 3dp, so D7 is 59.997 and D14 is 59.990 -- rounding the target to
+		-- 60 put both past the server's 0.001 epsilon and made those two shapes
+		-- permanently unforgeable (FORGE-2). The server never required integers.
+		local drift = budget - sum
+		if drift > 0 then
 			local heaviest, heaviestIdx = -1, 1
 			for i, m in ipairs(out) do
 				if m > heaviest then
@@ -1317,18 +1323,43 @@ function V7ForgePanel.new(): V7ForgeController
 				end
 			end
 			out[heaviestIdx] += drift
+		elseif drift < 0 then
+			local floor = DiceCatalog.getMassFloor(shapeId)
+			local remaining = -drift
+			while remaining > 1e-6 do
+				local heaviest, heaviestIdx = -1, 1
+				for i, m in ipairs(out) do
+					if m > heaviest then
+						heaviest, heaviestIdx = m, i
+					end
+				end
+				local spare = out[heaviestIdx] - floor
+				if spare <= 0 then
+					out[heaviestIdx] -= remaining
+					break
+				end
+				local sub = math.min(spare, remaining)
+				if remaining > 1 and spare > 1 then
+					sub = math.min(sub, 1)
+				end
+				out[heaviestIdx] -= sub
+				remaining -= sub
+			end
 		end
 
 		bForge.Text = "CALIBRATING..."
 		bForge.BackgroundColor3 = FORGE_THEME.ButtonDark
 		task.spawn(function()
-			local ok, reason = NetClient.forge(activeDie, out)
-			if ok then
+			-- NetClient returns a single Result table { ok: boolean, reason: string? },
+			-- not a tuple. Destructuring as (ok, reason) made `ok` a truthy table reference,
+			-- unconditionally reporting success and clearing dirty even on refusal (FORGE-1).
+			local result = NetClient.forge(activeDie, out)
+			if result.ok then
 				dirty = false
 				bForge.Text = "CALIBRATED"
 				bForge.BackgroundColor3 = FORGE_THEME.Positive
 			else
-				bForge.Text = tostring(reason or "Refused")
+				bForge.Text = tostring(result.reason or "Refused")
 				bForge.BackgroundColor3 = FORGE_THEME.Negative
 				draft = table.clone(committed)
 				dirty = false

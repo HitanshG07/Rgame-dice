@@ -12,6 +12,7 @@
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ForgeMath = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("ForgeMath"))
+local DiceCatalog = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("DiceCatalog"))
 
 local FACES = 6
 local BUDGET = 60
@@ -213,6 +214,106 @@ local function run(): (boolean, string?, number)
 		for i = 1, faces do dist[i] = 10 end
 		local o, r = ForgeMath.validate(dist, faces, budget, FLOOR)
 		e = e or check(o, string.format("D%d flat distribution rejected: %s", faces, tostring(r)))
+	end
+
+	--------------------------------------------------------------------------
+	-- Client Forge submission across ALL catalog shapes (FORGE-2 regression pin)
+	--
+	-- WHY THIS TEST EXISTS. `newDie` snaps per-face shares down to 3dp, so
+	-- D7's budget is 59.997 and D14's is 59.990. The panel previously forced
+	-- drift against `math.floor(budget + 0.5)` (60), creating 0.003 and 0.010
+	-- residuals that exceeded EPSILON (0.001) and permanently prevented forging
+	-- on those two shapes.
+	--
+	-- We assert:
+	--   1. The old buggy formula indeed fails on D7 and D14.
+	--   2. The fixed formula (drift = budget - sum) accepts ALL 12 shapes.
+	--------------------------------------------------------------------------
+	local allShapes = { "D2", "D3", "D4", "D5", "D6", "D7", "D8", "D10", "D12", "D14", "D16", "D20" }
+	for _, shapeId in ipairs(allShapes) do
+		local shape = DiceCatalog.getShape(shapeId)
+		e = e or check(shape ~= nil, "missing shape in catalog: " .. shapeId)
+		if shape then
+			local die = DiceCatalog.newDie(shapeId)
+			e = e or check(die ~= nil, "newDie returned nil for: " .. shapeId)
+			if die then
+				local budget = die.MassBudget
+				local count = shape.faceCount
+				local floor = shape.massFloor
+
+				-- Draft from die faces
+				local draft: { number } = {}
+				for i, f in ipairs(die.Faces) do
+					draft[i] = f.Mass
+				end
+
+				-- (1) Verify that the old buggy rounding formula would fail on D7 and D14
+				local buggyOut: { number } = {}
+				local buggySum = 0
+				for i, m in ipairs(draft) do
+					buggyOut[i] = math.floor(m + 0.5)
+					buggySum += buggyOut[i]
+				end
+				local buggyDrift = math.floor(budget + 0.5) - buggySum
+				if buggyDrift ~= 0 then
+					local heaviest, heaviestIdx = -1, 1
+					for i, m in ipairs(buggyOut) do
+						if m > heaviest then
+							heaviest, heaviestIdx = m, i
+						end
+					end
+					buggyOut[heaviestIdx] += buggyDrift
+				end
+				local buggyOk = ForgeMath.validate(buggyOut, count, budget, floor)
+				if shapeId == "D7" or shapeId == "D14" then
+					e = e or check(not buggyOk,
+						string.format("buggy integer rounding should FAIL for %s (budget=%.4f)", shapeId, budget))
+				end
+
+				-- (2) Verify that the corrected formula accepts every shape
+				local fixedOut: { number } = {}
+				local fixedSum = 0
+				for i, m in ipairs(draft) do
+					fixedOut[i] = math.floor(m + 0.5)
+					fixedSum += fixedOut[i]
+				end
+				local fixedDrift = budget - fixedSum
+				if fixedDrift > 0 then
+					local heaviest, heaviestIdx = -1, 1
+					for i, m in ipairs(fixedOut) do
+						if m > heaviest then
+							heaviest, heaviestIdx = m, i
+						end
+					end
+					fixedOut[heaviestIdx] += fixedDrift
+				elseif fixedDrift < 0 then
+					local remaining = -fixedDrift
+					while remaining > 1e-6 do
+						local heaviest, heaviestIdx = -1, 1
+						for i, m in ipairs(fixedOut) do
+							if m > heaviest then
+								heaviest, heaviestIdx = m, i
+							end
+						end
+						local spare = fixedOut[heaviestIdx] - floor
+						if spare <= 0 then
+							fixedOut[heaviestIdx] -= remaining
+							break
+						end
+						local sub = math.min(spare, remaining)
+						if remaining > 1 and spare > 1 then
+							sub = math.min(sub, 1)
+						end
+						fixedOut[heaviestIdx] -= sub
+						remaining -= sub
+					end
+				end
+				local fixedOk, fixedReason = ForgeMath.validate(fixedOut, count, budget, floor)
+				e = e or check(fixedOk,
+					string.format("client forge submission must be valid for %s: %s (budget=%.4f)",
+						shapeId, tostring(fixedReason), budget))
+			end
+		end
 	end
 
 	if e then

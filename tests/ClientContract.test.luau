@@ -560,6 +560,29 @@ local function run(): (boolean, string?, number)
 		"NetClient.awaitReady must refuse to run off-client rather than returning a false ready")
 
 	----------------------------------------------------------------------------
+	-- NetClient wrappers return a single Result table { ok: boolean, reason: string? }
+	-- NOT a tuple (FORGE-1 regression pin)
+	----------------------------------------------------------------------------
+	-- Calling a wrapper returns a table with `ok: boolean`, never a boolean directly.
+	-- If a caller destructures as `local ok, reason = NetClient.forge(...)`, `ok`
+	-- becomes the table reference (always truthy!) and reason is nil.
+	local resForge = (NetClient :: any).forge(1, { 10, 10, 10, 10, 10, 10 })
+	e = e or check(type(resForge) == "table",
+		"NetClient.forge must return a single Result table, not a tuple or primitive")
+	e = e or check(type(resForge.ok) == "boolean",
+		"NetClient.forge result.ok must be a boolean")
+	e = e or check(resForge.reason == nil or type(resForge.reason) == "string",
+		"NetClient.forge result.reason must be nil or string")
+
+	local resUpgrade = (NetClient :: any).buyUpgrade("MassBudget")
+	e = e or check(type(resUpgrade) == "table",
+		"NetClient.buyUpgrade must return a single Result table, not a tuple or primitive")
+	e = e or check(type(resUpgrade.ok) == "boolean",
+		"NetClient.buyUpgrade result.ok must be a boolean")
+	e = e or check(resUpgrade.reason == nil or type(resUpgrade.reason) == "string",
+		"NetClient.buyUpgrade result.reason must be nil or string")
+
+	----------------------------------------------------------------------------
 	-- The promo-code refusal surface is CLOSED (added 2026-08-26)
 	----------------------------------------------------------------------------
 

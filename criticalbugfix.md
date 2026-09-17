@@ -73,7 +73,7 @@ first makes the second invisible.
 | | |
 |---|---|
 | **Severity** | **CRITICAL** |
-| **Status** | **READY** |
+| **Status** | **FIXED** |
 | **Stands** | CONFIRMED. Client sweep; I re-read both sites myself |
 | **Where** | `src/Client/V7ForgePanel.luau:1325` and `:1239` |
 | **Costs** | A false economic receipt on the game's core screen |
@@ -124,7 +124,7 @@ button reads the refusal reason in red instead of "CALIBRATED" in green.
 | | |
 |---|---|
 | **Severity** | **CRITICAL** |
-| **Status** | **READY** |
+| **Status** | **FIXED** |
 | **Stands** | CONFIRMED. I measured every shape in a running game |
 | **Where** | `src/Client/V7ForgePanel.luau:1311` |
 | **Costs** | Two shapes cannot be forged at all, ever |
