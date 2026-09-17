@@ -315,7 +315,7 @@ player with `SlotNodes > 0`.
 | | |
 |---|---|
 | **Severity** | **CRITICAL** |
-| **Status** | **READY** |
+| **Status** | **FIXED** |
 | **Stands** | CONFIRMED |
 | **Where** | `src/Server/AscensionService.luau:76-79` vs `:114-119` |
 | **Costs** | The entire Cash half of FR-3.6, dead for the life of the account, after one ascension |
@@ -366,7 +366,7 @@ is purchasable again.
 | | |
 |---|---|
 | **Severity** | **CRITICAL** |
-| **Status** | **READY** |
+| **Status** | **FIXED** |
 | **Where** | `src/Server/ProgressionService.luau:471-482` |
 
 **Root cause.** The streak write is unchecked **and** the credit runs
@@ -409,7 +409,7 @@ flag is unset.
 | | |
 |---|---|
 | **Severity** | **CRITICAL** |
-| **Status** | **READY** |
+| **Status** | **FIXED** |
 | **Where** | `PlayerProfile._reconcile`, consumed at `EconomyService.luau:81-87` |
 
 **Root cause.** No reconcile guard repairs a non-number or NaN `Cash` / `Gems` /

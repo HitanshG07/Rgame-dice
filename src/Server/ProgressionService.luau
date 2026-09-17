@@ -76,7 +76,13 @@ function ProgressionService.claimDailySpin(player: Player): (boolean, string?, s
 		return false, reason or "mutate_failed", nil, nil
 	end
 
-	EconomyService.credit(player, currency :: any, amount, "daily_spin")
+	local okCredit, creditReason = EconomyService.credit(player, currency :: any, amount, "daily_spin")
+	if not okCredit then
+		PlayerProfile.mutate(player, function(d)
+			d.LastSpin = 0
+		end)
+		return false, creditReason or "credit_failed", nil, nil
+	end
 	return true, nil, currency, amount
 end
 
@@ -116,7 +122,13 @@ function ProgressionService.redeemCode(player: Player, submittedCode: string): (
 		return false, reason or "mutate_failed"
 	end
 
-	EconomyService.credit(player, codeData.type, codeData.amount, "code_redemption")
+	local okCredit, creditReason = EconomyService.credit(player, codeData.type, codeData.amount, "code_redemption")
+	if not okCredit then
+		PlayerProfile.mutate(player, function(d)
+			d.CodesRedeemed[cleanCode] = nil
+		end)
+		return false, creditReason or "credit_failed"
+	end
 	return true, nil
 end
 
@@ -342,7 +354,18 @@ function ProgressionService.claimQuest(player: Player, questId: string): (boolea
 		return false, "not_claimable"
 	end
 
-	EconomyService.credit(player, def.rewardKind, def.rewardAmount, "quest_" .. questId)
+	local okCredit, creditReason = EconomyService.credit(player, def.rewardKind, def.rewardAmount, "quest_" .. questId)
+	if not okCredit then
+		PlayerProfile.mutate(player, function(d)
+			for _, slot in ipairs(d.Quests.Slots) do
+				if slot.Id == questId then
+					slot.Claimed = false
+					return
+				end
+			end
+		end)
+		return false, creditReason or "credit_failed"
+	end
 	return true, nil
 end
 
@@ -412,7 +435,11 @@ function ProgressionService.claimChest(player: Player, tierId: string): (boolean
 	-- Marked before crediting so a duplicate request in the same frame cannot
 	-- pass the check twice.
 	taken[tierId] = true
-	EconomyService.credit(player, reward.kind, reward.amount, "chest_" .. tierId)
+	local okCredit, creditReason = EconomyService.credit(player, reward.kind, reward.amount, "chest_" .. tierId)
+	if not okCredit then
+		taken[tierId] = nil
+		return false, creditReason or "credit_failed"
+	end
 	return true, nil
 end
 
@@ -468,13 +495,19 @@ function ProgressionService.recordLogin(player: Player): (boolean, number)
 
 	local awarded = LOGIN_REWARDS[math.min(newCount, #LOGIN_REWARDS)]
 
-	PlayerProfile.mutate(player, function(d)
+	local ok, reason = PlayerProfile.mutate(player, function(d)
 		d.LoginStreak.Count = newCount
 		d.LoginStreak.LastDay = today
 		if spendForgiveness then
 			d.LoginStreak.ForgivenessLeft -= 1
 		end
 	end)
+
+	if not ok then
+		-- NOT CREDITED (LOGIN-1). The streak write is what makes this reward once-only;
+		-- if it did not land, paying anyway turns a rejoin into a repeatable mint.
+		return false, 0
+	end
 
 	if awarded ~= nil then
 		EconomyService.credit(player, awarded.kind, awarded.amount, "login_streak")

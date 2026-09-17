@@ -55,3 +55,28 @@
   - Evidence captured: `deliveries/evidence/2026-09-17-batch2-real-money.txt`.
 - **Still open?** CLOSED. Fixed in Batch 2.
 
+### 2026-09-17 — Batch 3: Permanent Player Loss (`ASC-2`, `LOGIN-1`, `NAN-1`)
+- **Date / Batch / Defect ID:** 2026-09-17 / Batch 3 / `ASC-2`, `LOGIN-1`, `NAN-1`
+- **What happened:**
+  - `ASC-2`: On ascension, Cash upgrades were reset, but `MassBudget` was omitted from the reset list while dice were reset to a fresh budget-60 die. Because `MassBudget` remained maxed, the player could never purchase it again for the life of the account. Furthermore, newly granted dice in `PlayerProfile.grantDieSlots` started at base budget without inheriting active `MassBudget` levels, and `MassBudget` was missing from `TEMPLATE.Upgrades`.
+  - `LOGIN-1`: In `ProgressionService.luau`, `checkLoginStreak` discarded the return value of `PlayerProfile.mutate` and credited rewards unconditionally. When profile writes failed, the player received currency while the streak failed to advance, creating an infinite reward mint on repeat rejoin. Sibling paths (spin, promo code, quests) set claim flags before credit confirmation, risking lost rewards on credit failure.
+  - `NAN-1`: `PlayerProfile._reconcile` only checked for missing keys. If any numeric currency (`Cash`, `Gems`, `Diamonds`, `LifetimeCash`, `HighestRoll`, `Ascensions`, `TotalRolls`, `DieSlots`) became NaN or infinite, it persisted indefinitely, defeating comparison checks and permanently poisoning player saves.
+- **What caused it:**
+  - `ASC-2`: Omission in `AscensionService.luau` upgrade wipe loop and uninherited account upgrades in `PlayerProfile.grantDieSlots`.
+  - `LOGIN-1`: Missing error check on `mutate` in `checkLoginStreak` and lack of atomic rollbacks in sibling reward claims.
+  - `NAN-1`: Missing NaN/infinite type guards in `_reconcile` and `EconomyService.writeBalance`.
+- **How it was addressed:**
+  - `ASC-2`: Reset `d.Upgrades.MassBudget = 0` in `AscensionService.luau`. Added `MassBudget = 0` to `TEMPLATE.Upgrades`. In `PlayerProfile.grantDieSlots`, auto-inherited account `MassBudget` levels for newly created dice up to `shape.cashBudgetCap`.
+  - `LOGIN-1`: Gated `checkLoginStreak` reward credit on successful profile `mutate`. Implemented atomic rollbacks on partial failures in `claimSpin`, `redeemCode`, `claimQuest`, and `claimChest`.
+  - `NAN-1`: In `PlayerProfile._reconcile`, sanitized all 8 numeric scalars against NaN and non-finite values. In `EconomyService.writeBalance`, refused non-finite value assignments.
+- **Verified how:**
+  - Full automated suite: 23 passed, 0 failed.
+  - Assertions increased from 3,693 to 3,707 (+14 assertions).
+  - Pin tests:
+    - `tests/Integration_Ascension.test.luau`: Seeded `MassBudget = 10`, asserted `Upgrades.MassBudget == 0` wiped on ascension.
+    - `tests/ProfileLifecycle.test.luau`: Verified `grantDieSlots` auto-inherits account `MassBudget` levels on new dice up to cap.
+    - `tests/ProfileSchema.test.luau`: Verified NaN and non-finite values across all 8 numeric scalars are repaired to safe template defaults, and verified `TEMPLATE.Upgrades.MassBudget == 0`.
+  - Evidence captured: `deliveries/evidence/2026-09-17-batch3-permanent-loss.txt`.
+- **Still open?** CLOSED. Fixed in Batch 3.
+
+

@@ -53,6 +53,7 @@ local function run(): (boolean, string?, number)
 	fakeData.Ascensions = 1
 	
 	fakeData.Upgrades.AutoRollSpeed = 5
+	fakeData.Upgrades.MassBudget = 10
 	fakeData.Vault.AccrualId = 123
 	fakeData.CodesRedeemed["BETA2026"] = true
 	fakeData.LoginStreak.Count = 7
@@ -79,6 +80,7 @@ local function run(): (boolean, string?, number)
 		e = e or check(postData.Cash == 0, "Cash MUST be wiped")
 		
 		e = e or check(postData.Upgrades.AutoRollSpeed == 0, "Upgrades MUST be wiped")
+		e = e or check(postData.Upgrades.MassBudget == 0, "MassBudget upgrade MUST be wiped on ascension (ASC-2)")
 		e = e or check(postData.Vault.AccrualId == 0, "Vault MUST be wiped")
 
 		-- 2. Asserts PRESERVED state

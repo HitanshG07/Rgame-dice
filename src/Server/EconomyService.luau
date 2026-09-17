@@ -87,6 +87,10 @@ local function readBalance(data: PlayerProfile.Profile, currency: Currency): num
 end
 
 local function writeBalance(data: PlayerProfile.Profile, currency: Currency, value: number): ()
+	if type(value) ~= "number" or value ~= value or value == math.huge or value == -math.huge then
+		warn(string.format("[Economy] refused write of non-finite balance for %s: %s", currency, tostring(value)))
+		return
+	end
 	if currency == "Cash" then
 		data.Cash = value
 	elseif currency == "Gems" then

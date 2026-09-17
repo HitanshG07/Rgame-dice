@@ -24,6 +24,7 @@ local ServerScriptService = game:GetService("ServerScriptService")
 -- than drift, because the hardcoded value also inverted a `math.clamp` range and
 -- would throw. See the clamp itself for the full account.
 local DiceCatalog = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("DiceCatalog"))
+local UpgradeCatalog = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("UpgradeCatalog"))
 
 local PlayerProfile = {}
 
@@ -147,7 +148,7 @@ local TEMPLATE: Profile = {
 	-- field's existence is explicit rather than implied. MonetizationService
 	-- (unbuilt) will be the only writer. Declared 2026-08-06 from Gate 3
 	-- finding F-G3-2. Absent-means-off remains the fail-closed default.
-	Upgrades = { AutoRollSpeed = 0, VaultCapacity = 0, VaultEfficiency = 0, Luck = 0, BadRollShield = 0 },
+	Upgrades = { AutoRollSpeed = 0, VaultCapacity = 0, VaultEfficiency = 0, Luck = 0, BadRollShield = 0, MassBudget = 0 },
 	Vault = { LastSeen = 0, AccrualId = 0, AvgIncomePerSec = 0, PurchasedHours = 0 },
 	PurchaseIds = {},
 	PurchaseOrder = {},
@@ -199,6 +200,29 @@ function PlayerProfile.grantDieSlots(d: any, count: number, maxSlots: number, ma
 		local die = makeDie()
 		if die == nil then
 			break
+		end
+		-- Inherit account-level MassBudget upgrade entitlement (ASC-2)
+		local massLevel = if type(d.Upgrades) == "table" then (tonumber(d.Upgrades.MassBudget) or 0) else 0
+		if massLevel > 0 then
+			local shape = DiceCatalog.getShape(die.Shape)
+			if shape ~= nil then
+				local grant = massLevel * UpgradeCatalog.MASS_PER_LEVEL
+				local ceiling = shape.cashBudgetCap
+				local currentPurchased = die.PurchasedBudget or die.MassBudget
+				local target = math.min(ceiling, currentPurchased + grant)
+				local added = target - currentPurchased
+				if added > 0 then
+					die.PurchasedBudget = target
+					die.MassBudget += added
+					local lightest, lightestIdx = math.huge, 1
+					for i, f in ipairs(die.Faces) do
+						if f.Mass < lightest then
+							lightest, lightestIdx = f.Mass, i
+						end
+					end
+					die.Faces[lightestIdx].Mass += added
+				end
+			end
 		end
 		table.insert(d.Dice, die)
 	end
@@ -345,6 +369,25 @@ function PlayerProfile._reconcile(raw: any): Profile
 	end
 	if type(data.BundleExpiry) ~= "number" or data.BundleExpiry ~= data.BundleExpiry then
 		data.BundleExpiry = 0
+	end
+	-- NaN AND WRONG-TYPE REPAIR FOR EVERY NUMERIC SCALAR (NAN-1). `fill` only writes
+	-- absent keys, so a field present with a poisoned value survives it. NaN then
+	-- defeats downstream guards (e.g. `next > MAX_CURRENCY` is false for NaN) and
+	-- poisons the save.
+	for _, key in ipairs({
+		"Cash",
+		"Gems",
+		"Diamonds",
+		"LifetimeCash",
+		"HighestRoll",
+		"Ascensions",
+		"TotalRolls",
+		"DieSlots",
+	}) do
+		local v = (data :: any)[key]
+		if type(v) ~= "number" or v ~= v or v == math.huge or v == -math.huge then
+			(data :: any)[key] = (TEMPLATE :: any)[key]
+		end
 	end
 	if type(data.Diamond.Shapes) ~= "table" then
 		data.Diamond.Shapes = deepCopy(TEMPLATE.Diamond.Shapes)

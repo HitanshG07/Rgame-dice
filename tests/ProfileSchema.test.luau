@@ -317,6 +317,33 @@ local function run(): (boolean, string?, number)
 	local badTypeOk = PlayerProfile._migrate(badTypeVersion)
 	e = e or check(not badTypeOk, "a non-numeric SchemaVersion must fail closed")
 
+	----------------------------------------------------------------------------
+	-- NAN-1: NaN and non-finite values in numeric scalars must be repaired
+	----------------------------------------------------------------------------
+	local poisoned: any = {
+		Cash = 0 / 0,
+		Gems = math.huge,
+		Diamonds = -math.huge,
+		LifetimeCash = "not a number",
+		HighestRoll = 0 / 0,
+		Ascensions = 0 / 0,
+		TotalRolls = 0 / 0,
+		DieSlots = 0 / 0,
+	}
+	local clean = PlayerProfile._reconcile(poisoned)
+	e = e or check(clean.Cash == 0, "poisoned Cash (NaN) must be repaired to 0")
+	e = e or check(clean.Gems == 0, "poisoned Gems (inf) must be repaired to 0")
+	e = e or check(clean.Diamonds == 0, "poisoned Diamonds (-inf) must be repaired to 0")
+	e = e or check(clean.LifetimeCash == 0, "poisoned LifetimeCash (string) must be repaired to 0")
+	e = e or check(clean.HighestRoll == 0, "poisoned HighestRoll (NaN) must be repaired to 0")
+	e = e or check(clean.Ascensions == 0, "poisoned Ascensions (NaN) must be repaired to 0")
+	e = e or check(clean.TotalRolls == 0, "poisoned TotalRolls (NaN) must be repaired to 0")
+	e = e or check(clean.DieSlots == 1, "poisoned DieSlots (NaN) must be repaired to 1")
+
+	-- Verify MassBudget exists in TEMPLATE.Upgrades (ASC-2)
+	local tmpl = PlayerProfile.getTemplate()
+	e = e or check(tmpl.Upgrades.MassBudget == 0, "TEMPLATE.Upgrades.MassBudget must be 0 (ASC-2)")
+
 	if e then
 		return false, e, n
 	end

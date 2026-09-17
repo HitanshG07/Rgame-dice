@@ -213,6 +213,29 @@ local function run(): (boolean, string?, number)
 		string.format("the TEMPLATE was corrupted by a profile mutation: fresh mass is %s",
 			tostring(fresh.Dice[1].Faces[1].Mass)))
 
+	----------------------------------------------------------------------------
+	-- ASC-2: grantDieSlots auto-inherits account MassBudget upgrade
+	----------------------------------------------------------------------------
+	local ReplicatedStorage = game:GetService("ReplicatedStorage")
+	local DiceCatalog = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("DiceCatalog"))
+	local UpgradeCatalog = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("UpgradeCatalog"))
+
+	local slotProfile = PlayerProfile._reconcile({})
+	slotProfile.Upgrades.MassBudget = 3 -- 3 levels = +30 mass
+	slotProfile.DieSlots = 1
+	local makeTestDie = function()
+		return DiceCatalog.newDie("D6")
+	end
+
+	local gained = PlayerProfile.grantDieSlots(slotProfile, 1, 5, makeTestDie)
+	e = e or check(gained == 1, "grantDieSlots should grant 1 slot")
+	e = e or check(#slotProfile.Dice == 2, "profile should now have 2 dice")
+	local newDie = slotProfile.Dice[2]
+	e = e or check(newDie.PurchasedBudget == 60 + 3 * UpgradeCatalog.MASS_PER_LEVEL,
+		"newly granted die MUST auto-inherit account MassBudget upgrade levels (ASC-2)")
+	e = e or check(newDie.MassBudget == 60 + 3 * UpgradeCatalog.MASS_PER_LEVEL,
+		"newly granted die MassBudget must match PurchasedBudget")
+
 	if e then
 		return false, e, n
 	end

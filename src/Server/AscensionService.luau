@@ -80,6 +80,12 @@ function AscensionService.ascend(player: Player): (boolean, string?, number)
 		d.Upgrades.VaultCapacity = 0
 		d.Upgrades.VaultEfficiency = 0
 		d.Upgrades.Luck = 0
+		-- MassBudget MUST reset with them (ASC-2). The dice are reset to a 60 budget
+		-- at the bottom of this function, and MassBudget is applied only at purchase
+		-- time -- so leaving the level standing meant the player kept a maxed counter,
+		-- lost the mass it bought, and could never re-buy it. FR-9.1 resets "Cash-purchased
+		-- upgrades"; this is one.
+		d.Upgrades.MassBudget = 0
 
 		-- Reset volatile progression
 		d.Vault.AccrualId = 0
