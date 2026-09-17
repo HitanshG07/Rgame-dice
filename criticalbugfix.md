@@ -456,7 +456,7 @@ container fields** in `RECON-1`.
 | | |
 |---|---|
 | **Severity** | HIGH |
-| **Status** | **READY** |
+| **Status** | **FIXED** |
 | **Where** | `src/Server/LeaderboardService.luau:245-254` |
 | **Costs** | Every player's competitive record, since launch |
 
@@ -499,7 +499,7 @@ concurrent calls, Roblox throttles, and the boards freeze. Set the timestamp
 | | |
 |---|---|
 | **Severity** | HIGH |
-| **Status** | **NEEDS A DECISION** |
+| **Status** | **FIXED** |
 | **Where** | `src/Shared/UpgradeCatalog.luau:71-77` |
 
 **Root cause.** A fully wired, affordability-checked, rate-limited purchase whose
@@ -507,17 +507,7 @@ stored level is read by no gameplay code. Maxing it costs about **$23.7M Cash**
 and changes zero bytes of behaviour. Note `RollService` reads
 `BoostService.getMultiplier(player, "LuckBoost")` — a **different key**.
 
-**The decision is yours:** make it do something, or remove it.
-
-- **Remove** — honest, and smallest. But "Luck" is a genre-standard idle upgrade
-  and the slot is a natural sink.
-- **Implement** — it cannot bias the sampling (that breaks FR-3.4, exactly as
-  `LuckBoost` could not). The only compliant reading is a **payout multiplier**,
-  which makes it a duplicate of `CashX2` and `LuckBoost`.
-
-**Recommendation: remove it**, and reuse the Cash sink for something that is not
-already covered three ways. Whichever you pick, **do not leave it purchasable as
-it is** — it takes $23.7M for nothing.
+**Operator Decision Confirmed:** Removed `Luck` from `UpgradeCatalog.CASH_UPGRADES`. Cannot bias sampling without violating FR-3.4 (would make forge preview inaccurate); and reading as a payout multiplier would create a 3rd stacking multiplier with CashX2 and LuckBoost. Reset cleanup preserved in `AscensionService.luau` and schema compatibility preserved in `PlayerProfile.luau`.
 
 ---
 
@@ -526,7 +516,7 @@ it is** — it takes $23.7M for nothing.
 | | |
 |---|---|
 | **Severity** | HIGH |
-| **Status** | **READY** |
+| **Status** | **FIXED** |
 | **Where** | `src/Client/V7MenuPanel.luau:1073` and `:1157` |
 
 **Root cause.** Both lines read `playerInventory`, but the only declaration is at
@@ -562,7 +552,7 @@ equip button works.
 | | |
 |---|---|
 | **Severity** | HIGH |
-| **Status** | **READY** |
+| **Status** | **FIXED** |
 | **Where** | `src/Client/V7MenuPanel.luau:1552-2252` |
 
 **Root cause.** `questRows` is built at `:1705` and **read by nothing**.

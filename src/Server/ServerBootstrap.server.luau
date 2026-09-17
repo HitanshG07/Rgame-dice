@@ -937,8 +937,11 @@ local function onPlayerRemoving(player: Player)
 	-- nothing on screen that could have looked wrong. Wiring the display is what
 	-- surfaced it: the vault read 0s after a real 90-second absence.
 	--
-	-- MUST run before `PlayerProfile.release`, because it MUTATES the profile and
-	-- a released profile refuses writes.
+	-- BOARD-1: MUST run before `PlayerProfile.release`, because it reads the profile
+	-- and a released profile refuses reads. Submits the player's LifetimeCash,
+	-- HighestRoll, and Ascensions to the authoritative global leaderboards.
+	pcall(LeaderboardService.updatePlayer, player)
+
 	OfflineService.onPlayerRemoving(player)
 
 	-- Released BEFORE the profile: the entitlement cache is keyed by Player and
@@ -948,6 +951,23 @@ local function onPlayerRemoving(player: Player)
 end
 
 Players.PlayerRemoving:Connect(onPlayerRemoving)
+
+--------------------------------------------------------------------------------
+-- PERIODIC LEADERBOARD PUBLISH (BOARD-1)
+--
+-- Automatically writes active players' scores to the 3 leaderboards every 60s
+-- so a server crash or network disconnect does not lose session progress.
+--------------------------------------------------------------------------------
+task.spawn(function()
+	while true do
+		task.wait(60)
+		for _, player in ipairs(Players:GetPlayers()) do
+			if PlayerProfile.isActive(player) then
+				pcall(LeaderboardService.updatePlayer, player)
+			end
+		end
+	end
+end)
 
 --------------------------------------------------------------------------------
 -- Open the doors
@@ -988,5 +1008,8 @@ end)
 
 game:BindToClose(function()
 	joinConnection:Disconnect()
+	for _, player in ipairs(Players:GetPlayers()) do
+		pcall(LeaderboardService.updatePlayer, player)
+	end
 	PlayerProfile.releaseAll()
 end)

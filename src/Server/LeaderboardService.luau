@@ -161,7 +161,7 @@ function LeaderboardService.getBoard(boardId: string): { Entry }
 	end
 
 	local now = os.clock()
-	if (now - cache.lastFetch) < CACHE_TTL_SEC and #cache.entries > 0 then
+	if (now - cache.lastFetch) < CACHE_TTL_SEC and cache.lastFetch > 0 then
 		return cache.entries
 	end
 
@@ -169,6 +169,11 @@ function LeaderboardService.getBoard(boardId: string): { Entry }
 	if store == nil then
 		return cache.entries
 	end
+
+	-- M3 (BOARD-1): Set lastFetch BEFORE the yield. If 30 players refresh at once,
+	-- setting the timestamp before the network yield ensures concurrent callers return
+	-- cached entries rather than issuing 30 concurrent GetSortedAsync calls that throttle DataStore.
+	cache.lastFetch = now
 
 	-- Same re-bind as `submitScore`: narrowing does not survive into a closure.
 	local ds: OrderedDataStore = store
@@ -217,7 +222,6 @@ function LeaderboardService.getBoard(boardId: string): { Entry }
 		table.insert(newEntries, entry)
 	end
 
-	cache.lastFetch = now
 	cache.entries = newEntries
 	return newEntries
 end

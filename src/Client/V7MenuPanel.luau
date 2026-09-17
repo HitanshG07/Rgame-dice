@@ -1000,6 +1000,10 @@ local function buildShapesOverlay(
 	local currentAscensionsCount = 0
 	local currentCashBalance = 0
 	local ownedShapesMap: { [string]: boolean } = { D2 = true }
+	-- SHAPE-1: Own inventory table scoped to buildShapesOverlay.
+	-- Previously read `playerInventory` which was declared in buildSlotsOverlay,
+	-- causing it to resolve to a nil global and reporting "NO DICE OWNED" on equip.
+	local shapesInventory: { [string]: number } = {}
 
 	local updateActionButtons: () -> ()
 
@@ -1070,7 +1074,7 @@ local function buildShapesOverlay(
 
 	updateActionButtons = function()
 		local isUnlocked = (ownedShapesMap[inspectedShapeId] == true)
-		local ownedTotal = if type(playerInventory) == "table" then (tonumber(playerInventory[inspectedShapeId]) or 0) else 0
+		local ownedTotal = if type(shapesInventory) == "table" then (tonumber(shapesInventory[inspectedShapeId]) or 0) else 0
 		local inUseCount = 0
 		for _, s in ipairs(currentEquippedShapeList) do
 			if s == inspectedShapeId then
@@ -1154,7 +1158,7 @@ local function buildShapesOverlay(
 	equipStateBtn.MouseButton1Click:Connect(function()
 		if actionInFlight then return end
 		local isUnlocked = (ownedShapesMap[inspectedShapeId] == true)
-		local ownedTotal = if type(playerInventory) == "table" then (tonumber(playerInventory[inspectedShapeId]) or 0) else 0
+		local ownedTotal = if type(shapesInventory) == "table" then (tonumber(shapesInventory[inspectedShapeId]) or 0) else 0
 		local inUseCount = 0
 		for _, s in ipairs(currentEquippedShapeList) do
 			if s == inspectedShapeId then
@@ -1455,6 +1459,12 @@ local function buildShapesOverlay(
 				ownedShapesMap = state.diamondTree.Shapes
 			end
 
+			if type(state.inventory) == "table" then
+				shapesInventory = state.inventory
+			else
+				shapesInventory = {}
+			end
+
 			local currentShape = if type(state.dice) == "table" and #state.dice > 0
 				then tostring(state.dice[1].Shape or "D2")
 				else "D2"
@@ -1549,6 +1559,16 @@ local function buildQuestsOverlay(
 	lList.SortOrder = Enum.SortOrder.LayoutOrder
 	lList.Parent = leftCol
 
+	local QUEST_INFO: { [string]: { title: string, desc: string } } = {
+		roll25 = { title = "WARM-UP ROLLS", desc = "Perform 25 dice rolls in the arena." },
+		roll100 = { title = "HIGH-FREQUENCY CALIBRATION", desc = "Perform 100 physical dice rolls in the arena." },
+		roll500 = { title = "ENDURANCE ROLLING", desc = "Perform 500 physical dice rolls in the arena." },
+		streak5 = { title = "MOMENTUM BUILDER", desc = "Achieve a streak of 5 successful rolls." },
+		streak15 = { title = "PERFECT HARMONY", desc = "Achieve a streak of 15 successful rolls." },
+		forge3 = { title = "FOUNDRY INITIATE", desc = "Calibrate and forge 3 dice distributions." },
+		forge10 = { title = "MASTER SMITH", desc = "Calibrate and forge 10 dice distributions." },
+	}
+
 	local questRows: { any } = {}
 
 	for i = 1, 3 do
@@ -1597,7 +1617,9 @@ local function buildQuestsOverlay(
 		rewBadge.Position = UDim2.new(0.5, 0, 0, 0)
 		rewBadge.BackgroundTransparency = 1
 		rewBadge.Font = Enum.Font.GothamBold
-		rewBadge.Text = "REWARD: +$2,500 CASH"
+		-- QUEST-1: Deleted fabricated "+$2,500 CASH" reward string. Server omits
+		-- reward amounts under NFR-5; client must never invent figures.
+		rewBadge.Text = "REWARD ON COMPLETION"
 		rewBadge.TextColor3 = THEME.Positive
 		rewBadge.TextSize = 12
 		rewBadge.TextXAlignment = Enum.TextXAlignment.Right
@@ -2169,6 +2191,54 @@ local function buildQuestsOverlay(
 	})
 
 	local function refreshQuests(state: any)
+		-- QUEST-1: Drive quest cards from authoritative state.quests snapshot
+		if type(state) == "table" and type(state.quests) == "table" then
+			for idx, row in ipairs(questRows) do
+				local q = state.quests[idx]
+				if q then
+					row.card.Visible = true
+					row.state.id = q.id
+					row.state.isReady = (q.ready == true)
+					row.state.isClaimed = (q.claimed == true)
+
+					local info = QUEST_INFO[q.id]
+					if info then
+						row.title.Text = info.title
+						row.desc.Text = info.desc
+					else
+						row.title.Text = string.upper(tostring(q.id))
+						row.desc.Text = "Complete daily objective in the arena."
+					end
+
+					local prog = tonumber(q.progress) or 0
+					local tgt = tonumber(q.target) or 1
+					local frac = math.clamp(if tgt > 0 then prog / tgt else 0, 0, 1)
+
+					row.fill.Size = UDim2.new(frac, 0, 1, 0)
+					row.count.Text = string.format("COMPLETION: %d / %d", math.min(prog, tgt), tgt)
+
+					if q.claimed then
+						row.button.Text = "CLAIMED \u{2713}"
+						row.button.BackgroundColor3 = THEME.CardBg
+						row.button.TextColor3 = THEME.TextMuted
+						row.button.AutoButtonColor = false
+					elseif q.ready then
+						row.button.Text = "CLAIM REWARD"
+						row.button.BackgroundColor3 = THEME.Positive
+						row.button.TextColor3 = THEME.TextDark
+						row.button.AutoButtonColor = true
+					else
+						row.button.Text = "IN PROGRESS"
+						row.button.BackgroundColor3 = THEME.ButtonDark
+						row.button.TextColor3 = THEME.TextMuted
+						row.button.AutoButtonColor = false
+					end
+				else
+					row.card.Visible = false
+				end
+			end
+		end
+
 		local sessionSec = os.clock() - sessionStartTime
 		for _, row in ipairs(playtimeRows) do
 			if not row.state.claimed then

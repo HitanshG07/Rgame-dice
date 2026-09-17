@@ -79,4 +79,32 @@
   - Evidence captured: `deliveries/evidence/2026-09-17-batch3-permanent-loss.txt`.
 - **Still open?** CLOSED. Fixed in Batch 3.
 
+### 2026-09-17 — Batch 4: Inert Features (`BOARD-1`, `LUCK-1`, `SHAPE-1`, `QUEST-1`)
+- **Date / Batch / Defect ID:** 2026-09-17 / Batch 4 / `BOARD-1`, `LUCK-1`, `SHAPE-1`, `QUEST-1`
+- **What happened:**
+  - `BOARD-1`: Leaderboard scores were never written because `updatePlayer` was never called from player exit, graceful shutdown, or periodic auto-save. All three OrderedDataStores remained empty and the BOARDS panel rendered empty forever. In `getBoard`, `lastFetch` was stamped after the yielding `GetSortedAsync` call, exposing DataStore to concurrent burst storms (M3) when multiple players refreshed simultaneously.
+  - `LUCK-1`: `Upgrades.Luck` was sold for up to ~$23.7M Cash but was read by zero gameplay code. It could not bias face sampling without violating FR-3.4 (would make forge probability preview inaccurate); and reading as a payout multiplier would introduce an uncalibrated 3rd stacking multiplier alongside `CashX2` and `LuckBoost`.
+  - `SHAPE-1`: In `V7MenuPanel.luau:1073` and `:1157`, `playerInventory` resolved to a nil global because `playerInventory` was declared in `buildSlotsOverlay` closure. Owned total was always 0, causing players holding multiple dice to see "[ NO DICE OWNED ]" and disabling the Equip button.
+  - `QUEST-1`: `questRows` in `buildQuestsOverlay` was constructed and never updated by `refreshQuests`. Quest cards displayed fabricated hardcoded text `"REWARD: +$2,500 CASH"` (violating NFR-5 server omission). Quests sat at default values, `rowState.id` remained nil, and CLAIM failed every time.
+- **What caused it:**
+  - Missing server lifecycle hooks (`onPlayerRemoving`, `BindToClose`, periodic tick) and post-yield cache timestamp in `LeaderboardService`.
+  - Unwired sink in `UpgradeCatalog` that was superseded by `BoostService.LuckBoost`.
+  - Variable scoping mismatch across closures in `V7MenuPanel`.
+  - Disconnected UI renderer and hardcoded mock text in `buildQuestsOverlay`.
+- **How it was addressed:**
+  - `BOARD-1`: Hooked `pcall(LeaderboardService.updatePlayer, player)` in `ServerBootstrap.onPlayerRemoving` (before profile release), in `game:BindToClose` across all players, and in a 60s periodic background loop. Moved `cache.lastFetch = now` before the `GetSortedAsync` yield in `LeaderboardService.getBoard` to protect against concurrent fetch storms.
+  - `LUCK-1`: Operator confirmed Option 1: removed `Luck` from `UpgradeCatalog.CASH_UPGRADES`. Retained `d.Upgrades.Luck = 0` in `AscensionService.luau` and `PlayerProfile.TEMPLATE` for save-file backward compatibility.
+  - `SHAPE-1`: Declared `shapesInventory: { [string]: number }` in `buildShapesOverlay`, populated in `refreshShapes` from `state.inventory`, and read at lines 1073 and 1157.
+  - `QUEST-1`: Replaced fabricated reward string with `"REWARD ON COMPLETION"`. Wired `refreshQuests` to walk `state.quests`, map quest IDs to titles/descriptions, update progress bars and completion counts, set `rowState.id / isReady / isClaimed`, and drive button states.
+- **Verified how:**
+  - Full automated suite: 23 passed, 0 failed.
+  - Assertions increased from 3,707 to 3,712 (+5 assertions).
+  - Pin tests in `tests/Leaderboard.test.luau`:
+    - Verified `UpgradeCatalog.getCashUpgrade("Luck") == nil` and absent from `getAllCashUpgrades()`.
+    - Verified `LeaderboardService.getPlayerRank` returns nil safely for unranked player.
+    - Verified `LeaderboardService.getBoard` handles unknown boards without error.
+    - Verified `LeaderboardService.updatePlayer` safely exits when player has no loaded profile.
+  - Evidence captured: `deliveries/evidence/2026-09-17-batch4-inert-features.txt`.
+- **Still open?** CLOSED. Fixed in Batch 4.
+
 

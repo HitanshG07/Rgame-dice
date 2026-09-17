@@ -39,6 +39,30 @@ function LeaderboardTest.run(): (boolean, string?, number)
 	local inv1e6 = LeaderboardService.inverseTransform(LeaderboardService.transform(1e6))
 	check(math.abs(inv1e6 - 1e6) <= 2.0, "inverseTransform should roundtrip 1e6 within 2.0 margin")
 
+	-- 5. LUCK-1: UpgradeCatalog must no longer offer "Luck"
+	local ReplicatedStorage = game:GetService("ReplicatedStorage")
+	local Shared = ReplicatedStorage:WaitForChild("Shared")
+	local UpgradeCatalog = require(Shared:WaitForChild("UpgradeCatalog"))
+	check(UpgradeCatalog.getCashUpgrade("Luck") == nil, "Luck must not be purchasable in CASH_UPGRADES (LUCK-1)")
+	local allCash = UpgradeCatalog.getAllCashUpgrades()
+	local foundLuck = false
+	for _, u in ipairs(allCash) do
+		if u.id == "Luck" then
+			foundLuck = true
+			break
+		end
+	end
+	check(not foundLuck, "Luck must not appear in getAllCashUpgrades (LUCK-1)")
+
+	-- 6. BOARD-1: LeaderboardService safely handles unranked players and unknown boards
+	local fakePlayer = { UserId = 99999999 } :: any
+	check(LeaderboardService.getPlayerRank(fakePlayer, "NetWorth") == nil, "getPlayerRank must return nil for unranked player")
+	check(#LeaderboardService.getBoard("NonExistentBoard_v1") == 0, "getBoard must return empty table for unknown board")
+	local updateOk = pcall(function()
+		LeaderboardService.updatePlayer(fakePlayer)
+	end)
+	check(updateOk, "updatePlayer must safely exit when player has no loaded profile")
+
 	return true, nil, asserts
 end
 

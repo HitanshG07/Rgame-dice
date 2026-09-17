@@ -68,13 +68,10 @@ local CASH_UPGRADES: { [string]: CashUpgradeDef } = {
 		baseCost = 500,
 		costMultiplier = 3.0,
 	},
-	Luck = {
-		id = "Luck",
-		name = "Luck Boost",
-		maxLevel = 20,
-		baseCost = 150,
-		costMultiplier = 1.8,
-	},
+	-- LUCK-1: "Luck" upgrade removed. It cost ~$23.7M Cash but was read by no gameplay
+	-- code. Cannot bias sampling without violating FR-3.4; and reading as a payout
+	-- multiplier would create a 3rd stacking multiplier with CashX2 and LuckBoost.
+	-- Preserved in AscensionService reset loop and PlayerProfile schema for backward compatibility.
 	BadRollShield = {
 		id = "BadRollShield",
 		name = "Bad Roll Shield",
