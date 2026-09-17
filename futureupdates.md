@@ -173,6 +173,72 @@ estimate into a receipt, and lets the panel recover from a server-side correctio
 
 ---
 
+## F-7b · TRAITS — the largest drawn-but-empty surface in the game
+**UI ~40%, backend 0% · SEAM** · `V7MenuPanel.luau:4125-4572`
+
+Tracked in `docs/ROADMAP.md` as Phase 2c, but it belongs here too, because **the
+UI already specifies the design in enough detail to build from** — and because it
+is the only feature whose panel carries a currency that does not exist.
+
+**What is on screen right now:**
+
+| Element | Where | State |
+|---|---|---|
+| A whole quadrant, titled **"TRAIT FORGE & INSPECTION"** | `:4125` | Badged **"ACTIVE"** — which is untrue |
+| The overlay's own title: **"~ Slots & Trait Forge ~"** | `:3655` | Half the panel's name is a feature that does not exist |
+| **Two trait slots per die** | `:4421`, `:4492` | `"TRAIT 1: NOT YET AVAILABLE"`, `"TRAIT 2: NOT YET AVAILABLE"` |
+| `createTraitEmblem` — real 28×28 emblem geometry | `:3867` | Built, drawn |
+| **REROLL** | `:4323` | Inert via `setTraitControlInert` |
+| **KEEP TRAITS** | `:4531` | Inert |
+| **REROLL ALL** | `:4555` | Inert |
+| A **ShardDeck** reading `◆ -- SHARDS` | `:4277-4313` | A fourth currency, named on screen |
+
+**What exists server-side: nothing.** `grep -rli "trait" src/Server/ src/Shared/`
+returns **zero files**. No schema field, no remote, no catalog, no test, and no
+Shards currency anywhere in `PlayerProfile`, `EconomyService` or the snapshot.
+
+### The design is already legible from the UI, and worth writing down
+
+The three controls imply a complete mechanic that nobody has specified in prose:
+
+- **Two trait slots per die** — so traits are per-die, not per-account. That
+  matches the roadmap's note and confirms the six-site per-die problem below.
+- **KEEP TRAITS + REROLL** is a **lock-and-reroll** loop — keep the trait you
+  like, reroll the other. That is a deliberate, familiar mechanic, not a plain
+  randomiser.
+- **REROLL ALL** is the bulk action, so rerolling is expected to be repeated.
+- **Shards** is the sink. A separate currency implies traits are *not* meant to
+  compete with Cash (the forge) or Diamonds (prestige) for the same wallet.
+
+### Why this is the most expensive item in the file, despite the UI existing
+
+`criticalbugfix.md` §`DIE-1` already records that **a new per-die field must be
+added in six places, and three of them DELETE it** — `performSetShape` and
+`repairDie` both rebuild the die as a fresh four-field literal, so traits would
+survive until a player's first shape change and then vanish. `StateSyncService`
+builds the dice payload field-by-field too, so traits would never reach the client
+and the cause would look like a UI bug.
+
+And §`CURR-1` records that **a new currency touches 23 sites**, with the Diamond
+fallthrough compiling silently once the union is widened.
+
+**Both of those must be fixed before any trait code is written**, not during.
+
+### Honest scoping
+
+The panel makes this look ~40% done. It is closer to **15%** — the drawn surface
+is the cheap part. What is missing: `TraitCatalog` in `src/Shared/`, the Shards
+currency across 23 sites, per-die storage across six sites, a shard earning path,
+a `RerollTraits` remote across six files, and the reroll RNG (server-seeded — a
+reroll is a random, value-bearing action and must never be decided by the client).
+
+**One thing to fix cheaply and immediately, regardless:** the section header says
+**"ACTIVE"** over three dead buttons. That is the same class as the invented
+`"+$2,500 CASH"` quest reward — a surface asserting something untrue. Changing it
+to `"COMING SOON"` is a one-line honesty fix that does not wait for the feature.
+
+---
+
 # TIER 2 — half-built systems
 
 ## F-8 · `VaultSummary` — the "welcome back" moment, declared and never fired
