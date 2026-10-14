@@ -672,8 +672,12 @@ function V7HUD.new(): V7HUDController
 	rightLayout.Padding = UDim.new(0.05, 0)
 	rightLayout.Parent = rightPanelBody
 
-	local function addMenuBtn(parentBody: Instance, id: string, text: string, color: Color3?)
-		local btnWrapper, btn = UITheme.neumorphicButton(text, color, UDim2.fromScale(0.8, 0.18), UDim2.fromScale(0, 0))
+	-- `size` is optional and defaults to exactly what every existing caller was
+	-- already getting, so the eight menu buttons below are unchanged in every
+	-- respect. It exists for the UPGRADES pod, which holds one button rather
+	-- than four and so cannot use a height tuned for a stack of four.
+	local function addMenuBtn(parentBody: Instance, id: string, text: string, color: Color3?, size: UDim2?)
+		local btnWrapper, btn = UITheme.neumorphicButton(text, color, size or UDim2.fromScale(0.8, 0.18), UDim2.fromScale(0, 0))
 		-- NAMED BY MENU ID. All eight of these were anonymous "Frame" wrappers
 		-- nested inside anonymous pods, so every button in the HUD -- FORGE,
 		-- SHAPE, SLOTS, ASCEND, SHOP, BOARDS, QUESTS, VAULT, ROLL and AUTO --
@@ -704,6 +708,37 @@ function V7HUD.new(): V7HUDController
 	addMenuBtn(rightPanelBody, "boards", "BOARDS", UITheme.Colors.TextPrimary)
 	addMenuBtn(rightPanelBody, "quests", "QUESTS", UITheme.Colors.Cash)
 	addMenuBtn(rightPanelBody, "vault", "VAULT", UITheme.Colors.TextGold)
+
+	-- THE UPGRADES ENTRY, IN A POD OF ITS OWN.
+	--
+	-- It does NOT go into either menu pod. Those are fixed-height containers
+	-- holding four buttons each at 0.18 height with 0.05 padding -- 0.87 of the
+	-- body. A fifth would come to 1.10 and overflow its parent, which is the
+	-- same class of defect as the REDEEM card that spilled past its own by 9px,
+	-- and shrinking the existing buttons to make room would retune eight
+	-- controls that are working.
+	--
+	-- Pods are absolutely positioned siblings of `gui` with no layout between
+	-- them, so adding one reflows nothing and moves no existing instance. It
+	-- sits in the empty strip below the left pod (y 0.25..0.75) and well clear
+	-- of the roll station (x 0.36..0.64, y 0.865..0.975).
+	--
+	-- The id routes itself: `ClientBootstrap` already forwards every menu id
+	-- that is not "forge" to `openOverlay(menuId)`, and the overlay registers
+	-- itself under "upgrades". Nothing in the routing changes.
+	local upgradesPod, upgradesPodBody = UITheme.neumorphicPod(
+		UDim2.fromScale(0.12, 0.08), UDim2.fromScale(0.02, 0.775))
+	upgradesPod.Name = "UpgradesMenu"
+	upgradesPod.Parent = gui
+
+	local upgradesLayout = Instance.new("UIListLayout")
+	upgradesLayout.FillDirection = Enum.FillDirection.Vertical
+	upgradesLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+	upgradesLayout.VerticalAlignment = Enum.VerticalAlignment.Center
+	upgradesLayout.Parent = upgradesPodBody
+
+	addMenuBtn(upgradesPodBody, "upgrades", "UPGRADES", UITheme.Colors.Cash,
+		UDim2.fromScale(0.86, 0.62))
 
 	-- ==========================================
 	-- 4. BOTTOM CENTER ROLL STATION

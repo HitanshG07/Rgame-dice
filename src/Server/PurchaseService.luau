@@ -39,6 +39,7 @@
 
 local MarketplaceService = game:GetService("MarketplaceService")
 local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
@@ -111,17 +112,50 @@ local function applyGrant(player: Player, entry: Catalog.Entry): (boolean, strin
 		if parts == nil then
 			return false, "malformed_bundle"
 		end
+
+		-- Required lazily, as `grantCurrency` above does.
+		local EconomyService = require(script.Parent:WaitForChild("EconomyService"))
+
+		-- TOTAL OVER THE CURRENCY UNION, AND CHECKED BEFORE ANYTHING IS WRITTEN
+		-- (CURR-1).
+		--
+		-- The loop below used to be a three-branch `if/elseif` with NO `else`,
+		-- so a part naming a currency those branches did not list was silently
+		-- skipped after the player had paid -- and widening the union for
+		-- Shards would make exactly that compile without a warning.
+		--
+		-- THE REFUSAL HAS TO HAPPEN HERE, not inside the mutation.
+		-- `PlayerProfile.mutate` cannot abort a mutator part-way, so a part
+		-- rejected mid-loop would leave the earlier parts written while the
+		-- grant reported failure -- and the platform's retry would then grant
+		-- those parts a SECOND time. Validating first keeps the only two
+		-- outcomes "everything" and "nothing", which is the property the single
+		-- mutation below exists to provide.
+		for _, part in ipairs(parts) do
+			local okPart, partReason = EconomyService.checkGrant(part.currency, part.amount)
+			if not okPart then
+				return false, partReason or "bad_bundle_part"
+			end
+		end
+
 		-- Applied in ONE mutation, so a bundle cannot half-apply: either the
 		-- player gets everything or the profile is untouched and the platform
 		-- retries the whole thing.
 		local ok, reason = PlayerProfile.mutate(player, function(data)
 			for _, part in ipairs(parts) do
-				if part.currency == "Cash" then
-					data.Cash += part.amount
-				elseif part.currency == "Gems" then
-					data.Gems += part.amount
-				elseif part.currency == "Diamonds" then
-					data.Diamonds += part.amount
+				-- THROUGH `creditWithin`, not `data.Cash += part.amount`. The
+				-- raw increment skipped the MAX_CURRENCY clamp and never
+				-- touched `LifetimeCash`, so bundle Cash was worth less than
+				-- identical Cash from a `Currency` product: it did not count
+				-- toward the NetWorth leaderboard or ascension pricing.
+				-- The cast is safe: `checkGrant` proved the union above.
+				local okPart = EconomyService.creditWithin(data, part.currency :: any, part.amount)
+				if not okPart then
+					-- Unreachable while the pre-flight above uses the same
+					-- predicate. Loud rather than silent if they ever diverge,
+					-- because a quiet skip here is the original defect.
+					warn(string.format("[PurchaseService] bundle part refused after validation: %s",
+						tostring(part.currency)))
 				end
 			end
 			-- The Starter Bundle's die slot. Clamped to the ceiling FR-1.1 sets,
@@ -458,6 +492,18 @@ end
 
 function PurchaseService.setAnnouncer(fn: (Player) -> ()): ()
 	announce = fn
+end
+
+-- STUDIO-ONLY TEST SEAM. `applyGrant` is reachable in production only through
+-- a real receipt, which a test cannot produce -- so without this the bundle
+-- grant could not be pinned at all, and CURR-1 survived seven batches for
+-- exactly that reason. Guarded the same way `PlayerProfile._injectProfileForTesting`
+-- is: a live server cannot call it.
+function PurchaseService._applyGrantForTesting(player: Player, entry: Catalog.Entry): (boolean, string?)
+	if not RunService:IsStudio() then
+		error("[PurchaseService] the grant seam is Studio-only", 2)
+	end
+	return applyGrant(player, entry)
 end
 
 function PurchaseService._onGamePassPurchaseFinished(player: Player, gamePassId: number, wasPurchased: boolean): ()

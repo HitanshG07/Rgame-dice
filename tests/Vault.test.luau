@@ -119,6 +119,49 @@ function VaultTest.run(): (boolean, string?, number)
 	check(not BoostService.isBoostActive(fakePlayer, "OfflineX2"), "OfflineX2 boost must be consumed after claim (VAULT-1)")
 
 	----------------------------------------------------------------------------
+	-- 5b. VAULT-1: THE PAYOUT AND THE WINDOW CONSUME MUST BE ONE WRITE
+	----------------------------------------------------------------------------
+	--
+	-- WHY SECTION 5 ABOVE CANNOT SEE THIS. It only ever claims against a
+	-- healthy profile, where both orderings look identical. The defect lives
+	-- entirely on the failure path: `claimVault` credited in one mutation and
+	-- consumed the vault window in a second, and the rollback between them was
+	-- `EconomyService.debit` -- itself a `PlayerProfile.mutate`, so it failed
+	-- for the same reason the consume just had. A profile released mid-claim
+	-- left the player PAID with the vault still reading full: claim again on
+	-- rejoin, and an unspent OfflineX2 doubles that second claim too.
+	--
+	-- FORCING THE FAILURE. The profile reports active until the moment Cash
+	-- changes, so any SECOND write inside one claim is refused exactly as a
+	-- mid-claim release would refuse it. Under two writes the money moves and
+	-- the window does not; under one write they move together or not at all.
+	liveData.Vault.LastSeen = os.time() - 300
+	liveData.Vault.AvgIncomePerSec = 20
+	OfflineService.beginSession(fakePlayer)
+
+	local cashBeforeFlaky = liveData.Cash
+	local accrualBeforeFlaky = liveData.Vault.AccrualId
+	local lastSeenBeforeFlaky = liveData.Vault.LastSeen
+	fakeProfile.IsActive = function(self: any): boolean
+		return self._is_active and liveData.Cash == cashBeforeFlaky
+	end
+
+	local flakyOk = OfflineService.claimVault(fakePlayer, false)
+
+	fakeProfile.IsActive = function(self: any): boolean
+		return self._is_active
+	end
+
+	local paidFlaky = liveData.Cash > cashBeforeFlaky
+	local windowSpent = liveData.Vault.AccrualId > accrualBeforeFlaky
+		and liveData.Vault.LastSeen > lastSeenBeforeFlaky
+	check(paidFlaky == windowSpent,
+		"the payout and the vault window consume must land in the SAME write (VAULT-1) -- paid="
+		.. tostring(paidFlaky) .. ", windowSpent=" .. tostring(windowSpent))
+	check(flakyOk == paidFlaky,
+		"claimVault must report success only when the player was actually paid")
+
+	----------------------------------------------------------------------------
 	-- 6. VAULT CAPACITY & BUYABLE HOURS CLAMP
 	----------------------------------------------------------------------------
 	liveData.Gems = 10000

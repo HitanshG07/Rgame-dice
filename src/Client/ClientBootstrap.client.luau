@@ -181,7 +181,12 @@ if hudCtrl ~= nil then
 	local forgeCtrl = forgeController
 	local menuCtrl = menuController
 
-	if menuCtrl ~= nil and forgeCtrl ~= nil then
+	-- FANOUT-1 (finish): each wiring needs only the panel it touches. Gating the
+	-- whole block on BOTH panels meant a forge-only failure left the MENU button
+	-- unwired and all eight overlays unreachable. Now only the dead panel's own
+	-- path is dead: no forge -> the forge entry is inert, overlays still open;
+	-- no menu panel -> overlays are inert, the forge still opens.
+	if menuCtrl ~= nil then
 		-- CAPABILITY REPORTING, from the one place that holds both modules.
 		--
 		-- The settings panel must not offer a live-looking switch over a
@@ -202,13 +207,25 @@ if hudCtrl ~= nil then
 			hasAudio = okAudio and result == true
 		end
 		menuCtrl:setCapability("audio", hasAudio)
+	end
 
+	if menuCtrl ~= nil or forgeCtrl ~= nil then
 		hudCtrl:onMenuClicked(function(menuId: string)
 			if menuId == "forge" then
-				menuCtrl:closeAll()
+				if forgeCtrl == nil then
+					return
+				end
+				if menuCtrl ~= nil then
+					menuCtrl:closeAll()
+				end
 				forgeCtrl:show()
 			else
-				forgeCtrl:hide()
+				if menuCtrl == nil then
+					return
+				end
+				if forgeCtrl ~= nil then
+					forgeCtrl:hide()
+				end
 				menuCtrl:openOverlay(menuId)
 			end
 		end)
@@ -271,12 +288,23 @@ if hudCtrl ~= nil then
 			-- requires a positive total; a list of zeros is the wrong input, not an
 			-- error to propagate. Unknown risk is `nil`, which the HUD renders as
 			-- "--" -- honest about not knowing rather than fatal.
-			if #masses == 0 or total <= 0 then
+			if #masses < 2 or total <= 0 then
 				return nil
 			end
-			local floor = DiceCatalog.getMassFloor(die.Shape)
-			local p = ForgeMath.voidProbability(masses, floor)
-			if not ForgeMath.isFinite(p) then
+
+			-- AN UNRECOGNISED SHAPE IS UNKNOWN RISK, NOT A GUESS. `getMassFloor`
+			-- answers DEFAULT_MASS_FLOOR (1) for an id it does not know, which would
+			-- print a confident percentage measured against a gate the server never
+			-- applied.
+			if DiceCatalog.getShape(die.Shape) == nil then
+				return nil
+			end
+
+			-- `voidProbability` has no internal guards. A failure is UNKNOWN (nil),
+			-- never 0: a false "0% risk" tells the player the streak is safe when
+			-- it is not.
+			local okP, p = pcall(ForgeMath.voidProbability, masses, DiceCatalog.getMassFloor(die.Shape))
+			if not okP or type(p) ~= "number" or not ForgeMath.isFinite(p) then
 				return nil
 			end
 			local pClamped = math.clamp(p, 0, 1)

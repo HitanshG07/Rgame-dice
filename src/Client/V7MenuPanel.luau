@@ -13,6 +13,7 @@ local DiceCatalog = require(Shared:WaitForChild("DiceCatalog"))
 local SettingsCatalog = require(Shared:WaitForChild("SettingsCatalog"))
 local VaultCatalog = require(Shared:WaitForChild("VaultCatalog"))
 local Format = require(Shared:WaitForChild("Format"))
+local UpgradeView = require(Shared:WaitForChild("UpgradeView"))
 local UITheme = require(script.Parent:WaitForChild("UITheme"))
 local NetClient = require(script.Parent:WaitForChild("NetClient"))
 
@@ -32,6 +33,7 @@ export type V7MenuController = {
 	questRefresh: ((any) -> ())?,
 	vaultRefresh: ((any) -> ())?,
 	slotsRefresh: ((any) -> ())?,
+	upgradesRefresh: ((any) -> ())?,
 	settingsRefresh: ((any) -> ())?,
 	setCapability: (self: V7MenuController, name: string, present: boolean) -> (),
 	_capabilities: { [string]: boolean },
@@ -350,6 +352,394 @@ local function formatModalShell(
 	bodyCanvas.Parent = mainShell
 
 	return mainShell, bodyCanvas
+end
+
+-- ------------------------------
+-- 0. UPGRADES & DIAMOND TREE OVERLAY
+--
+-- THE DOOR TO SEVEN FINISHED ROOMS. Before this panel the client could reach
+-- exactly two upgrades: the FORGE's mass button, hardcoded to
+-- `buyUpgrade("MassBudget")`, and the SHAPE panel's `buyDiamondNode(shapeId)`,
+-- which is a shape id and lands in the shape-unlock branch of the handler
+-- rather than the node branch. `AutoRollSpeed`, `VaultCapacity`,
+-- `VaultEfficiency`, `BadRollShield`, `StreakStrength`, `MassCeiling` and
+-- `SlotNodes` were all finished server-side -- costed, capped, reset on
+-- ascension, wired to real effects -- behind a door with no handle.
+-- `StreakStrength` being among them is why `b` is 0 for every player and the
+-- streak multiplier has always been 1x (FR-5.4).
+--
+-- BOTH CURRENCIES, ONE SURFACE, TWO SECTIONS. Cash on the left, the Diamond
+-- tree on the right. They are the same transaction -- spend a balance, gain a
+-- level -- and splitting them across two panels would make the player learn
+-- two places to look for one idea.
+--
+-- NOT PLACED IN THE ASCENSION OVERLAY, which is where its right column already
+-- advertises "Diamond Tree Progression Perks & Multipliers". That column is a
+-- fixed two-card 50/50 split and a third card means resizing both existing
+-- cards, which the operator's standing rule forbids. This overlay is built
+-- entirely from new instances and changes the geometry of nothing.
+--
+-- NO ID IS WRITTEN DOWN HERE. The rows come from `UpgradeView.rows`, which
+-- enumerates the catalog, so an upgrade added to `UpgradeCatalog` appears here
+-- untouched. Prices come from the shared catalog, levels and balances from the
+-- snapshot the client already receives -- NFR-5 means no figure on this panel
+-- arrived in a server message, and the handler re-derives every price from the
+-- same function before it charges, so no row can quote what the server refuses.
+-- ------------------------------
+local function buildUpgradesOverlay(
+	screenGui: ScreenGui,
+	overlays: { [string]: Frame },
+	getController: () -> any
+): (any) -> ()
+	local upgradesOverlay, legacyBody = UITheme.overlay("Upgrades & Diamond Tree")
+	upgradesOverlay.Parent = screenGui
+	overlays["upgrades"] = upgradesOverlay
+	if legacyBody then legacyBody.Visible = false end
+
+	local _mainShell, upgradesBody = formatModalShell(
+		upgradesOverlay, "~ Upgrades & Diamond Tree ~", getController)
+
+	local bodyRow = Instance.new("Frame")
+	bodyRow.Name = "BodyRow"
+	bodyRow.Size = UDim2.fromScale(1, 1)
+	bodyRow.BackgroundTransparency = 1
+	bodyRow.Parent = upgradesBody
+
+	local bodyLayout = Instance.new("UIListLayout")
+	bodyLayout.FillDirection = Enum.FillDirection.Horizontal
+	bodyLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	bodyLayout.Padding = UDim.new(0, 12)
+	bodyLayout.Parent = bodyRow
+
+	-- One column per currency. Identical construction, so the two sections
+	-- cannot drift apart in layout the way two hand-built panels would.
+	local function buildColumn(
+		kind: UpgradeView.Kind,
+		order: number,
+		title: string,
+		accent: Color3
+	): (any) -> ()
+		local col = Instance.new("Frame")
+		col.Name = kind .. "Column"
+		col.Size = UDim2.new(0.5, -6, 1, 0)
+		col.BackgroundColor3 = THEME.CardBg
+		col.BorderSizePixel = 0
+		col.LayoutOrder = order
+		col.Parent = bodyRow
+
+		local cCorner = Instance.new("UICorner")
+		cCorner.CornerRadius = UDim.new(0, 8)
+		cCorner.Parent = col
+
+		local cStroke = Instance.new("UIStroke")
+		cStroke.Color = THEME.StrokeSubtle
+		cStroke.Thickness = 1
+		cStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+		cStroke.Parent = col
+
+		local cPad = Instance.new("UIPadding")
+		cPad.PaddingTop = UDim.new(0, 8)
+		cPad.PaddingBottom = UDim.new(0, 8)
+		cPad.PaddingLeft = UDim.new(0, 10)
+		cPad.PaddingRight = UDim.new(0, 10)
+		cPad.Parent = col
+
+		local cList = Instance.new("UIListLayout")
+		cList.FillDirection = Enum.FillDirection.Vertical
+		cList.SortOrder = Enum.SortOrder.LayoutOrder
+		cList.Padding = UDim.new(0, 6)
+		cList.Parent = col
+
+		local headerFrame = Instance.new("Frame")
+		headerFrame.Name = "SectionHeader"
+		headerFrame.Size = UDim2.new(1, 0, 0, 20)
+		headerFrame.BackgroundTransparency = 1
+		headerFrame.LayoutOrder = 1
+		headerFrame.Parent = col
+
+		local titleLbl = Instance.new("TextLabel")
+		titleLbl.Size = UDim2.new(0.5, 0, 1, 0)
+		titleLbl.BackgroundTransparency = 1
+		titleLbl.Font = Enum.Font.GothamBold
+		titleLbl.Text = title
+		titleLbl.TextColor3 = accent
+		titleLbl.TextSize = 13.5
+		titleLbl.TextXAlignment = Enum.TextXAlignment.Left
+		titleLbl.Parent = headerFrame
+
+		-- The player's balance in THIS column's currency, so the cost on a row
+		-- and the money to pay it are readable without leaving the panel.
+		local balanceLbl = Instance.new("TextLabel")
+		balanceLbl.Name = "Balance"
+		balanceLbl.Size = UDim2.new(0.5, 0, 1, 0)
+		balanceLbl.Position = UDim2.new(0.5, 0, 0, 0)
+		balanceLbl.BackgroundTransparency = 1
+		balanceLbl.Font = Enum.Font.Code
+		balanceLbl.Text = "--"
+		balanceLbl.TextColor3 = THEME.TextMuted
+		balanceLbl.TextSize = 11.5
+		balanceLbl.TextXAlignment = Enum.TextXAlignment.Right
+		balanceLbl.Parent = headerFrame
+
+		local scroll = Instance.new("ScrollingFrame")
+		scroll.Name = "RowScroll"
+		scroll.Size = UDim2.new(1, 0, 1, -26)
+		scroll.BackgroundTransparency = 1
+		scroll.BorderSizePixel = 0
+		scroll.ScrollBarThickness = 4
+		scroll.ScrollBarImageColor3 = accent
+		scroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+		scroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+		scroll.ClipsDescendants = true
+		scroll.LayoutOrder = 2
+		scroll.Parent = col
+
+		local sPad = Instance.new("UIPadding")
+		sPad.PaddingRight = UDim.new(0, 8)
+		sPad.PaddingBottom = UDim.new(0, 6)
+		sPad.Parent = scroll
+
+		local sList = Instance.new("UIListLayout")
+		sList.FillDirection = Enum.FillDirection.Vertical
+		sList.SortOrder = Enum.SortOrder.LayoutOrder
+		sList.Padding = UDim.new(0, 8)
+		sList.Parent = scroll
+
+		type RowUI = {
+			id: string,
+			levelLbl: TextLabel,
+			buyBtn: TextButton,
+			inFlight: boolean,
+		}
+		local rowUIs: { RowUI } = {}
+		local lastState: any = nil
+		local paint: () -> ()
+
+		local isDiamond = kind == "Diamond"
+
+		-- `UpgradeView.rows` sorts by cost then id, so the rows are created in a
+		-- stable order. Both catalog accessors build their lists with `pairs`,
+		-- whose order differs between runs -- without the sort the same upgrade
+		-- would sit in a different place every session.
+		for index, def in ipairs(UpgradeView.rows(kind)) do
+			local row = Instance.new("Frame")
+			row.Name = "Row_" .. def.id
+			row.Size = UDim2.new(1, 0, 0, 0)
+			row.AutomaticSize = Enum.AutomaticSize.Y
+			row.BackgroundColor3 = THEME.InsetBg
+			row.BorderSizePixel = 0
+			row.LayoutOrder = index
+			row.Parent = scroll
+
+			local rCorner = Instance.new("UICorner")
+			rCorner.CornerRadius = UDim.new(0, 6)
+			rCorner.Parent = row
+
+			local rStroke = Instance.new("UIStroke")
+			rStroke.Color = THEME.StrokeInset
+			rStroke.Thickness = 1
+			rStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+			rStroke.Parent = row
+
+			local rPad = Instance.new("UIPadding")
+			rPad.PaddingTop = UDim.new(0, 8)
+			rPad.PaddingBottom = UDim.new(0, 8)
+			rPad.PaddingLeft = UDim.new(0, 10)
+			rPad.PaddingRight = UDim.new(0, 10)
+			rPad.Parent = row
+
+			local rList = Instance.new("UIListLayout")
+			rList.FillDirection = Enum.FillDirection.Vertical
+			rList.SortOrder = Enum.SortOrder.LayoutOrder
+			rList.Padding = UDim.new(0, 4)
+			rList.Parent = row
+
+			local nameRow = Instance.new("Frame")
+			nameRow.Size = UDim2.new(1, 0, 0, 18)
+			nameRow.BackgroundTransparency = 1
+			nameRow.LayoutOrder = 1
+			nameRow.Parent = row
+
+			local nameLbl = Instance.new("TextLabel")
+			nameLbl.Size = UDim2.new(0.65, 0, 1, 0)
+			nameLbl.BackgroundTransparency = 1
+			nameLbl.Font = Enum.Font.GothamBold
+			nameLbl.Text = def.name
+			nameLbl.TextColor3 = THEME.TextPrimary
+			nameLbl.TextSize = 12.5
+			nameLbl.TextXAlignment = Enum.TextXAlignment.Left
+			nameLbl.TextTruncate = Enum.TextTruncate.AtEnd
+			nameLbl.Parent = nameRow
+
+			local levelLbl = Instance.new("TextLabel")
+			levelLbl.Name = "Level"
+			levelLbl.Size = UDim2.new(0.35, 0, 1, 0)
+			levelLbl.Position = UDim2.new(0.65, 0, 0, 0)
+			levelLbl.BackgroundTransparency = 1
+			levelLbl.Font = Enum.Font.Code
+			levelLbl.Text = string.format("LV 0 / %d", def.maxLevel)
+			levelLbl.TextColor3 = THEME.TextMuted
+			levelLbl.TextSize = 11
+			levelLbl.TextXAlignment = Enum.TextXAlignment.Right
+			levelLbl.Parent = nameRow
+
+			-- WHAT A LEVEL DOES, not just what it costs. Every figure in this
+			-- string is read from the constant the effect actually uses -- see
+			-- `UpgradeView` -- so the panel cannot promise what the game will not
+			-- pay.
+			local detailLbl = Instance.new("TextLabel")
+			detailLbl.Name = "Detail"
+			detailLbl.Size = UDim2.new(1, 0, 0, 0)
+			detailLbl.AutomaticSize = Enum.AutomaticSize.Y
+			detailLbl.BackgroundTransparency = 1
+			detailLbl.Font = Enum.Font.Code
+			detailLbl.Text = (UpgradeView.status(kind, def.id, nil) :: any).detail
+			detailLbl.TextColor3 = THEME.TextMuted
+			detailLbl.TextSize = 10
+			detailLbl.TextWrapped = true
+			detailLbl.TextXAlignment = Enum.TextXAlignment.Left
+			detailLbl.LayoutOrder = 2
+			detailLbl.Parent = row
+			-- An id with no blurb of its own falls back to its display name,
+			-- which the row already shows above. Printing it twice reads as a
+			-- rendering fault rather than as a description, so the line is
+			-- dropped instead -- the row still lists level, cap and price.
+			detailLbl.Visible = detailLbl.Text ~= def.name
+
+			local buyBtn = Instance.new("TextButton")
+			buyBtn.Name = "BuyButton"
+			buyBtn.Size = UDim2.new(1, 0, 0, 28)
+			buyBtn.BackgroundColor3 = THEME.ButtonDark
+			buyBtn.BorderSizePixel = 0
+			buyBtn.Font = Enum.Font.GothamBold
+			buyBtn.Text = "--"
+			buyBtn.TextColor3 = THEME.TextMuted
+			buyBtn.TextSize = 12
+			buyBtn.AutoButtonColor = false
+			buyBtn.LayoutOrder = 3
+			buyBtn.Parent = row
+
+			local bCorner = Instance.new("UICorner")
+			bCorner.CornerRadius = UDim.new(0, 6)
+			bCorner.Parent = buyBtn
+
+			local bStroke = Instance.new("UIStroke")
+			bStroke.Color = THEME.StrokeSubtle
+			bStroke.Thickness = 1
+			bStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+			bStroke.Parent = buyBtn
+
+			local ui: RowUI = {
+				id = def.id,
+				levelLbl = levelLbl,
+				buyBtn = buyBtn,
+				inFlight = false,
+			}
+			table.insert(rowUIs, ui)
+
+			buyBtn.MouseButton1Click:Connect(function()
+				if ui.inFlight then
+					return
+				end
+				-- Re-read the status at CLICK time rather than trusting what the
+				-- button was last painted with: a snapshot may have landed since,
+				-- and the affordability the server will check is the one that
+				-- holds now.
+				local st = UpgradeView.status(kind, def.id, lastState)
+				if st == nil or st.atMax or not st.affordable then
+					return
+				end
+
+				ui.inFlight = true
+				buyBtn.Text = "Purchasing..."
+				task.spawn(function()
+					-- THE ID, AND NOTHING ELSE. The price is the server's to
+					-- decide; it recomputes it from the same catalog function
+					-- this row quoted from (NFR-5).
+					--
+					-- `def.id` is a NODE id, so `DiceCatalog.getUnlockCost` does
+					-- not know it and the handler falls through the shape-unlock
+					-- branch into the node branch. That is pinned in
+					-- `UpgradeSurfaces.test`, because sending a shape id here is
+					-- exactly the bug this panel replaces.
+					local result = if isDiamond
+						then NetClient.buyDiamondNode(def.id)
+						else NetClient.buyUpgrade(def.id)
+					ui.inFlight = false
+					if not result.ok then
+						buyBtn.Text = tostring(result.reason or "Refused")
+						buyBtn.TextColor3 = THEME.Negative
+						task.wait(1.2)
+					end
+					-- A successful purchase pushes a fresh snapshot, which arrives
+					-- through `applyState`; repainting here as well covers the
+					-- refusal case, where no snapshot is sent at all.
+					paint()
+				end)
+			end)
+		end
+
+		paint = function()
+			local balance = 0
+			if type(lastState) == "table" then
+				balance = tonumber(if isDiamond then lastState.diamonds else lastState.cash) or 0
+			end
+			balanceLbl.Text = if isDiamond
+				then string.format("%s \u{2666}", Format.formatNumber(balance))
+				else "$" .. Format.formatNumber(balance)
+
+			for _, ui in ipairs(rowUIs) do
+				local resolved = UpgradeView.status(kind, ui.id, lastState)
+				if resolved == nil then
+					continue
+				end
+				local st: UpgradeView.Status = resolved
+				ui.levelLbl.Text = string.format("LV %d / %d", st.level, st.maxLevel)
+				ui.levelLbl.TextColor3 = if st.atMax then accent else THEME.TextMuted
+
+				-- A purchase in flight owns the button's caption until it
+				-- resolves; repainting over "Purchasing..." would tell the player
+				-- the press did nothing.
+				if ui.inFlight then
+					continue
+				end
+
+				-- Bound to a local before the branch so the price is a plain
+				-- number inside it. `cost` is nil exactly when there is no next
+				-- level to sell.
+				local cost = st.cost
+				if st.atMax or cost == nil then
+					ui.buyBtn.Text = "MAX LEVEL"
+					ui.buyBtn.TextColor3 = THEME.TextSubtle
+					ui.buyBtn.BackgroundColor3 = THEME.ButtonDark
+					ui.buyBtn.AutoButtonColor = false
+				else
+					local priced = if isDiamond
+						then string.format("BUY \u{2014} %s \u{2666}", Format.formatNumber(cost))
+						else "BUY \u{2014} $" .. Format.formatNumber(cost)
+					ui.buyBtn.Text = priced
+					ui.buyBtn.TextColor3 = if st.affordable then THEME.TextDark else THEME.TextSubtle
+					ui.buyBtn.BackgroundColor3 = if st.affordable then accent else THEME.ButtonDark
+					ui.buyBtn.AutoButtonColor = st.affordable
+				end
+			end
+		end
+
+		paint()
+
+		return function(state: any)
+			lastState = state
+			paint()
+		end
+	end
+
+	local refreshCash = buildColumn("Cash", 1, "CASH UPGRADES", THEME.GoldPrimary)
+	local refreshDiamond = buildColumn("Diamond", 2, "DIAMOND TREE", THEME.Diamonds)
+
+	return function(state: any)
+		refreshCash(state)
+		refreshDiamond(state)
+	end
 end
 
 -- ------------------------------
@@ -4123,7 +4513,11 @@ local function buildSlotsOverlay(
 	igl.Parent = igFrame
 
 	local traitsBox = buildQuadrantShell(btmRow, "TraitsSection", UDim2.new(0.70, -5, 1, 0), 2, THEME.StrokeSubtle, THEME.CardBg)
-	buildSectionHeader(traitsBox, "TRAIT FORGE & INSPECTION", "ACTIVE", THEME.GoldPrimary)
+	-- BADGED HONESTLY. This quadrant was tagged "ACTIVE" and is not: all three of
+	-- its controls are inert and there is no trait code anywhere on the server or
+	-- in Shared. Same defect as the fabricated "+$2,500 CASH" quest reward that
+	-- was removed -- a surface asserting something untrue.
+	buildSectionHeader(traitsBox, "TRAIT FORGE & INSPECTION", "COMING SOON", THEME.GoldPrimary)
 
 	local tBody = Instance.new("Frame")
 	tBody.Size = UDim2.new(1, 0, 1, -26)
@@ -5981,6 +6375,7 @@ function V7MenuPanel.new(customParent: Instance?): V7MenuController
 	local vaultRefresh = buildVaultOverlay(screenGui, overlays, getController, formatModalShell)
 	local settingsRefresh = buildSettingsOverlay(screenGui, overlays, getController)
 	local slotsRefresh = buildSlotsOverlay(screenGui, overlays, getController)
+	local upgradesRefresh = buildUpgradesOverlay(screenGui, overlays, getController)
 
 	for key, frame in pairs(overlays) do
 		frame.Name = "Overlay_" .. key
@@ -5999,6 +6394,7 @@ function V7MenuPanel.new(customParent: Instance?): V7MenuController
 		questRefresh = questRefresh,
 		vaultRefresh = vaultRefresh,
 		slotsRefresh = slotsRefresh,
+		upgradesRefresh = upgradesRefresh,
 		settingsRefresh = settingsRefresh,
 		_capabilities = capabilities,
 		lastState = nil,
@@ -6039,6 +6435,9 @@ function V7MenuPanel.new(customParent: Instance?): V7MenuController
 				{ name = "slots", fn = self.slotsRefresh },
 				{ name = "settings", fn = self.settingsRefresh },
 				{ name = "ascend", fn = self.ascendRefresh },
+				-- APPENDED, never inserted. The existing entries keep the order
+				-- they already ran in, so nothing about when they fire changes.
+				{ name = "upgrades", fn = self.upgradesRefresh },
 			}
 			for _, entry in ipairs(refreshers) do
 				if type(entry.fn) == "function" then

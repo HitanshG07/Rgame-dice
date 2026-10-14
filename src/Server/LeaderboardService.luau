@@ -63,11 +63,47 @@ local BOARDS = {
 	Ascensions = "Board_Ascensions_v1",
 }
 
-local caches: { [string]: { lastFetch: number, entries: { Entry } } } = {
-	NetWorth = { lastFetch = 0, entries = {} },
-	HighestRoll = { lastFetch = 0, entries = {} },
-	Ascensions = { lastFetch = 0, entries = {} },
+-- TWO FACTS, TWO FIELDS. `lastFetch` is when a fetch last SUCCEEDED (0 = never);
+-- `inFlight` is whether one is running right now. They were one field, stamped
+-- before the yield (M3) -- which stopped the 30-caller burst but also made a
+-- THROTTLED first fetch look like a success, so every caller for a full TTL got
+-- an empty board. `failedAt` only gates a short retry cooldown, so a failure
+-- neither poisons the cache for the TTL nor lets callers hammer a throttled store.
+export type BoardStatus = "ok" | "empty" | "throttled" | "loading"
+
+type BoardCache = {
+	lastFetch: number,
+	failedAt: number,
+	inFlight: boolean,
+	status: BoardStatus,
+	entries: { Entry },
 }
+
+local function newCache(): BoardCache
+	return { lastFetch = 0, failedAt = 0, inFlight = false, status = "loading", entries = {} }
+end
+
+local caches: { [string]: BoardCache } = {
+	NetWorth = newCache(),
+	HighestRoll = newCache(),
+	Ascensions = newCache(),
+}
+
+-- Minimum gap between retries after a FAILED fetch (not after a success).
+local RETRY_COOLDOWN_SEC = 5
+
+-- Test seams: a fake store and a fake clock. Calling with no arguments restores
+-- the real ones and clears every cache.
+local storeProvider: ((string) -> OrderedDataStore?)? = nil
+local clock: () -> number = os.clock
+
+function LeaderboardService._setTestHooks(provider: ((string) -> OrderedDataStore?)?, fakeClock: (() -> number)?): ()
+	storeProvider = provider
+	clock = fakeClock or os.clock
+	for id in pairs(caches) do
+		caches[id] = newCache()
+	end
+end
 
 -- USERNAME CACHE. `GetNameFromUserIdAsync` is a web call; a 50-entry board would
 -- make 50 of them on every refresh and stall the fetch. Names effectively never
@@ -127,6 +163,9 @@ end
 -- key 'SetAsync'" and the same for 'GetSortedAsync' on code that is actually
 -- guarded and actually correct.
 local function getOrderedStore(boardId: string): OrderedDataStore?
+	if storeProvider ~= nil then
+		return storeProvider(boardId)
+	end
 	local dsName = BOARDS[boardId]
 	if not dsName then
 		return nil
@@ -154,35 +193,50 @@ function LeaderboardService.submitScore(player: Player, boardId: string, rawValu
 	end)
 end
 
-function LeaderboardService.getBoard(boardId: string): { Entry }
+-- Entries plus WHY they look the way they do. "throttled" (fetch failed, retry
+-- shortly) must not be painted as an empty board or as "STREAM OFFLINE" -- they
+-- are different facts. A bare discriminant: NFR-5 forbids any figure here, so
+-- there is deliberately no retry-after duration.
+function LeaderboardService.getBoardStatus(boardId: string): ({ Entry }, BoardStatus)
 	local cache = caches[boardId]
 	if not cache then
-		return {}
+		return {}, "empty"
 	end
 
-	local now = os.clock()
-	if (now - cache.lastFetch) < CACHE_TTL_SEC and cache.lastFetch > 0 then
-		return cache.entries
+	local now = clock()
+	if cache.lastFetch > 0 and (now - cache.lastFetch) < CACHE_TTL_SEC then
+		return cache.entries, cache.status
+	end
+
+	-- M3 (BOARD-1): ONE fetch at a time. 30 simultaneous callers must not issue 30
+	-- GetSortedAsync calls. Guarded by `inFlight`, NOT by stamping `lastFetch`.
+	if cache.inFlight then
+		return cache.entries, cache.status
+	end
+	if cache.failedAt > 0 and (now - cache.failedAt) < RETRY_COOLDOWN_SEC then
+		return cache.entries, cache.status
 	end
 
 	local store = getOrderedStore(boardId)
 	if store == nil then
-		return cache.entries
+		return cache.entries, cache.status
 	end
 
-	-- M3 (BOARD-1): Set lastFetch BEFORE the yield. If 30 players refresh at once,
-	-- setting the timestamp before the network yield ensures concurrent callers return
-	-- cached entries rather than issuing 30 concurrent GetSortedAsync calls that throttle DataStore.
-	cache.lastFetch = now
+	cache.inFlight = true
 
 	-- Same re-bind as `submitScore`: narrowing does not survive into a closure.
 	local ds: OrderedDataStore = store
 	local ok, pages = pcall(function()
 		return ds:GetSortedAsync(false, 50)
 	end)
+	-- Cleared right after the only yield; nothing below yields, so it cannot
+	-- be left set.
+	cache.inFlight = false
 
 	if not ok or not pages then
-		return cache.entries
+		cache.failedAt = clock()
+		cache.status = "throttled"
+		return cache.entries, cache.status
 	end
 
 	-- `GetCurrentPage` is typed loosely, so `item.key` and `item.value` arrive as
@@ -223,7 +277,15 @@ function LeaderboardService.getBoard(boardId: string): { Entry }
 	end
 
 	cache.entries = newEntries
-	return newEntries
+	cache.lastFetch = clock()
+	cache.failedAt = 0
+	cache.status = if #newEntries > 0 then "ok" else "empty"
+	return newEntries, cache.status
+end
+
+function LeaderboardService.getBoard(boardId: string): { Entry }
+	local entries = LeaderboardService.getBoardStatus(boardId)
+	return entries
 end
 
 -- THE PLAYER'S OWN RANK on a board, or nil if they are not on it.

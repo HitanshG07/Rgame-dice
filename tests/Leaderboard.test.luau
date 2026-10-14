@@ -39,20 +39,21 @@ function LeaderboardTest.run(): (boolean, string?, number)
 	local inv1e6 = LeaderboardService.inverseTransform(LeaderboardService.transform(1e6))
 	check(math.abs(inv1e6 - 1e6) <= 2.0, "inverseTransform should roundtrip 1e6 within 2.0 margin")
 
-	-- 5. LUCK-1: UpgradeCatalog must no longer offer "Luck"
+	-- 5. LUCK-1 REVERSED (operator decision): "Luck" is purchasable again, as a payout
+	-- add-on folded into LuckBoost. The old pin here asserted its ABSENCE; it now
+	-- asserts presence, and Payout.test pins the behaviour.
 	local ReplicatedStorage = game:GetService("ReplicatedStorage")
 	local Shared = ReplicatedStorage:WaitForChild("Shared")
 	local UpgradeCatalog = require(Shared:WaitForChild("UpgradeCatalog"))
-	check(UpgradeCatalog.getCashUpgrade("Luck") == nil, "Luck must not be purchasable in CASH_UPGRADES (LUCK-1)")
+	check(UpgradeCatalog.getCashUpgrade("Luck") ~= nil, "Luck must be purchasable in CASH_UPGRADES (LUCK-1 reversed)")
 	local allCash = UpgradeCatalog.getAllCashUpgrades()
-	local foundLuck = false
+	local luckCount = 0
 	for _, u in ipairs(allCash) do
 		if u.id == "Luck" then
-			foundLuck = true
-			break
+			luckCount += 1
 		end
 	end
-	check(not foundLuck, "Luck must not appear in getAllCashUpgrades (LUCK-1)")
+	check(luckCount == 1, "Luck must appear exactly once in getAllCashUpgrades")
 
 	-- 6. BOARD-1: LeaderboardService safely handles unranked players and unknown boards
 	local fakePlayer = { UserId = 99999999 } :: any
@@ -62,6 +63,44 @@ function LeaderboardTest.run(): (boolean, string?, number)
 		LeaderboardService.updatePlayer(fakePlayer)
 	end)
 	check(updateOk, "updatePlayer must safely exit when player has no loaded profile")
+
+	-- 7. BOARD-1: THE EXIT HOOK ITSELF. Section 6 above only proves the service is
+	-- safe to call; deleting `pcall(LeaderboardService.updatePlayer, player)` from
+	-- ServerBootstrap left all of it green while no score was ever submitted.
+	--
+	-- A SOURCE SCAN, because the harness cannot fire PlayerRemoving through the
+	-- composition root (requiring ServerBootstrap would start the whole server).
+	-- It proves the call text exists in `onPlayerRemoving`, is pcall-wrapped, and
+	-- sits in the right ORDER. It does not prove the handler is reached at runtime
+	-- beyond checking that it is connected to Players.PlayerRemoving by name.
+	--
+	-- ORDER IS THE CONTRACT: `updatePlayer` reads the profile, and a released
+	-- profile refuses reads, so it must precede `PlayerProfile.release`; and it
+	-- must precede `OfflineService.onPlayerRemoving` per the bootstrap's own note.
+	local bootstrap = Server:FindFirstChild("ServerBootstrap")
+	check(bootstrap ~= nil and bootstrap:IsA("LuaSourceContainer"), "ServerBootstrap script must exist beside the services")
+	local okSrc, src = pcall(function()
+		return (bootstrap :: any).Source :: string
+	end)
+	if okSrc then
+		-- Comments stripped: the handler's own BOARD-1 comment names PlayerProfile.release.
+		local code = string.gsub(src, "%-%-[^\n]*", "")
+		local fnStart = string.find(code, "local function onPlayerRemoving", 1, true)
+		check(fnStart ~= nil, "ServerBootstrap must define onPlayerRemoving")
+		local connectAt = string.find(code, "Players.PlayerRemoving:Connect(onPlayerRemoving)", 1, true)
+		check(connectAt ~= nil and fnStart ~= nil and connectAt > fnStart,
+			"onPlayerRemoving must be connected to Players.PlayerRemoving")
+		local body = string.sub(code, fnStart or 1, connectAt or #code)
+		local atBoard = string.find(body, "pcall(LeaderboardService.updatePlayer, player)", 1, true)
+		local atOffline = string.find(body, "OfflineService.onPlayerRemoving(player)", 1, true)
+		local atRelease = string.find(body, "PlayerProfile.release(player)", 1, true)
+		check(atBoard ~= nil, "onPlayerRemoving must submit the score via pcall(LeaderboardService.updatePlayer, player) (BOARD-1)")
+		check(atOffline ~= nil and atRelease ~= nil, "onPlayerRemoving must still call OfflineService.onPlayerRemoving and PlayerProfile.release")
+		check((atBoard :: number) < (atOffline :: number), "BOARD-1: updatePlayer must run BEFORE OfflineService.onPlayerRemoving")
+		check((atBoard :: number) < (atRelease :: number), "BOARD-1: updatePlayer must run BEFORE PlayerProfile.release (a released profile refuses reads)")
+	else
+		print("[UT-10] BOARD-1 exit-hook scan SKIPPED -- this thread cannot read Source (needs PluginOrOpenCloud).")
+	end
 
 	return true, nil, asserts
 end

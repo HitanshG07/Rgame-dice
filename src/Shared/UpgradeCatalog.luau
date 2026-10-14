@@ -68,10 +68,23 @@ local CASH_UPGRADES: { [string]: CashUpgradeDef } = {
 		baseCost = 500,
 		costMultiplier = 3.0,
 	},
-	-- LUCK-1: "Luck" upgrade removed. It cost ~$23.7M Cash but was read by no gameplay
-	-- code. Cannot bias sampling without violating FR-3.4; and reading as a payout
-	-- multiplier would create a 3rd stacking multiplier with CashX2 and LuckBoost.
-	-- Preserved in AscensionService reset loop and PlayerProfile schema for backward compatibility.
+	-- LUCK-1 (REVERSED by operator decision). "Luck" was removed once because it was
+	-- read by no gameplay code, could not bias sampling without violating FR-3.4
+	-- (the forge preview must show the maths that pays), and as a standalone payout
+	-- multiplier would have been a 3rd stacking term beside CashX2 and LuckBoost.
+	-- It is back as a PAYOUT add-on that FOLDS INTO the existing LuckBoost term:
+	-- `(1 + level * LUCK_PER_LEVEL) * LuckBoost` is still ONE `coinBonus` term, so
+	-- the payout line gains no new multiplier slot. It never touches sampling, so
+	-- FR-3.4 holds. See `getLuckMultiplier`; max level gives 1.40x, below the paid 2x.
+	-- Same id and curve as the pre-removal entry, so stored levels (the schema and
+	-- the Ascension reset kept `Luck = 0`) read straight back in.
+	Luck = {
+		id = "Luck",
+		name = "Luck (+2% Payout)",
+		maxLevel = 20,
+		baseCost = 150,
+		costMultiplier = 1.8,
+	},
 	BadRollShield = {
 		id = "BadRollShield",
 		name = "Bad Roll Shield",
@@ -105,6 +118,22 @@ local DIAMOND_NODES: { [string]: DiamondNodeDef } = {
 		costMultiplier = 4.0,
 	},
 }
+
+-- Payout bonus per Luck level (+2%). Additive in the LEVEL, then multiplied into the
+-- LuckBoost term by RollService -- never a second independent multiplier.
+UpgradeCatalog.LUCK_PER_LEVEL = 0.02
+
+-- The Luck factor for a STORED level. Fails closed to exactly 1 (neutral): a
+-- negative, NaN or infinite level must never confiscate or inflate a payout, and a
+-- level above maxLevel (hostile or corrupt save) is capped rather than trusted.
+-- Level 0 is `1 + 0 * 0.02`, which is exactly 1 -- no float drift on the common path.
+function UpgradeCatalog.getLuckMultiplier(level: number): number
+	if not ForgeMath.isFinite(level) or level <= 0 then
+		return 1
+	end
+	local capped = math.min(math.floor(level), CASH_UPGRADES.Luck.maxLevel)
+	return 1 + capped * UpgradeCatalog.LUCK_PER_LEVEL
+end
 
 function UpgradeCatalog.getCashUpgrade(id: string): CashUpgradeDef?
 	return CASH_UPGRADES[id]

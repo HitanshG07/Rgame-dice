@@ -101,9 +101,6 @@ local function run(): (boolean, string?, number)
 		"BoardView",
 		"DiceRenderer",
 		"FeedbackFX",
-		"HUD",
-		"ForgePanel",
-		"MenuPanel",
 		"AudioDirector",
 		"V7HUD",
 		"V7ForgePanel",
@@ -150,6 +147,14 @@ local function run(): (boolean, string?, number)
 		"view modules with no init() or new(): ClientBootstrap would skip them "
 		.. "silently -- %s", table.concat(missingInit, ", ")))
 
+	-- ClientBootstrap.computeVoidRiskPct is local to a .client script and cannot be
+	-- required here, so this pins the PREMISE of its unknown-shape guard: an
+	-- unrecognised id must be detectable via getShape (the guard returns nil on it)
+	-- even though getMassFloor would silently answer a default.
+	local DiceCatalog = require(Shared:WaitForChild("DiceCatalog")) :: any
+	e = e or check(DiceCatalog.getShape("NoSuchShape") == nil,
+		"getShape must return nil for an unknown id -- the HUD void-risk guard relies on it")
+
 	----------------------------------------------------------------------------
 	-- Teardown symmetry
 	----------------------------------------------------------------------------
@@ -159,7 +164,12 @@ local function run(): (boolean, string?, number)
 	-- without one. Not every module needs shutdown -- but one that connects to a
 	-- signal does, and the audit found the asymmetry only by reading each file.
 	local noShutdown: { string } = {}
-	for _, name in ipairs({ "BoardView", "DiceRenderer", "FeedbackFX", "HUD", "ForgePanel", "MenuPanel", "AudioDirector" }) do
+	-- KNOWN GAP: V7HUD, V7ForgePanel and V7MenuPanel are NOT listed. They return
+	-- controllers from `.new()` and expose no module-level shutdown(), so the V7
+	-- surfaces have no teardown assertion here. The legacy HUD, ForgePanel and
+	-- MenuPanel were removed from this list when those files were deleted (Phase 3);
+	-- they asserted teardown on modules the player no longer sees.
+	for _, name in ipairs({ "BoardView", "DiceRenderer", "FeedbackFX", "AudioDirector" }) do
 		local m = loadedModules[name]
 		if type(m) == "table" and type((m :: any).shutdown) ~= "function" then
 			table.insert(noShutdown, name)
@@ -466,6 +476,65 @@ local function run(): (boolean, string?, number)
 		print("[UT-13] emoji scan SKIPPED -- this thread cannot read Source "
 			.. "(needs PluginOrOpenCloud). Runs under a plugin context; also "
 			.. "reproducible from the shell.")
+	end
+
+	----------------------------------------------------------------------------
+	-- MULT-1: THE CLIENT MUST NOT CARRY ITS OWN STREAK CAP.
+	--
+	-- The shipped defect was a hardcoded `math.min(streak, 500)` in
+	-- ClientBootstrap's `estimateMultiplier`, so the HUD advertised a multiplier the
+	-- server (cap 50) never paid. `estimateMultiplier` is a local inside a .client
+	-- script and cannot be required, so this is a SOURCE SCAN -- the same instrument
+	-- as the emoji scan above, with the same skip-when-unreadable behaviour.
+	--
+	-- WHAT THIS PROVES, AND WHAT IT DOES NOT. It proves the file contains a call to
+	-- `StreakMath.multiplier` and no line that clamps something streak-named against
+	-- a numeric literal. It does NOT prove the call is on the live path, that its
+	-- arguments are right, or that a cap spelled some other way (a named local, a
+	-- lookup table) is absent. A behavioural test would; extracting the function
+	-- to Shared was ruled out as a logic refactor. Treat a green here as "the known
+	-- defect shape is gone", not "the HUD multiplier is correct".
+	--
+	-- Comments are stripped first: the explanatory comment above `estimateMultiplier`
+	-- legitimately mentions "500".
+	--
+	-- VALIDATED BOTH WAYS (L-051): the detector is run on a synthetic copy of the
+	-- shipped defect below and must flag it, so it cannot pass by matching nothing.
+	----------------------------------------------------------------------------
+
+	local function literalStreakClamp(src: string): string?
+		for line in string.gmatch(src, "[^\n]+") do
+			local code = string.gsub(line, "%-%-.*$", "")
+			local lower = string.lower(code)
+			if string.find(lower, "streak", 1, true) ~= nil
+				and (string.find(lower, "math.min(", 1, true) ~= nil
+					or string.find(lower, "math.clamp(", 1, true) ~= nil)
+				and string.find(lower, "[%(,]%s*%d+%.?%d*%s*[,%)]") ~= nil then
+				return code
+			end
+		end
+		return nil
+	end
+
+	e = e or check(literalStreakClamp("local c = math.min(streak, 500)") ~= nil
+		and literalStreakClamp("local c = math.min(500, state.streak)") ~= nil
+		and literalStreakClamp("local c = math.min(streak, StreakMath.STREAK_CAP) -- 500") == nil,
+		"literalStreakClamp must flag the shipped MULT-1 shape and ignore comments and named caps")
+
+	if bootModule ~= nil and bootModule:IsA("LuaSourceContainer") then
+		local okBoot, bootSrc = pcall(function()
+			return (bootModule :: any).Source :: string
+		end)
+		if okBoot then
+			e = e or check(literalStreakClamp(bootSrc) == nil, string.format(
+				"ClientBootstrap clamps a streak against a numeric literal (MULT-1: derive the cap "
+				.. "from StreakMath.STREAK_CAP): %s", tostring(literalStreakClamp(bootSrc))))
+			e = e or check(string.find(bootSrc, "StreakMath.multiplier(", 1, true) ~= nil,
+				"ClientBootstrap must compute the HUD multiplier through StreakMath.multiplier (MULT-1)")
+		else
+			print("[UT-13] MULT-1 streak-cap scan SKIPPED -- this thread cannot read Source "
+				.. "(needs PluginOrOpenCloud).")
+		end
 	end
 
 	----------------------------------------------------------------------------

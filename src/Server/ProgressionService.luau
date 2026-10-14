@@ -495,23 +495,49 @@ function ProgressionService.recordLogin(player: Player): (boolean, number)
 
 	local awarded = LOGIN_REWARDS[math.min(newCount, #LOGIN_REWARDS)]
 
-	local ok, reason = PlayerProfile.mutate(player, function(d)
+	-- THE STREAK WRITE AND THE PAYMENT ARE ONE WRITE (LOGIN-1).
+	--
+	-- LOGIN-1's own rule is that the flag making a reward once-only must be
+	-- written after the payment is confirmed, or its failure must roll the flag
+	-- back. This function -- the one the defect is named for -- did neither: it
+	-- advanced the streak and then DISCARDED `credit`'s result, so a profile
+	-- released between the two calls cost a player their day-7 reward
+	-- permanently. The streak had moved, so it was never offered again.
+	--
+	-- Its three siblings take the rollback option. That option is weaker than
+	-- it looks and cannot help here: a rollback is itself a
+	-- `PlayerProfile.mutate`, and the credit it would undo failed BECAUSE a
+	-- `mutate` failed -- so the rollback fails for the identical reason. That
+	-- is the flaw that made VAULT-1's rollback unreachable, and repeating it
+	-- here would only look like a fix. One mutation removes the window rather
+	-- than trying to unwind it: the streak advances only if the player is paid,
+	-- and the player is paid only if the streak advances.
+	local paid = false
+	local ok = PlayerProfile.mutate(player, function(d)
+		if awarded ~= nil then
+			if not EconomyService.creditWithin(d, awarded.kind, awarded.amount) then
+				-- The reward is a constant from LOGIN_REWARDS, so this is
+				-- unreachable unless that table is edited into something
+				-- invalid. Leaving the streak untouched keeps the day claimable
+				-- rather than burning it on a payment that did not happen.
+				return
+			end
+		end
 		d.LoginStreak.Count = newCount
 		d.LoginStreak.LastDay = today
 		if spendForgiveness then
 			d.LoginStreak.ForgivenessLeft -= 1
 		end
+		paid = true
 	end)
 
-	if not ok then
+	if not ok or not paid then
 		-- NOT CREDITED (LOGIN-1). The streak write is what makes this reward once-only;
 		-- if it did not land, paying anyway turns a rejoin into a repeatable mint.
+		-- Nothing was written here, so there is nothing to undo.
 		return false, 0
 	end
 
-	if awarded ~= nil then
-		EconomyService.credit(player, awarded.kind, awarded.amount, "login_streak")
-	end
 	return true, newCount
 end
 

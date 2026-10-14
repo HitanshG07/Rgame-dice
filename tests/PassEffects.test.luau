@@ -122,18 +122,84 @@ function PassEffectsTest.run(): (boolean, string?, number)
 	-- 5. CURR-1: Reject invalid currencies and protect Diamonds
 	----------------------------------------------------------------------------
 	local diamondsBefore = PlayerProfile.get(fakePlayer).Diamonds
-	local okBadCredit, badReason = EconomyService.credit(fakePlayer, "Shards" :: any, 100, "test_bad")
+	local okBadCredit, badReason = EconomyService.credit(fakePlayer, "NotACurrency" :: any, 100, "test_bad")
 	check(not okBadCredit and badReason == "invalid_currency", "EconomyService.credit must reject invalid currency (CURR-1)")
 	check(PlayerProfile.get(fakePlayer).Diamonds == diamondsBefore, "Diamonds must not be mutated on invalid credit (CURR-1)")
 
-	local okBadDebit, badDebitReason = EconomyService.debit(fakePlayer, "Shards" :: any, 100, "test_bad")
+	local okBadDebit, badDebitReason = EconomyService.debit(fakePlayer, "NotACurrency" :: any, 100, "test_bad")
 	check(not okBadDebit and badDebitReason == "invalid_currency", "EconomyService.debit must reject invalid currency (CURR-1)")
 
-	local badBal = EconomyService.balance(fakePlayer, "Shards" :: any)
+	local badBal = EconomyService.balance(fakePlayer, "NotACurrency" :: any)
 	check(badBal == nil, "EconomyService.balance must return nil for unknown currency (CURR-1)")
 
-	local canAffordBad = EconomyService.canAfford(fakePlayer, "Shards" :: any, 10)
+	local canAffordBad = EconomyService.canAfford(fakePlayer, "NotACurrency" :: any, 10)
 	check(not canAffordBad, "EconomyService.canAfford must return false for unknown currency (CURR-1)")
+
+	-- The rejection checks above use a sentinel that can never become a currency.
+	-- They used to use "Shards", which pinned the WRONG thing: the day Shards joined
+	-- `export type Currency`, a grant would fail closed and silent and that test
+	-- would still pass, because it asserted exactly that refusal. Rejection of
+	-- garbage is only half of CURR-1; the other half is below.
+
+	----------------------------------------------------------------------------
+	-- CURR-1 TOTALITY: every currency the game can name must be accepted by
+	-- isCurrency AND readable AND writable. The list lives in four places in
+	-- EconomyService (type union, isCurrency, readBalance, writeBalance); this
+	-- restates none of them. It asks two authorities instead (L-025):
+	--   (a) the `export type Currency` declaration itself, read from source, so a
+	--       member added there but forgotten in the three runtime branches fails;
+	--   (b) every currency MonetisationCatalog actually sells, so a product that
+	--       grants a currency EconomyService refuses fails.
+	-- Round-tripping through balance/credit/debit exercises readBalance and
+	-- writeBalance (unreachable otherwise) and isCurrency on the way.
+	----------------------------------------------------------------------------
+	local currencySet: { [string]: boolean } = {}
+
+	local econModule = Server:FindFirstChild("EconomyService")
+	local okSrc, econSrc = pcall(function()
+		return (econModule :: any).Source :: string
+	end)
+	if okSrc then
+		local decl = string.match(econSrc, "export type Currency%s*=%s*([^\n]+)")
+		check(decl ~= nil, "EconomyService must declare `export type Currency` (CURR-1 totality scan)")
+		local fromUnion = 0
+		for name in string.gmatch(decl :: string, "\"(%w+)\"") do
+			currencySet[name] = true
+			fromUnion += 1
+		end
+		check(fromUnion >= 3, "the Currency union scan must find at least Cash, Gems and Diamonds")
+	else
+		print("[PassEffects] CURR-1 union scan SKIPPED -- this thread cannot read Source "
+			.. "(needs PluginOrOpenCloud); the catalog sweep still runs.")
+	end
+
+	local MonetisationCatalog = require(Shared:WaitForChild("MonetisationCatalog")) :: any
+	local fromCatalog = 0
+	for _, product in pairs(MonetisationCatalog.Products) do
+		if product.currency ~= nil then
+			currencySet[product.currency] = true
+			fromCatalog += 1
+		end
+		for _, part in ipairs(product.bundle or {}) do
+			currencySet[part.currency] = true
+			fromCatalog += 1
+		end
+	end
+	check(fromCatalog >= 1, "MonetisationCatalog sells no currency; the CURR-1 catalog sweep would be vacuous")
+
+	for currency in pairs(currencySet) do
+		check((EconomyService :: any).isCurrency(currency),
+			string.format("isCurrency rejects '%s', a currency the game names (CURR-1)", currency))
+		local before = EconomyService.balance(fakePlayer, currency :: any)
+		check(type(before) == "number",
+			string.format("balance must be readable for '%s' (readBalance not total, CURR-1)", currency))
+		local okIn = EconomyService.credit(fakePlayer, currency :: any, 7, "test_totality")
+		check(okIn and EconomyService.balance(fakePlayer, currency :: any) == (before :: number) + 7,
+			string.format("credit of '%s' must land in the field balance reads (writeBalance not total, CURR-1)", currency))
+		local okOut = EconomyService.debit(fakePlayer, currency :: any, 7, "test_totality")
+		check(okOut and EconomyService.balance(fakePlayer, currency :: any) == before,
+			string.format("debit of '%s' must restore the balance (CURR-1)", currency))
+	end
 
 	PlayerProfile.releaseAll()
 	return true, nil, asserts

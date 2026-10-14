@@ -160,6 +160,72 @@ function EconomyService.credit(player: Player, currency: Currency, amount: numbe
 	return mutated, mutateReason, if mutated then finalAmount else nil
 end
 
+-- THE ONE PREDICATE for "may this currency and amount be granted at all".
+--
+-- Exported because a caller that must validate BEFORE opening its own mutation
+-- has to ask the same question the write itself asks. Two copies of this rule
+-- is precisely how a bundle part comes to be skipped after the player has paid
+-- (CURR-1): the loop's own three-branch test drifted from the union while the
+-- type system stayed quiet.
+--
+-- Takes `any` deliberately. It sits at a boundary where the currency arrives as
+-- a plain string (catalog rows, bundle parts), and its job is to turn that into
+-- a proven `Currency` rather than to assume one.
+function EconomyService.checkGrant(currency: any, amount: any): (boolean, string?)
+	if not isCurrency(currency) then
+		return false, "invalid_currency"
+	end
+	if type(amount) ~= "number" then
+		return false, "non_finite_amount"
+	end
+	return guardAmount(amount)
+end
+
+-- Credits INSIDE a mutation the caller already owns (VAULT-1, CURR-1, LOGIN-1).
+--
+-- `credit` opens its own `PlayerProfile.mutate`, so a caller that must also
+-- write something else -- the vault window, the login streak, the rest of a
+-- bundle -- is forced into TWO writes. Two writes is the defect: the profile
+-- can release between them, the first lands, the second does not, and no
+-- rollback is available, because every rollback primitive in this file is
+-- itself a `mutate` and fails for the identical reason. One mutation has no
+-- between.
+--
+-- STILL THE SOLE WRITER. The statements that touch Cash, Gems and Diamonds
+-- remain in this file (SRS FR-14.8, HLD §5.2 rule 3) -- the caller supplies the
+-- mutation, never the assignment.
+--
+-- NO MULTIPLIER PATH, deliberately: the 2x-Cash pass scales ROLL payouts only
+-- (see `credit`), and no in-mutation caller is a roll. A multiplier applied
+-- here would silently double vault claims and bundle Cash.
+--
+-- CALLERS MUST PRE-FLIGHT WITH `checkGrant` WHERE A REFUSAL MATTERS.
+-- `PlayerProfile.mutate` cannot abort a mutator part-way, so a refusal
+-- discovered in here can be reported but not unwound.
+function EconomyService.creditWithin(data: PlayerProfile.Profile, currency: Currency, amount: number): (boolean, string?)
+	local ok, reason = EconomyService.checkGrant(currency, amount)
+	if not ok then
+		return false, reason
+	end
+
+	local next_ = readBalance(data, currency) + amount
+	if next_ > MAX_CURRENCY then
+		next_ = MAX_CURRENCY
+	end
+	writeBalance(data, currency, next_)
+
+	if currency == "Cash" then
+		-- Same all-time counter `credit` maintains, for the same reason: the
+		-- NetWorth leaderboard ranks on it. Cash that reaches a player without
+		-- passing through here does not count, which is how bundle Cash came to
+		-- be worth less than identical Cash from a Currency product.
+		local lifetime = data.LifetimeCash + amount
+		data.LifetimeCash = if lifetime > MAX_CURRENCY then MAX_CURRENCY else lifetime
+	end
+
+	return true, nil
+end
+
 -- Debit. Refuses rather than going negative -- an overdraft is how duplication
 -- bugs become permanent.
 function EconomyService.debit(player: Player, currency: Currency, amount: number, source: string): (boolean, string?)

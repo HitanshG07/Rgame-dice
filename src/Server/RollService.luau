@@ -25,6 +25,7 @@ local ForgeMath = require(Shared:WaitForChild("ForgeMath"))
 local StreakMath = require(Shared:WaitForChild("StreakMath"))
 local ElementCatalog = require(Shared:WaitForChild("ElementCatalog"))
 local DiceCatalog = require(Shared:WaitForChild("DiceCatalog"))
+local UpgradeCatalog = require(Shared:WaitForChild("UpgradeCatalog"))
 local Remotes = require(Shared:WaitForChild("Remotes"))
 
 local PlayerProfile = require(script.Parent:WaitForChild("PlayerProfile"))
@@ -458,7 +459,17 @@ function RollService.performRoll(player: Player): (boolean, string?)
 		--
 		-- Server-clocked and read fresh every throw, so it expires on the
 		-- server's clock (T-20) and a client cannot extend it.
-		coinBonus = BoostService.getMultiplier(player, "LuckBoost"),
+		--
+		-- THE `Luck` CASH UPGRADE FOLDS INTO THIS SAME TERM (operator decision,
+		-- reversing LUCK-1): `(1 + level * 0.02) * LuckBoost`. Still ONE `coinBonus`,
+		-- so no third multiplier joins the payout line. Both factors are read here,
+		-- fresh, from server state -- the upgrade level from the profile, the boost
+		-- from BoostService -- and BOTH are applied unconditionally: neither is gated
+		-- on the other, and level 0 / no boost are each exactly 1. LuckBoost is a
+		-- pure timer that nothing consumes (only OfflineX2 is spent), so there is no
+		-- apply-versus-consume pair to split here (cf. 6cb6aa1).
+		coinBonus = UpgradeCatalog.getLuckMultiplier(data.Upgrades.Luck or 0)
+			* BoostService.getMultiplier(player, "LuckBoost"),
 		-- Consumes the Freeze set by the previous throw (SRS FR-4.4).
 		frozenDie = session.frozenDie,
 	})

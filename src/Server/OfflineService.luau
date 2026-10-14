@@ -376,23 +376,44 @@ function OfflineService.claimVault(player: Player, _doubled: boolean): (boolean,
 		return false, "bad_payout", 0
 	end
 
-	-- CREDIT FIRST before consuming the vault window (VAULT-1).
-	-- If credit fails, nothing has been mutated and offline earnings are preserved.
-	local credited, creditReason = EconomyService.credit(player, "Cash", payout, "vault_claim")
-	if not credited then
-		return false, creditReason or "credit_failed", 0
-	end
-
-	-- ATOMIC MUTATION: consume vault accrual and update LastSeen synchronously.
+	-- ONE MUTATION, BECAUSE THERE IS NO SAFE ORDER FOR TWO (VAULT-1).
+	--
+	-- This line has been wrong in both directions, and both were real money:
+	--
+	--   1. Consume the window, then credit. A failed credit threw away the
+	--      player's entire offline accrual.
+	--   2. Credit, then consume the window, with a `debit` bolted on as the
+	--      rollback. THE ROLLBACK COULD NOT FIRE. `EconomyService.debit` IS a
+	--      `PlayerProfile.mutate`, and the only route to it is the mutate
+	--      immediately above having just failed -- so it failed identically.
+	--      The player was paid, `LastSeen` never advanced and `AccrualId` never
+	--      incremented, so on rejoin the vault read full and paid a SECOND
+	--      time, with the still-unspent OfflineX2 doubling that claim too.
+	--
+	-- Both writes are profile writes, so they are ONE write. `mutate` runs its
+	-- mutator synchronously behind the IsActive check with no yield in between
+	-- (threat T-26): either the profile is live and the player is paid AND the
+	-- window is spent, or the profile is gone and NOTHING happened. There is no
+	-- half-state left to roll back, and so no ordering left to get wrong.
+	--
+	-- The credit refusal is checked inside and leaves the window untouched: a
+	-- window consumed without a payout would merely invert the defect.
+	local creditOk = false
+	local creditReason: string? = nil
 	local mutated, reason = PlayerProfile.mutate(player, function(d)
+		creditOk, creditReason = EconomyService.creditWithin(d, "Cash", payout)
+		if not creditOk then
+			return
+		end
 		d.Vault.LastSeen = os.time()
 		d.Vault.AccrualId += 1
 	end)
 
 	if not mutated then
-		-- Roll back credit if mutation fails to keep state consistent.
-		EconomyService.debit(player, "Cash", payout, "vault_claim_rollback")
 		return false, reason or "mutate_failed", 0
+	end
+	if not creditOk then
+		return false, creditReason or "credit_failed", 0
 	end
 
 	-- THE FROZEN WINDOW IS SPENT. Without this the claim would leave the same

@@ -14,6 +14,7 @@ local ServerScriptService = game:GetService("ServerScriptService")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local ForgeMath = require(Shared:WaitForChild("ForgeMath"))
 local ElementCatalog = require(Shared:WaitForChild("ElementCatalog"))
+local UpgradeCatalog = require(Shared:WaitForChild("UpgradeCatalog"))
 local RollService = require(ServerScriptService:WaitForChild("Server"):WaitForChild("RollService"))
 
 local n = 0
@@ -108,22 +109,69 @@ local function run(): (boolean, string?, number)
 	e = e or check(StreakMath.MAX_MULTIPLIER == 1e6, "StreakMath.MAX_MULTIPLIER must be 1e6")
 	e = e or check(RollService.MAX_STREAK_MULTIPLIER == StreakMath.MAX_MULTIPLIER, "RollService.MAX_STREAK_MULTIPLIER must match StreakMath")
 
-	-- Shared multiplier consistency check across grid of levels and streaks
+	-- MULT-1: the multiplier is checked against an INDEPENDENT expectation, never
+	-- against its own twin. This grid used to compare `StreakMath.multiplier` with
+	-- `RollService.streakMultiplier`, and the latter is literally
+	-- `return StreakMath.multiplier(...)` -- so every cell was f(x) == f(x) and could
+	-- not fail. The expectation below is written from the SPEC (b-compounding,
+	-- capped at 50 streaks, ceiling 1e6), with the literals spelled out on purpose:
+	-- raising the cap to 500 now turns the streak 60 and 500 cells red.
+	-- The shipped MULT-1 defect itself lived in the CLIENT's estimateMultiplier,
+	-- which this file cannot reach; ClientContract.test scans for it (source scan).
 	for _, testLvl in ipairs({ 0, 1, 5, 20 }) do
 		for _, testStreak in ipairs({ 0, 1, 10, 50, 60, 500 }) do
 			local testB = StreakMath.streakStrengthToB(testLvl)
-			local sharedMult = StreakMath.multiplier(testStreak, testB)
-			local serverMult = RollService.streakMultiplier(testStreak, testB)
-			e = e or check(approx(sharedMult, serverMult, 1e-9), string.format(
-				"StreakMath.multiplier mismatch at lvl=%d, streak=%d", testLvl, testStreak))
+			local expected = 1
+			if testB > 0 and testStreak > 0 then
+				expected = math.min((1 + testB) ^ math.min(testStreak, 50), 1e6)
+			end
+			e = e or check(approx(StreakMath.multiplier(testStreak, testB), expected, 1e-9), string.format(
+				"StreakMath.multiplier deviates from the spec at lvl=%d, streak=%d", testLvl, testStreak))
+			e = e or check(approx(RollService.streakMultiplier(testStreak, testB), expected, 1e-9), string.format(
+				"RollService.streakMultiplier deviates from the spec at lvl=%d, streak=%d", testLvl, testStreak))
 		end
 	end
 
-	-- RISK-1: Multi-die void risk formula proof (1 - Π(1 - p_i))
-	local pDie = 0.33
-	local threeDiceRisk = (1.0 - (1.0 - pDie) ^ 3) * 100
-	e = e or check(threeDiceRisk > 69.9 and threeDiceRisk < 70.0,
-		"3 dice at 33% void risk each must produce ~69.9% combined risk, not 33% (RISK-1)")
+	-- RISK-1: the shared maths behind the HUD's void-risk figure, exercised against
+	-- REAL per-shape inputs. The previous pin computed 1 - 0.67^3 inline and never
+	-- called anything in the game; it was true with the fix, without it, and with
+	-- the function deleted.
+	--
+	-- WHAT THIS DOES NOT PIN: `computeVoidRiskPct` is a local inside a .client script
+	-- and cannot be required, so its multi-die aggregation loop (1 - product of
+	-- (1 - p_i)) has NO behavioural test. What is pinned is every shared function it
+	-- delegates to, which is where the shipped divergence (L-025: HUD showed 16.7%
+	-- while the server's isVoidFace said no face voids) actually lived.
+	local DiceCatalog = require(Shared:WaitForChild("DiceCatalog"))
+	local shapes = DiceCatalog.getAllShapes()
+	e = e or check(#shapes >= 1, "DiceCatalog.getAllShapes returned nothing; the per-shape RISK-1 sweep would be vacuous")
+	for _, shape in ipairs(shapes) do
+		local floor = DiceCatalog.getMassFloor(shape.id)
+		e = e or check(floor == shape.massFloor, string.format(
+			"getMassFloor(%s) must read the catalog floor the HUD passes to voidProbability", shape.id))
+
+		-- An un-forged die (every face equal) has NO void face, so risk is exactly 0.
+		local evenMass: { number } = table.create(shape.faceCount, 10)
+		e = e or check(ForgeMath.voidProbability(evenMass, floor) == 0, string.format(
+			"%s: an un-forged die must carry 0 void risk (the proximity gate; 1/faces was the old bug)", shape.id))
+
+		-- Face 1 starved to the floor, the rest heavy: it IS the Void, and its
+		-- probability is exactly that face's landing probability.
+		local starved: { number } = table.create(shape.faceCount, 50)
+		starved[1] = floor
+		local pStarved = ForgeMath.voidProbability(starved, floor)
+		e = e or check(ForgeMath.isVoidFace(starved, 1, floor), string.format(
+			"%s: a face at the floor must be a Void", shape.id))
+		e = e or check(pStarved > 0 and pStarved < 1
+			and approx(pStarved, ForgeMath.landingProbabilities(starved)[1], 1e-12), string.format(
+			"%s: void risk of a starved die must equal the starved face's landing probability", shape.id))
+	end
+
+	-- The client wraps voidProbability in pcall and answers nil because it RAISES on
+	-- a zero-mass die. If it stopped raising the guard would be dead weight; if it
+	-- started returning a number for bad input the HUD would show a false risk.
+	e = e or check(not pcall(ForgeMath.voidProbability, { 0, 0 }, 1),
+		"voidProbability must raise on a zero-total-mass die (the HUD's pcall guard relies on it)")
 
 	----------------------------------------------------------------------------
 	-- VOID DETECTION: the lightest face is the streak breaker (SRS FR-5.2)
@@ -287,6 +335,59 @@ local function run(): (boolean, string?, number)
 	e = e or check(ForgeMath.isFinite(bad.payout), "a NaN coinBonus produced a non-finite payout")
 	e = e or check(bad.payout > 0, "a NaN coinBonus zeroed a legitimate payout")
 
+	-- LUCK (operator reversal of LUCK-1): `coinBonus = (1 + level * 0.02) * LuckBoost`.
+	-- Every expected value below is a LITERAL, never `getLuckMultiplier(x)` again --
+	-- comparing the function to itself would stay green over a broken formula. The
+	-- thing pinned is the PAYOUT the level is supposed to move, against a baseline
+	-- throw on the same seed (identical faces, streak and elements).
+	local luckBase = RollService.computeThrow(plainDice, Random.new(1), {
+		streak = 0, streakStrengthLevel = 0, hasShield = false, shieldReady = false,
+	})
+	local function luckThrow(bonus: number): number
+		return RollService.computeThrow(plainDice, Random.new(1), {
+			streak = 0, streakStrengthLevel = 0, hasShield = false, shieldReady = false,
+			coinBonus = bonus,
+		}).payout
+	end
+	e = e or check(luckBase.payout > 0, "luck baseline payout must be positive for the ratios to mean anything")
+
+	-- level 0 is EXACTLY neutral: multiplier precisely 1, payout bit-identical.
+	e = e or check(UpgradeCatalog.getLuckMultiplier(0) == 1, "Luck level 0 must be exactly 1, not 1 +/- epsilon")
+	e = e or check(luckThrow(UpgradeCatalog.getLuckMultiplier(0) * 1) == luckBase.payout,
+		"Luck level 0 with no boost must pay bit-identically to no coinBonus at all")
+
+	-- the level moves the payout by +2% per level (literal ratios)
+	e = e or check(approx(luckThrow(UpgradeCatalog.getLuckMultiplier(10)) / luckBase.payout, 1.20, 1e-9),
+		"Luck level 10 must raise the payout by exactly 1.20x")
+	e = e or check(approx(luckThrow(UpgradeCatalog.getLuckMultiplier(20)) / luckBase.payout, 1.40, 1e-9),
+		"Luck max level (20) must raise the payout by exactly 1.40x")
+
+	-- Luck and LuckBoost MULTIPLY: neither replaces the other, and neither is added.
+	local luckOnly = luckThrow(UpgradeCatalog.getLuckMultiplier(10) * 1)
+	local boostOnly = luckThrow(1 * 2)
+	local both = luckThrow(UpgradeCatalog.getLuckMultiplier(10) * 2)
+	e = e or check(approx(both / luckBase.payout, 2.40, 1e-9),
+		"Luck 10 (1.2x) with a 2x LuckBoost must pay 2.4x -- 1.2 * 2, not 1.2 + 2 or either alone")
+	e = e or check(both > luckOnly and both > boostOnly, "stacked Luck + LuckBoost must beat either alone")
+	e = e or check(approx(boostOnly / luckBase.payout, 2.0, 1e-9), "LuckBoost alone must still pay exactly 2x")
+
+	-- a negative / NaN / infinite stored level floors to neutral rather than
+	-- confiscating payout; an over-max level is capped, not trusted.
+	for _, hostile in ipairs({ -5, -1e308, 0 / 0, math.huge, -math.huge }) do
+		local m = UpgradeCatalog.getLuckMultiplier(hostile)
+		e = e or check(m == 1, string.format("hostile Luck level %s must read exactly 1, got %s", tostring(hostile), tostring(m)))
+		e = e or check(luckThrow(m) == luckBase.payout,
+			string.format("hostile Luck level %s must not change the payout", tostring(hostile)))
+	end
+	e = e or check(approx(UpgradeCatalog.getLuckMultiplier(1000), 1.40, 1e-9), "an over-max Luck level must cap at 1.40x")
+	e = e or check(approx(UpgradeCatalog.getLuckMultiplier(3.9), 1.06, 1e-9), "a fractional Luck level must floor (3.9 -> level 3 -> 1.06x)")
+
+	-- the restored catalog entry reads sensibly when enumerated
+	local luckDef = UpgradeCatalog.getCashUpgrade("Luck")
+	e = e or check(luckDef ~= nil and luckDef.id == "Luck" and luckDef.maxLevel == 20, "Luck must be a purchasable Cash upgrade, max level 20")
+	e = e or check(UpgradeCatalog.getCashUpgradeCost("Luck", 0) == 150, "Luck level 0 must cost 150")
+	e = e or check(UpgradeCatalog.getCashUpgradeCost("Luck", 20) == math.huge, "Luck at max level must not be purchasable")
+
 	----------------------------------------------------------------------------
 	-- performRoll — the wired service shell, driven through the Studio-only
 	-- emitter seam so no test scaffolding lives in the production path.
@@ -294,6 +395,7 @@ local function run(): (boolean, string?, number)
 	local Fakes = require(script.Parent:WaitForChild("Fakes"))
 	local PlayerProfile = require(ServerScriptService:WaitForChild("Server"):WaitForChild("PlayerProfile"))
 	local EconomyService = require(ServerScriptService:WaitForChild("Server"):WaitForChild("EconomyService"))
+	local BoostService = require(ServerScriptService:WaitForChild("Server"):WaitForChild("BoostService"))
 
 	local fakePlayer = Fakes.createFakePlayer(9999, "ShellTestPlayer")
 	local fakeData = PlayerProfile._reconcile({})
@@ -364,6 +466,64 @@ local function run(): (boolean, string?, number)
 	local ghost = Fakes.createFakePlayer(9998, "NoSessionPlayer")
 	local ghostOk = RollService.performRoll(ghost)
 	e = e or check(not ghostOk, "performRoll must refuse a player with no session")
+
+	-- LUCK, THROUGH THE REAL performRoll. The pure checks above cannot catch the
+	-- failure this file has shipped before (a multiplier built and never wired), so
+	-- this drives the actual payout line. The session RNG is not seedable, so the
+	-- expectation is rebuilt from the emitted faces: (base + additive) * factor *
+	-- streakMult, using the same public rules, then compared against the payout.
+	local function expectedPayout(dice: any, payload: any, strengthLevel: number): number
+		local outs: { RollService.DieOutcome } = {}
+		local base = 0
+		for i, f in ipairs(payload.faces) do
+			local face = dice[i].Faces[f]
+			local o: RollService.DieOutcome = {
+				dieIndex = i, faceIndex = f, mass = face.Mass, element = face.Element,
+				baseValue = ForgeMath.faceValue(face.Mass),
+			}
+			base += o.baseValue
+			table.insert(outs, o)
+		end
+		local additive, factor = RollService.resolveElements(outs)
+		return (base + additive) * factor
+			* RollService.streakMultiplier(payload.streak, RollService.streakStrengthToB(strengthLevel))
+	end
+
+	local luckPlayer = Fakes.createFakePlayer(9997, "LuckWiredPlayer")
+	local luckData = PlayerProfile._reconcile({})
+	luckData.Upgrades.Luck = 20
+	PlayerProfile._injectProfileForTesting(luckPlayer, Fakes.createFakeProfile(luckData))
+	RollService.beginSession(luckPlayer)
+
+	local before = #emitted
+	e = e or check(RollService.performRoll(luckPlayer), "performRoll with Luck 20 should succeed")
+	if #emitted == before + 1 then
+		local p1 = emitted[#emitted]
+		local want = expectedPayout(luckData.Dice, p1, luckData.Diamond.StreakStrength)
+		e = e or check(want > 0 and approx(p1.payout / want, 1.40, 1e-6), string.format(
+			"performRoll must pay Luck 20 at 1.40x the unbonused payout, got %.6fx", p1.payout / math.max(want, 1e-12)))
+	else
+		e = e or check(false, "the Luck roll did not emit exactly one RollResult")
+	end
+
+	-- add a live 2x LuckBoost on top: the two must multiply to 2.8x in the same throw.
+	e = e or check(BoostService.addBoost(luckPlayer, "LuckBoost", 2, 900), "granting LuckBoost should succeed")
+	before = #emitted
+	e = e or check(RollService.performRoll(luckPlayer), "performRoll with Luck 20 + LuckBoost should succeed")
+	if #emitted == before + 1 then
+		local p2 = emitted[#emitted]
+		local want = expectedPayout(luckData.Dice, p2, luckData.Diamond.StreakStrength)
+		e = e or check(want > 0 and approx(p2.payout / want, 2.80, 1e-6), string.format(
+			"performRoll must pay Luck 20 * LuckBoost 2 at 2.80x, got %.6fx", p2.payout / math.max(want, 1e-12)))
+	else
+		e = e or check(false, "the Luck + boost roll did not emit exactly one RollResult")
+	end
+	-- LuckBoost is a timer, not a one-shot: a throw must not have spent it.
+	e = e or check(BoostService.getMultiplier(luckPlayer, "LuckBoost") == 2.0,
+		"a roll must not consume LuckBoost -- it expires by clock, only OfflineX2 is spent")
+
+	RollService.endSession(luckPlayer)
+	PlayerProfile.release(luckPlayer)
 
 	RollService._setResultEmitterForTesting(nil)
 	RollService.endSession(fakePlayer)

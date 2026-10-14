@@ -114,6 +114,25 @@ end
 -- PurchaseOrder and CodesRedeemed to the client, and would silently start
 -- shipping every future field the moment someone added one to the template.
 -- The client cannot be trusted with what it does not need to know.
+-- DIE-1 site #6: EVERY per-die field needs a decision HERE. This is a server-to-
+-- client payload, not storage, so a blind spread is wrong (it would ship whatever
+-- a future field holds, and NFR-5 bars prices/balances/outcomes from crossing).
+-- But a hand-written literal silently DROPS a new field, and the symptom reads as
+-- a UI bug. So: an explicit table. "ship" = a scalar the client may see (copied
+-- automatically); "withhold" = server-only. Faces is built separately below.
+-- A field in neither list is withheld (fail closed), warned once, and the
+-- policy-coverage test goes red -- the choice cannot be skipped quietly.
+StateSyncService.DIE_FIELD_POLICY = {
+	Shape = "ship",
+	MassBudget = "ship",
+	-- Schema v2. The forge needs the owned figure as well as the usable
+	-- one, or it cannot show why a narrower shape is capping the player.
+	PurchasedBudget = "ship",
+	Faces = "ship",
+} :: { [string]: string }
+
+local warnedDieFields: { [string]: boolean } = {}
+
 function StateSyncService.buildSnapshot(data: PlayerProfile.Profile, streak: number, player: Player?): any
 	local dice = {}
 	for i, die in ipairs(data.Dice) do
@@ -121,14 +140,21 @@ function StateSyncService.buildSnapshot(data: PlayerProfile.Profile, streak: num
 		for j, face in ipairs(die.Faces) do
 			faces[j] = { Mass = face.Mass, Element = face.Element }
 		end
-		dice[i] = {
-			Shape = die.Shape,
-			MassBudget = die.MassBudget,
-			-- Schema v2. The forge needs the owned figure as well as the usable
-			-- one, or it cannot show why a narrower shape is capping the player.
-			PurchasedBudget = die.PurchasedBudget,
-			Faces = faces,
-		}
+		local out: { [string]: any } = { Faces = faces }
+		for key, value in pairs(die) do
+			local policy = StateSyncService.DIE_FIELD_POLICY[key :: string]
+			if policy == "ship" and key ~= "Faces" then
+				-- Scalars only: a table here would alias profile state.
+				local t = type(value)
+				if t == "number" or t == "string" or t == "boolean" then
+					out[key :: string] = value
+				end
+			elseif policy == nil and not warnedDieFields[key :: string] then
+				warnedDieFields[key :: string] = true
+				warn("[StateSync] per-die field '" .. tostring(key) .. "' has no DIE_FIELD_POLICY decision; withheld from client")
+			end
+		end
+		dice[i] = out
 	end
 
 	local upgrades = {}
