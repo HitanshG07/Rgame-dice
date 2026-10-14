@@ -140,6 +140,13 @@ function GrantAtomicityTest.run(): (boolean, string?, number)
 	-- FORCING IT: the profile reports active only until the streak day is
 	-- written, so any SECOND write in the same call is refused exactly as a
 	-- release between the two would refuse it.
+	--
+	-- NOT A DUPLICATE OF `ClaimRollback.test`, which sweeps the same four claim
+	-- paths with a SINGLE transient fault and says so: under one failed mutate a
+	-- rollback still works, so that suite cannot distinguish a rollback from an
+	-- atomic write. This is the case it excludes -- a profile that is gone and
+	-- STAYS gone, where every later mutate fails and a rollback is not available
+	-- at all. Delete neither; they fault the same code differently.
 	local claimer = Fakes.createFakePlayer(778802, "TestLoginPlayer")
 	local claimerData = PlayerProfile._reconcile({})
 	local claimerProfile = Fakes.createFakeProfile(claimerData)
