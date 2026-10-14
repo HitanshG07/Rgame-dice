@@ -11,6 +11,16 @@ kept for the lesson.
 
 ---
 
+## AUDIT CORRECTION, 2026-10-14 - READ BEFORE TRUSTING ANY "FIXED" BELOW
+
+An independent Gate 2-3 audit of the seven batches that wrote these markers (`43ca1ac^..114f147`) returned **REJECTED-TO-GATE-1 on both gates**. It falsified **six** of the 25 FIXED markers: `VAULT-1`, `CURR-1` and `LOGIN-1` were **not actually fixed**; `RISK-1`, `MULT-1`/`CONST-1` and `BOARD-1` **shipped pins that could not fail**. All six were genuinely fixed on 2026-10-14 (committed as `34f4777`), so those six markers are now true, **but for different reasons than the entries state.** Each of the six has a CORRECTION block below its table recording what was wrong and what the real fix was. The original text is left in place; it is the history, and part of the lesson.
+
+**What this does and does not establish.**
+- The other 19 markers were not individually falsified, but they were issued under the same Gate 2 that the audit rejected. Treat them as "implemented and committed", not "verified". The audit has not been re-run against them.
+- **Nothing has been run in Studio since `34f4777`. Gate 2 has not passed. P-1 static analysis has never been produced for any batch** (`docs/blueprint/TEST_PLAN.md:45` makes that a rejected gate), so "verified live in Studio VM" in the scoreboard lines for these batches should not be relied on either.
+- **One class of defect is known to remain:** `claimDailySpin`, `redeemCode` and `claimQuest` still roll back with a second `mutate`, which cannot fire when the profile has been released (see the `LOGIN-1` correction and ledger L-081).
+- Where this file says "Nothing here is applied" in its introduction, that sentence is from 2026-09-17 and is superseded by the status markers.
+
 ## HOW TO USE THIS
 
 Each entry carries the same six fields. **Read `THE FIX` and `WHY THIS AND NOT
@@ -367,7 +377,16 @@ is purchasable again.
 |---|---|
 | **Severity** | **CRITICAL** |
 | **Status** | **FIXED** |
+| **Audit 2026-10-14** | **The FIXED marker on this entry was falsified by an independent audit. See the CORRECTION below this table.** |
 | **Where** | `src/Server/ProgressionService.luau:471-482` |
+
+**CORRECTION 2026-10-14. The FIXED marker above was FALSE when written.**
+
+**What was wrong.** Batch 3 claimed "streak mutate gating and claim rollback", but `recordLogin`, the function this defect is named for, advanced the streak and then **discarded `credit`'s result**. A profile released between the two calls cost the player their day-7 reward permanently: the streak had already moved, so the reward was never offered again. It also had no test. The fix text above has the same flaw as VAULT-1: a rollback is itself a `mutate`, so it fails for the reason the credit failed.
+
+**The real fix (2026-10-14, `34f4777`).** `recordLogin` now writes the streak and pays in **one** mutation (`creditWithin` inside the streak mutate): the streak advances only if the player is paid, and the player is paid only if the streak advances. Pins: `tests/GrantAtomicity.test.luau` and `tests/ClaimRollback.test.luau`. **Not run in Studio.**
+
+**STILL OPEN, deliberately not done today.** The three siblings named above (`claimDailySpin`, `redeemCode`, `claimQuest`) still set the once-only flag in one `mutate`, pay in a second, and on failure *roll back with a third `mutate`*. That rollback cannot fire when the profile has been released. `tests/ClaimRollback.test.luau` fails exactly one `IsActive` call at a time, so its rollback succeeds in the test; it cannot reproduce a persistent release and so cannot show this. Recommended as a clean follow-up batch (credit and flag in one mutation, as `recordLogin` and `claimVault` now do). Found by reading, not by running.
 
 **Root cause.** The streak write is unchecked **and** the credit runs
 **unconditionally**. If the write is refused the reward is paid anyway and the
@@ -457,8 +476,17 @@ container fields** in `RECON-1`.
 |---|---|
 | **Severity** | HIGH |
 | **Status** | **FIXED** |
+| **Audit 2026-10-14** | **The FIXED marker on this entry was falsified by an independent audit. See the CORRECTION below this table.** |
 | **Where** | `src/Server/LeaderboardService.luau:245-254` |
 | **Costs** | Every player's competitive record, since launch |
+
+**CORRECTION 2026-10-14. The FIXED marker above was true of the code and FALSE of the evidence.**
+
+**What was wrong.** The hooks shipped in `7874a1c`, but the only pin proved `updatePlayer` is safe to call. Deleting `pcall(LeaderboardService.updatePlayer, player)` from `onPlayerRemoving` left it green while no score was ever submitted. Separately, the M3 fix set the cache timestamp before the yield, so a failed first fetch left a fresh timestamp over an empty cache and served an empty board for the whole TTL.
+
+**The real fix (2026-10-14, `34f4777`).** The leaderboard cache is split into `inFlight` / `lastFetch` / `failedAt`, pinned by the new `tests/LeaderboardFetch.test.luau`. `tests/Leaderboard.test.luau` gained a scan of `ServerBootstrap`'s `onPlayerRemoving` for the pcall-wrapped call, in the right order (before `OfflineService.onPlayerRemoving` and before `PlayerProfile.release`).
+
+**Residual gap, visible in the test.** That scan **skips silently with a print** when the thread cannot read `Source` (needs PluginOrOpenCloud), and the project's own history (scoreboard, 2026-08-07 block 4A) records `Source` as unreadable from a game script. **If it skips in Play Solo, the exit-hook pin is not enforcing anything.** Whether it skips has not been observed. **Not run in Studio.**
 
 **Root cause.** `updatePlayer` is the only caller of `submitScore`, and
 `updatePlayer` itself is called from **nowhere**. The HLD specifies writes *"on
@@ -589,8 +617,17 @@ move to `src/Shared/` so the client can look it up locally — the same solution
 |---|---|
 | **Severity** | HIGH |
 | **Status** | **FIXED** |
+| **Audit 2026-10-14** | **The FIXED marker on this entry was falsified by an independent audit. See the CORRECTION below this table.** |
 | **Stands** | CONFIRMED. **Operator-reported**, then measured |
 | **Where** | `src/Client/ClientBootstrap.client.luau:219` |
+
+**CORRECTION 2026-10-14. The FIXED marker above was true of the code and FALSE of the evidence.**
+
+**What was wrong.** The multi-die aggregation shipped in `5c04066` and the pin shipped with it could not fail: it computed `1 - 0.67^3` inline and never called anything in the game. It was true with the fix, without it, and with the function deleted.
+
+**The real fix (2026-10-14, `34f4777`).** `computeVoidRiskPct` gained three guards (unknown shape returns `nil` rather than a guessed floor, fewer than two faces or non-positive mass returns `nil`, and the call site is `pcall`-wrapped, answering `nil` which the HUD renders as "--"). The pin in `tests/Payout.test.luau` now sweeps every shape in `DiceCatalog.getAllShapes()` through the real `ForgeMath.voidProbability`/`isVoidFace`/`landingProbabilities`, and `tests/ClientContract.test.luau` pins the unknown-shape premise.
+
+**Residual gap, stated by the test itself.** `computeVoidRiskPct` is a local inside a `.client` script and cannot be required, so **its multi-die aggregation loop (`1 - product of (1 - p_i)`) still has no behavioural test.** What is pinned is every shared function it delegates to. **Not run in Studio.**
 
 **Root cause.** Two defects in one line — `local die = state.dice[1]`. It never
 looks past the first die, so forging any other die does not move the number. And
@@ -638,7 +675,14 @@ took the whole client down once. Wrap the loop, do not replace them.
 |---|---|
 | **Severity** | HIGH |
 | **Status** | **FIXED** |
+| **Audit 2026-10-14** | **The FIXED marker on this entry was falsified by an independent audit. See the CORRECTION below this table.** |
 | **Where** | `src/Client/ClientBootstrap.client.luau:290` |
+
+**CORRECTION 2026-10-14 (covers `MULT-1` and `CONST-1`). The FIXED markers were true of the code and FALSE of the evidence.**
+
+**What was wrong.** The shared `StreakMath` module shipped in `5c04066`, but the pin compared a value with itself, so it could not fail whatever the constants were.
+
+**The real fix (2026-10-14, `34f4777`).** `tests/Payout.test.luau` now compares both `StreakMath.multiplier` and `RollService.streakMultiplier` against an **independently written statement of the spec**, `min((1 + b) ^ min(streak, 50), 1e6)`, across a grid of levels and streaks that includes values past the cap. A wrong constant on either side now fails. **Not run in Studio.**
 
 **Root cause.** `math.min(streak, 500)` — the server caps the exponent at **50**
 (`RollService.STREAK_CAP`) and additionally clamps to `1e6`. At StreakStrength 20
@@ -681,7 +725,14 @@ loss the moment Phase 2 ships**, so they must land first.
 |---|---|
 | **Severity** | HIGH — **blocks Shards work** |
 | **Status** | **FIXED** |
+| **Audit 2026-10-14** | **The FIXED marker on this entry was falsified by an independent audit. See the CORRECTION below this table.** |
 | **Where** | `EconomyService.luau:80-97`, and a second copy at `PurchaseService.luau:85-93` |
+
+**CORRECTION 2026-10-14. The FIXED marker above was only half true when written.**
+
+**What was wrong.** Batch 6 guarded `readBalance`/`writeBalance` and the public entry points, but the bundle grant in `PurchaseService` still reached around `EconomyService`: a raw `data.Cash += part.amount` (no `MAX_CURRENCY` clamp, no `LifetimeCash`, so bundle Cash did not count toward NetWorth or ascension pricing) inside a three-branch `if/elseif` **with no `else`**, which silently skipped any currency it did not name, after the player had paid. This entry's own text named that loop and the batch did not close it. No test pinned the currency list or the bundle path.
+
+**The real fix (2026-10-14, `34f4777`).** The bundle loop is made total: every part is validated up front by `EconomyService.checkGrant` (the refusal must happen before anything is written, because `mutate` cannot abort part-way and a half-applied grant would be granted again on the platform's retry), then applied in one `mutate` through `creditWithin`, with the die slot through `grantDieSlots`. Pins in the new `tests/GrantAtomicity.test.luau` force a write to fail mid-grant, the only state in which a correct and an incorrect ordering look different. **Not run in Studio.**
 
 **Root cause.** `readBalance` and `writeBalance` have no `else → refuse`. An
 unrecognised, renamed or misspelled currency **reads and writes the Diamonds
@@ -783,7 +834,14 @@ are retained and the ceiling is a hard stop.
 |---|---|
 | **Severity** | HIGH |
 | **Status** | **FIXED** |
+| **Audit 2026-10-14** | **The FIXED marker on this entry was falsified by an independent audit. See the CORRECTION below this table.** |
 | **Where** | `OfflineService.luau:354-375` |
+
+**CORRECTION 2026-10-14. The FIXED marker above was FALSE when written. It is true now, for a different reason than this entry states.**
+
+**What was wrong.** Batch 6 credited first and consumed the window second, with a `debit` bolted on as the rollback. **The rollback could not fire.** `EconomyService.debit` *is* a `PlayerProfile.mutate`, and the only route to it was the mutate immediately above having just failed (profile released), so it failed for the identical reason. Result: the player was paid, `Vault.LastSeen` never advanced and `AccrualId` never incremented, so on rejoin the vault read full and **paid a second time, with the still-unspent `OfflineX2` doubling that claim too.** The remedy recommended in the text above, "credit first, then consume; or refund on a failed credit", is exactly the shape that cannot run.
+
+**The real fix (2026-10-14, `34f4777`).** Remove the window instead of adding a remedy: `OfflineService.claimVault` now does the credit (`EconomyService.creditWithin`) and the window spend (`LastSeen`, `AccrualId`) inside **one** `PlayerProfile.mutate`. Either the profile is live and both happen, or it is gone and neither does. A credit refusal is checked inside and leaves the window untouched. The boost multiplier is finiteness-guarded and floored at 1.0, and apply and consume share one condition (`boostMult > 1.0`). See `.brain/LEDGER.md` L-081. **Not run in Studio.**
 
 Order is: consume the vault → zero the frozen window → **then** credit → check.
 A failed credit loses the player's **entire offline accrual**.

@@ -2,3 +2,5 @@
 # verdicts, interaction/console logs, and run-tracker.json remain tracked.
 qa_runs/*/screenshots/
 qa_runs/*/logs/layout-dumps/
+# Claude Code session transcripts are not project artifacts.
+Claudechats/

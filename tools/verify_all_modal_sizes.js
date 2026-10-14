@@ -123,8 +123,11 @@ async function main() {
     const capRes = await callTool('screen_capture', { capture_id: 'unified_quests_verified' });
     if (capRes.result && capRes.result.content && capRes.result.content[0] && capRes.result.content[0].data) {
         const buf = Buffer.from(capRes.result.content[0].data, 'base64');
-        fs.writeFileSync('C:\\RGame\\screenshots\\unified_quests_verified.png', buf);
-        fs.writeFileSync('C:\\Users\\Hitansh Gogri\\.gemini\\antigravity-ide\\brain\\cbe5a261-05be-4b9b-a450-a0a97c7eb194\\unified_quests_verified.png', buf);
+        fs.writeFileSync(path.join('C:', 'RGame', 'screenshots', 'unified_quests_verified.png'), buf);
+        const artifactDir = path.join(process.env.USERPROFILE || '', '.gemini', 'antigravity-ide', 'brain', 'cbe5a261-05be-4b9b-a450-a0a97c7eb194');
+        if (fs.existsSync(artifactDir)) {
+            fs.writeFileSync(path.join(artifactDir, 'unified_quests_verified.png'), buf);
+        }
         console.log('Saved unified Quests capture to artifacts');
     }
 

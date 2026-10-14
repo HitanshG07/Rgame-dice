@@ -3,7 +3,7 @@ const readline = require('readline');
 const fs = require('fs');
 const path = require('path');
 
-const studioMcpPath = 'C:\\Users\\Hitansh Gogri\\AppData\\Local\\Roblox\\Versions\\version-d679641ad17741aa\\StudioMCP.exe';
+const studioMcpPath = path.join(process.env.LOCALAPPDATA || '', 'Roblox', 'Versions', 'version-d679641ad17741aa', 'StudioMCP.exe');
 const studioId = 'f2e30777-e3b1-4ad2-b76a-71b8e9dabd25';
 
 const dir1 = path.join('C:', 'RGame', 'screenshots');

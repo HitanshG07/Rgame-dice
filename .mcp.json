@@ -4,7 +4,7 @@
       "type": "stdio",
       "command": "node",
       "args": [
-        "C:\\Users\\Hitansh Gogri\\AppData\\Local\\Roblox\\roblox_studio_mcp_proxy.js"
+        "tools/roblox_studio_mcp_proxy.js"
       ],
       "env": {}
     }

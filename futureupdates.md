@@ -12,6 +12,22 @@ headline finding below was re-verified by hand before being written down.
 
 ---
 
+## RESOLVED 2026-10-14 - the headline below is no longer true; the analysis is kept
+
+**The finding under "READ THIS FIRST" (seven of nine upgrades cannot be bought) was resolved by `34f4777` on 2026-10-14.** Two purchase surfaces now exist: `src/Shared/UpgradeView.luau` (a pure row builder over the catalogs, so no id is hardcoded in the client), a new **UPGRADES & DIAMOND TREE overlay** in `V7MenuPanel.luau` that calls `NetClient.buyUpgrade` / `NetClient.buyDiamondNode` from the enumerated rows, and an **UPGRADES pod in `V7HUD.luau`** that opens it. `Luck` is also back, restored as a Cash upgrade folding into the `LuckBoost` term (max level 1.40x, below the paid 2x), which is what the operator asked for in the table row that says "removed by `7874a1c`".
+
+**Everything below that heading is the 2026-09-17 reasoning, left intact on purpose** - why it dwarfed the rest, the correction about the streak cliff costing 8,730 Diamonds being wrong in the game's favour (it was unpurchasable, not expensive), and the "highest value-per-effort item in the project" argument all still explain why the work was prioritised.
+
+**What is NOT established:** nothing has been run in Studio since `34f4777`. The overlay exists, is wired by reading, and has never been opened in a running game. Gate 2 has not passed. Treat "resolved" as "built and committed", not "verified". Whether the streak cliff at `b ~ 0.15` is now actually *reachable at a sensible price* is a balance question nobody has answered: `StreakStrength` is buyable, but its cost curve has never been playtested.
+
+**F-7b (TRAITS) - the "ACTIVE" badge is also resolved.** The section header now reads **"COMING SOON"** (`V7MenuPanel.luau`, `buildSectionHeader(traitsBox, "TRAIT FORGE & INSPECTION", "COMING SOON", ...)`), so the one-line honesty fix F-7b asked for has landed. The rest of F-7b is untouched: backend 0%, the whole feature is still unbuilt, and the ~15% honest-scoping paragraph stands. Line numbers quoted in F-7b predate the Phase 3 deletion and the new overlay and have drifted.
+
+**Other changes since this file was written (2026-09-17):** Phase 3 executed (`ForgePanel`, `MenuPanel`, `HUD`, `CurrencyModels` deleted, 3,662 lines) - see `docs/legacy_harvest.md` for what was and was not carried over. Several F-items that cite those four files (F-3 Statistics panel, F-28 CurrencyModels, F-29 and parts of F-2) now point at deleted code; retrieve with `git show 0e7b361:src/Client/<File>.luau`. The "HARVEST BEFORE PHASE 3" section near the end is historical.
+
+**The `handoff-N.md` files cited in this file were deleted on 2026-10-14** (`HANDOFF.md` replaced all nine). Retrieve any with `git show c73774f:docs/handoff-2.md` (use `c73774f` or any earlier commit). F-18 cites `handoff-1.md` s4A, F-19 cites `handoff-2` s2-a, F-20 cites `handoff-2` s5-c.
+
+---
+
 ## ⚠ READ THIS FIRST — one finding dwarfs the rest
 
 ### **Seven of the nine upgrades in the game cannot be bought by anyone.**
